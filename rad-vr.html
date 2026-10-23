@@ -53,6 +53,7 @@
     <div class="sub">Sunset Highway Racer</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> = gas &nbsp;·&nbsp; <b>Left trigger</b> = brake</p>
+    <p class="small">Two-way highway: cross the median to face oncoming traffic — wrong-way near misses score double and build a bonus.</p>
     <p class="small">No headset handy? Desktop preview works too — arrow keys / WASD drive, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -191,7 +192,8 @@ scene.add(envGroup);
 
 // ============================== track generation (segments) ==============================
 const SEG_LEN = 10;                    // metres per segment
-const ROAD_HALF = 5.6;                 // road half-width (3 lanes)
+const ROAD_HALF = 7.8;                 // road half-width (2 lanes each way + median)
+const MEDIAN_HALF = 0.6;               // low concrete median strip half-width
 const RUMBLE_W = 1.3;
 const GROUND_W = 300;                  // ground extends this far each side in the ribbon
 const DRAW = 90;                       // segments drawn ahead
@@ -237,7 +239,7 @@ function findSegment(z) { return segments[Math.floor(z / SEG_LEN) % segments.len
 // ============================== road ribbon geometry ==============================
 // Cross-section points (x offsets): ground, rumble, road, road, rumble, ground
 const CROSS_X = [-GROUND_W, -(ROAD_HALF + RUMBLE_W), -ROAD_HALF, ROAD_HALF, ROAD_HALF + RUMBLE_W, GROUND_W];
-const LANE_X = ROAD_HALF * 2 / 3;      // lane divider offset from centre
+const LANE_X = 4.2;                    // lane divider offset within each carriageway
 const VERTS_PER_SEG = 20;              // 12 ribbon verts + 2 dashes x 4 verts
 const roadPos = new Float32Array(DRAW * VERTS_PER_SEG * 3);
 const roadCol = new Float32Array(DRAW * VERTS_PER_SEG * 3);
@@ -266,12 +268,15 @@ function makeAsphaltTexture() {
   }
   // Tyre-polished dark tracks inside the road band (u 0.38..0.62 -> x 195..317)
   g.fillStyle = 'rgba(12,12,18,0.20)';
-  [213, 237, 275, 299].forEach(x => { g.fillRect(x - 6, 0, 12, 512); });
-  // Worn lane paint (faint, broken) at the two divider positions
+  [206, 234, 266, 296].forEach(x => { g.fillRect(x - 6, 0, 12, 512); });
+  // Worn lane paint (faint, broken) at the two carriageway divider positions
   g.fillStyle = 'rgba(230,230,220,0.35)';
-  [232, 280].forEach(x => {
+  [223, 289].forEach(x => {
     for (let y = 0; y < 512; y += 46) if (Math.random() > 0.25) g.fillRect(x - 1, y, 3, 26);
   });
+  // Median edge paint (double amber) peeking out from under the concrete strip
+  g.fillStyle = 'rgba(255,176,46,0.8)';
+  g.fillRect(249, 0, 3, 512); g.fillRect(260, 0, 3, 512);
   // Occasional cracks / tar seams across the segment
   g.fillStyle = 'rgba(10,10,14,0.35)';
   for (let i = 0; i < 4; i++) g.fillRect(195, Math.random() * 512, 122, 2);
@@ -314,16 +319,21 @@ road.frustumCulled = false;
 scene.add(road);
 
 // Neon edge guide-lines (Asphalt-style): separate additive ribbon hugging the road edges
-const GLOW_VERTS = 8;                        // 2 lines x 4 verts per segment
+const GLOW_VERTS = 16;                       // 4 lines x 4 verts per segment
+const GLOW_LINES = [
+  { x: -(ROAD_HALF - 0.35),    c: new THREE.Color(0x19e3ff) },   // road edges
+  { x:  (ROAD_HALF - 0.35),    c: new THREE.Color(0xff2e88) },
+  { x: -(MEDIAN_HALF + 0.18),  c: new THREE.Color(0xffb02e) },   // median edges (amber)
+  { x:  (MEDIAN_HALF + 0.18),  c: new THREE.Color(0xffb02e) }
+];
 const glowPos = new Float32Array(DRAW * GLOW_VERTS * 3);
 const glowColArr = new Float32Array(DRAW * GLOW_VERTS * 3);
 const glowIdx = [];
 {
-  const cCyan = new THREE.Color(0x19e3ff), cMag = new THREE.Color(0xff2e88);
   for (let s = 0; s < DRAW; s++) {
     const b = s * GLOW_VERTS;
-    for (let l = 0; l < 2; l++) {
-      const lb = b + l * 4, c = l === 0 ? cCyan : cMag;
+    for (let l = 0; l < 4; l++) {
+      const lb = b + l * 4, c = GLOW_LINES[l].c;
       glowIdx.push(lb, lb + 2, lb + 1, lb + 1, lb + 2, lb + 3);
       for (let k = 0; k < 4; k++) { glowColArr[(lb + k) * 3] = c.r; glowColArr[(lb + k) * 3 + 1] = c.g; glowColArr[(lb + k) * 3 + 2] = c.b; }
     }
@@ -350,6 +360,29 @@ const COL = {
 function setVert(arr, i, x, y, z) { arr[i * 3] = x; arr[i * 3 + 1] = y; arr[i * 3 + 2] = z; }
 function setCol(arr, i, c) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
 function setNor(arr, i, y, z) { arr[i * 3] = 0; arr[i * 3 + 1] = y; arr[i * 3 + 2] = z; }
+
+// Low concrete median strip: its own ribbon (standard material, up-facing normals)
+const MED_VERTS = 4;
+const medPos = new Float32Array(DRAW * MED_VERTS * 3);
+const medCol = new Float32Array(DRAW * MED_VERTS * 3);
+const medNor = new Float32Array(DRAW * MED_VERTS * 3);
+const medIdx = [];
+for (let s = 0; s < DRAW; s++) {
+  const b = s * MED_VERTS;
+  medIdx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+  for (let k = 0; k < 4; k++) { medNor[(b + k) * 3] = 0; medNor[(b + k) * 3 + 1] = 1; medNor[(b + k) * 3 + 2] = 0; }
+}
+const medGeo = new THREE.BufferGeometry();
+medGeo.setAttribute('position', new THREE.BufferAttribute(medPos, 3).setUsage(THREE.DynamicDrawUsage));
+medGeo.setAttribute('color', new THREE.BufferAttribute(medCol, 3).setUsage(THREE.DynamicDrawUsage));
+medGeo.setAttribute('normal', new THREE.BufferAttribute(medNor, 3));
+medGeo.setIndex(medIdx);
+const median = new THREE.Mesh(medGeo, new THREE.MeshStandardMaterial({
+  vertexColors: true, roughness: 0.95, metalness: 0.0, envMapIntensity: 0.25, side: THREE.DoubleSide
+}));
+median.frustumCulled = false;
+scene.add(median);
+const COL_MED_A = new THREE.Color(0x8f8c99), COL_MED_B = new THREE.Color(0x807d8a);
 
 // Per-slot road-centre poses (near edge), recomputed every frame; traffic reuses them
 const slotPose = [];
@@ -401,21 +434,31 @@ function updateRoad(position, playerX) {
     const dyS = far.y - near.y, nLen = Math.sqrt(SEG_LEN * SEG_LEN + dyS * dyS);
     const nY = SEG_LEN / nLen, nZ = dyS / nLen;
     for (let p = 0; p < 12; p++) setNor(roadNor, b + p, nY, nZ);
-    // Neon edge guide-lines
+    // Neon edge guide-lines (road edges + amber median edges)
     const gb = s * GLOW_VERTS;
-    for (let l = 0; l < 2; l++) {
+    for (let l = 0; l < 4; l++) {
       const lb = gb + l * 4;
-      const cx = (l === 0 ? -1 : 1) * (ROAD_HALF - 0.35);
+      const cx = GLOW_LINES[l].x;
       setVert(glowPos, lb,     near.x + cx - 0.09 - playerX, near.y + 0.045, near.z);
       setVert(glowPos, lb + 1, near.x + cx + 0.09 - playerX, near.y + 0.045, near.z);
       setVert(glowPos, lb + 2, far.x  + cx - 0.09 - playerX, far.y  + 0.045, far.z);
       setVert(glowPos, lb + 3, far.x  + cx + 0.09 - playerX, far.y  + 0.045, far.z);
     }
+    // Low concrete median strip (slightly raised, alternating tint)
+    const mb = s * MED_VERTS;
+    const mC = seg.alt ? COL_MED_B : COL_MED_A;
+    setVert(medPos, mb,     near.x - MEDIAN_HALF - playerX, near.y + 0.055, near.z);
+    setVert(medPos, mb + 1, near.x + MEDIAN_HALF - playerX, near.y + 0.055, near.z);
+    setVert(medPos, mb + 2, far.x  - MEDIAN_HALF - playerX, far.y  + 0.055, far.z);
+    setVert(medPos, mb + 3, far.x  + MEDIAN_HALF - playerX, far.y  + 0.055, far.z);
+    for (let k = 0; k < 4; k++) setCol(medCol, mb + k, mC);
   }
   roadGeo.attributes.position.needsUpdate = true;
   roadGeo.attributes.color.needsUpdate = true;
   roadGeo.attributes.normal.needsUpdate = true;
   glowGeo.attributes.position.needsUpdate = true;
+  medGeo.attributes.position.needsUpdate = true;
+  medGeo.attributes.color.needsUpdate = true;
 }
 
 // ============================== merged-geometry helper (props built once) ==============================
@@ -502,6 +545,16 @@ const palmMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const palms = [];
 for (let i = 0; i < 20; i++) { const p = new THREE.Mesh(palmGeo, palmMat); p.visible = false; scene.add(p); palms.push(p); }
 
+// Median delineator posts (pooled): dark post + bright amber band. No collision —
+// they mark the median clearly at speed so crossing it is a choice, not an accident.
+const postGeo = mergeParts([
+  { geo: new THREE.CylinderGeometry(0.045, 0.055, 0.8, 6), matrix: m4(0, 0.4, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x2c2c34) },
+  { geo: new THREE.BoxGeometry(0.12, 0.16, 0.12),           matrix: m4(0, 0.68, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0xffa02e) }
+]);
+const postMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+const posts = [];
+for (let i = 0; i < 24; i++) { const p = new THREE.Mesh(postGeo, postMat); p.visible = false; scene.add(p); posts.push(p); }
+
 // ============================== city: buildings + gantries ==============================
 // Facade canvases come in pairs per variant: a dim colour map + a black emissive map
 // carrying only the lit windows and the neon crown strip, so windows glow at dusk.
@@ -571,9 +624,9 @@ const gantrySignTex = (() => {
   return tex;
 })();
 const gantryFrameGeo = mergeParts([
-  { geo: new THREE.CylinderGeometry(0.09, 0.09, 7.0, 6), matrix: m4(-(5.6 + 1.2), 3.5, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x23232e) },
-  { geo: new THREE.CylinderGeometry(0.09, 0.09, 7.0, 6), matrix: m4( (5.6 + 1.2), 3.5, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x23232e) },
-  { geo: new THREE.BoxGeometry(14.4, 0.22, 0.22),        matrix: m4(0, 6.9, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x23232e) }
+  { geo: new THREE.CylinderGeometry(0.09, 0.09, 7.0, 6), matrix: m4(-9.6, 3.5, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x23232e) },
+  { geo: new THREE.CylinderGeometry(0.09, 0.09, 7.0, 6), matrix: m4( 9.6, 3.5, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x23232e) },
+  { geo: new THREE.BoxGeometry(20.6, 0.22, 0.22),        matrix: m4(0, 6.9, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x23232e) }
 ]);
 const gantryFrameMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const gantries = [];
@@ -590,7 +643,7 @@ for (let i = 0; i < 4; i++) {
 }
 
 function updateProps(playerX) {
-  let pi = 0, pa = 0, gi = 0;
+  let pi = 0, pa = 0, gi = 0, mi = 0;
   bldgCount[0] = bldgCount[1] = bldgCount[2] = 0;
   for (let s = 0; s < DRAW; s++) {
     const seg = segments[(baseSegment.index + s) % segments.length];
@@ -634,9 +687,16 @@ function updateProps(playerX) {
       g.rotation.y = -Math.atan((ahead.x - pose.x) / SEG_LEN);
       g.rotation.x = Math.atan((ahead.y - pose.y) / SEG_LEN);
     }
+    // Median delineator post every 8 segments
+    if (seg.index % 8 === 4 && mi < posts.length) {
+      const p = posts[mi++];
+      p.visible = true;
+      p.position.set(pose.x - playerX, pose.y + 0.05, pose.z - SEG_LEN / 2);
+    }
   }
   for (; pi < pylons.length; pi++) { pylons[pi].visible = false; pylonGlows[pi].visible = false; }
   for (; pa < palms.length; pa++) palms[pa].visible = false;
+  for (; mi < posts.length; mi++) posts[mi].visible = false;
   for (; gi < gantries.length; gi++) gantries[gi].visible = false;
   for (let v = 0; v < 3; v++) {
     bldgMeshes[v].count = bldgCount[v];
@@ -654,63 +714,193 @@ const carTailMat  = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 
 const tailGlowMat  = new THREE.SpriteMaterial({ map: glowTex, color: 0xff3355, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 const frontGlowMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xcfe8ff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 const blobMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false });
-const carBodyGeo   = new THREE.BoxGeometry(1.8, 0.52, 4.3);
-const carNoseGeo   = new THREE.BoxGeometry(1.7, 0.30, 1.1);
-const carCabGeo    = new THREE.BoxGeometry(1.5, 0.5, 1.9);
-const carRoofGeo   = new THREE.BoxGeometry(1.3, 0.10, 1.1);
-const carDeckGeo   = new THREE.BoxGeometry(1.7, 0.18, 0.8);
-const carSpoilGeo  = new THREE.BoxGeometry(1.7, 0.06, 0.34);
-const carStrutGeo  = new THREE.BoxGeometry(0.08, 0.24, 0.08);
-const carSkirtGeo  = new THREE.BoxGeometry(0.06, 0.22, 3.4);
-const carWheelGeo  = new THREE.CylinderGeometry(0.34, 0.34, 0.26, 10);
-const carRimGeo    = new THREE.CylinderGeometry(0.19, 0.19, 0.28, 10);
-const carBarGeo    = new THREE.BoxGeometry(1.55, 0.09, 0.05);
+const carPoolMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x9fc4ff, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+const carSpoilGeo  = new THREE.BoxGeometry(1.66, 0.06, 0.34);
+const carStrutGeo  = new THREE.BoxGeometry(0.08, 0.26, 0.08);
+const carBarGeo    = new THREE.BoxGeometry(1.5, 0.09, 0.05);
 const blobGeo      = new THREE.CircleGeometry(1, 20);
+const archGeo      = new THREE.CircleGeometry(1, 20);
+const archMat      = new THREE.MeshStandardMaterial({ color: 0x0a0a0d, roughness: 0.92, metalness: 0.1 });
+const poolGeo      = new THREE.PlaneGeometry(5, 7);
+// Spoked rim face texture (drawn once): dark barrel, bright ring, 5 spokes, hub
+const rimTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#101216'; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#aeb9c4'; g.lineWidth = 7;
+  g.beginPath(); g.arc(64, 64, 55, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#c7d2dd';
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * Math.PI * 2;
+    g.save(); g.translate(64, 64); g.rotate(a); g.fillRect(-5, -54, 10, 54); g.restore();
+  }
+  g.beginPath(); g.arc(64, 64, 13, 0, Math.PI * 2); g.fill();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+})();
+const rimFaceMat = new THREE.MeshStandardMaterial({ map: rimTex, roughness: 0.35, metalness: 0.6, envMapIntensity: 1.0 });
+const rimFaceGeo = new THREE.CircleGeometry(1, 20);          // scaled per variant by wheelR
+const tireGeo    = new THREE.CylinderGeometry(1, 1, 0.24, 16); // scaled per variant by wheelR
+
+// Sculpted car bodies: a real side-profile silhouette (THREE.Shape) extruded across
+// the body width with a small bevel — one shell per car, no stacked boxes. The glass
+// canopy follows the same roof curve and sits a hair wider than the shell so it reads
+// as a glass band wrapping the greenhouse.
+function extrudeProfile(shape, width) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: width - 0.12, bevelEnabled: true, bevelThickness: 0.05,
+    bevelSize: 0.055, bevelSegments: 2, steps: 1, curveSegments: 8
+  });
+  geo.translate(0, 0, -(width - 0.12) / 2);
+  geo.rotateY(-Math.PI / 2);      // shape x (length, front negative) -> world z; extrusion -> width
+  return geo;
+}
+function superBodyShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-2.2, 0.30); s.lineTo(-2.2, 0.46);
+  s.quadraticCurveTo(-2.05, 0.60, -1.45, 0.66);   // sloping nose / hood
+  s.quadraticCurveTo(-0.95, 0.72, -0.55, 1.00);   // windshield
+  s.quadraticCurveTo(-0.25, 1.10, 0.25, 1.10);    // roofline
+  s.quadraticCurveTo(0.75, 1.08, 1.15, 0.86);     // rear haunch / deck slope
+  s.quadraticCurveTo(1.80, 0.84, 2.12, 0.80);
+  s.lineTo(2.2, 0.74); s.lineTo(2.2, 0.30);
+  s.lineTo(-2.2, 0.30);
+  return s;
+}
+function superGlassShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.98, 0.68);
+  s.quadraticCurveTo(-0.80, 0.86, -0.52, 1.02);
+  s.quadraticCurveTo(-0.20, 1.09, 0.28, 1.08);
+  s.quadraticCurveTo(0.72, 1.05, 1.02, 0.76);
+  s.lineTo(1.02, 0.68); s.lineTo(-0.98, 0.68);
+  return s;
+}
+function sedanBodyShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-2.3, 0.32); s.lineTo(-2.3, 0.58);
+  s.quadraticCurveTo(-2.10, 0.74, -1.50, 0.80);
+  s.quadraticCurveTo(-1.00, 0.86, -0.62, 1.24);
+  s.quadraticCurveTo(-0.30, 1.36, 0.45, 1.36);
+  s.quadraticCurveTo(0.95, 1.34, 1.25, 0.92);
+  s.quadraticCurveTo(1.90, 0.90, 2.22, 0.86);
+  s.lineTo(2.3, 0.80); s.lineTo(2.3, 0.32);
+  s.lineTo(-2.3, 0.32);
+  return s;
+}
+function sedanGlassShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-1.08, 0.84);
+  s.quadraticCurveTo(-0.88, 1.05, -0.60, 1.26);
+  s.quadraticCurveTo(-0.25, 1.34, 0.45, 1.33);
+  s.quadraticCurveTo(0.90, 1.30, 1.22, 0.92);
+  s.lineTo(1.22, 0.84); s.lineTo(-1.08, 0.84);
+  return s;
+}
+function suvBodyShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-2.35, 0.34); s.lineTo(-2.35, 0.72);
+  s.quadraticCurveTo(-2.25, 0.92, -1.70, 0.98);
+  s.quadraticCurveTo(-1.25, 1.04, -0.95, 1.52);
+  s.quadraticCurveTo(-0.60, 1.64, 0.90, 1.64);
+  s.quadraticCurveTo(1.90, 1.62, 2.15, 1.45);
+  s.lineTo(2.35, 1.30); s.lineTo(2.35, 0.34);
+  s.lineTo(-2.35, 0.34);
+  return s;
+}
+function suvGlassShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-1.22, 1.00);
+  s.quadraticCurveTo(-1.05, 1.30, -0.90, 1.52);
+  s.quadraticCurveTo(-0.50, 1.60, 0.88, 1.59);
+  s.quadraticCurveTo(1.60, 1.57, 2.02, 1.40);
+  s.lineTo(2.02, 1.00); s.lineTo(-1.22, 1.00);
+  return s;
+}
+const VARIANTS = [
+  { body: null, glass: null, len: 4.4, wid: 1.80, wheelR: 0.34, wheelZ: 1.38, headY: 0.52, tailY: 0.66, spoiler: true,
+    make: () => ({ body: extrudeProfile(superBodyShape(), 1.80), glass: extrudeProfile(superGlassShape(), 1.83) }) },
+  { body: null, glass: null, len: 4.6, wid: 1.82, wheelR: 0.34, wheelZ: 1.42, headY: 0.64, tailY: 0.76, spoiler: false,
+    make: () => ({ body: extrudeProfile(sedanBodyShape(), 1.82), glass: extrudeProfile(sedanGlassShape(), 1.85) }) },
+  { body: null, glass: null, len: 4.7, wid: 1.92, wheelR: 0.42, wheelZ: 1.50, headY: 0.84, tailY: 1.10, spoiler: false,
+    make: () => ({ body: extrudeProfile(suvBodyShape(), 1.92), glass: extrudeProfile(suvGlassShape(), 1.95) }) }
+];
+VARIANTS.forEach(v => { const g = v.make(); v.body = g.body; v.glass = g.glass; });
 const CAR_COLORS = [0x3f7fbf, 0xbfc7cc, 0x777d84, 0x8c2f4a, 0x2f8c6a, 0xd8a03c, 0x5a3fbf];
-const LANES = [-3.73, 0, 3.73];
+const SAME_LANES = [2.4, 6.0];       // same-direction carriageway (right side)
+const ONC_LANES  = [-2.4, -6.0];     // oncoming carriageway (left side)
 const cars = [];
 for (let i = 0; i < 12; i++) {
+  const v = VARIANTS[i % 3];
+  const dir = i < 7 ? 1 : -1;                     // 7 same-direction, 5 oncoming
   const g = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({
     color: CAR_COLORS[i % CAR_COLORS.length], metalness: 0.65, roughness: 0.32, envMapIntensity: 1.15
   });
   const blob = new THREE.Mesh(blobGeo, blobMat);
-  blob.rotation.x = -Math.PI / 2; blob.scale.set(1.1, 2.4, 1); blob.position.y = 0.03; g.add(blob);
-  const body = new THREE.Mesh(carBodyGeo, bodyMat); body.position.y = 0.58; g.add(body);
-  const nose = new THREE.Mesh(carNoseGeo, bodyMat); nose.position.set(0, 0.80, -1.55); nose.rotation.x = 0.12; g.add(nose);
-  const cab = new THREE.Mesh(carCabGeo, carGlassMat); cab.position.set(0, 1.04, 0.15); g.add(cab);
-  const roof = new THREE.Mesh(carRoofGeo, bodyMat); roof.position.set(0, 1.32, 0.15); g.add(roof);
-  const deck = new THREE.Mesh(carDeckGeo, bodyMat); deck.position.set(0, 0.90, 1.70); g.add(deck);
-  const spoiler = new THREE.Mesh(carSpoilGeo, bodyMat); spoiler.position.set(0, 1.14, 2.02); g.add(spoiler);
-  [-0.6, 0.6].forEach(sx => {
-    const st = new THREE.Mesh(carStrutGeo, carDarkMat); st.position.set(sx, 1.0, 2.02); g.add(st);
+  blob.rotation.x = -Math.PI / 2; blob.scale.set(v.wid / 2 + 0.25, v.len / 2 + 0.35, 1); blob.position.y = 0.03; g.add(blob);
+  const body = new THREE.Mesh(v.body, bodyMat); g.add(body);
+  const glass = new THREE.Mesh(v.glass, carGlassMat); g.add(glass);
+  if (v.spoiler) {
+    const spoiler = new THREE.Mesh(carSpoilGeo, bodyMat); spoiler.position.set(0, 1.02, 2.02); g.add(spoiler);
+    [-0.6, 0.6].forEach(sx => {
+      const st = new THREE.Mesh(carStrutGeo, carDarkMat); st.position.set(sx, 0.88, 2.02); g.add(st);
+    });
+  }
+  // Dark wheel-arch discs just proud of the body sides at each wheel
+  const archR = v.wheelR + 0.13;
+  [-1, 1].forEach(sd => {
+    [-v.wheelZ, v.wheelZ].forEach(wz => {
+      const a = new THREE.Mesh(archGeo, archMat);
+      a.scale.set(archR, archR, 1);
+      a.rotation.y = sd * Math.PI / 2;
+      a.position.set(sd * (v.wid / 2 + 0.004), v.wheelR, wz);
+      g.add(a);
+    });
   });
-  [-0.92, 0.92].forEach(sx => {
-    const sk = new THREE.Mesh(carSkirtGeo, carDarkMat); sk.position.set(sx, 0.30, 0); g.add(sk);
+  // Wheels: a spinning group per corner (tyre + spoked rim faces both sides)
+  const wheels = [];
+  [-1, 1].forEach(sd => {
+    [-v.wheelZ, v.wheelZ].forEach(wz => {
+      const wg = new THREE.Group();
+      wg.position.set(sd * (v.wid / 2 - 0.13), v.wheelR, wz);
+      const tire = new THREE.Mesh(tireGeo, carTireMat);
+      tire.rotation.z = Math.PI / 2; tire.scale.set(v.wheelR, 1, v.wheelR);
+      wg.add(tire);
+      [-1, 1].forEach(fd => {
+        const face = new THREE.Mesh(rimFaceGeo, rimFaceMat);
+        face.scale.set(v.wheelR * 0.62, v.wheelR * 0.62, 1);
+        face.rotation.y = fd * Math.PI / 2;
+        face.position.x = fd * 0.125;
+        wg.add(face);
+      });
+      g.add(wg);
+      wheels.push(wg);
+    });
   });
-  [[-0.85, 1.35], [0.85, 1.35], [-0.85, -1.35], [0.85, -1.35]].forEach(w => {
-    const wh = new THREE.Mesh(carWheelGeo, carTireMat);
-    wh.rotation.z = Math.PI / 2; wh.position.set(w[0], 0.34, w[1]); g.add(wh);
-    const rim = new THREE.Mesh(carRimGeo, carRimMat);
-    rim.rotation.z = Math.PI / 2; rim.position.set(w[0], 0.34, w[1]); g.add(rim);
-  });
-  const headBar = new THREE.Mesh(carBarGeo, carHeadMat); headBar.position.set(0, 0.66, -2.16); g.add(headBar);
-  const tailBar = new THREE.Mesh(carBarGeo, carTailMat); tailBar.position.set(0, 0.74, 2.16); g.add(tailBar);
-  const tailGlow = new THREE.Sprite(tailGlowMat); tailGlow.scale.set(2.6, 0.7, 1); tailGlow.position.set(0, 0.74, 2.38); g.add(tailGlow);
-  const frontGlow = new THREE.Sprite(frontGlowMat); frontGlow.scale.set(2.2, 0.6, 1); frontGlow.position.set(0, 0.66, -2.38); g.add(frontGlow);
+  const headBar = new THREE.Mesh(carBarGeo, carHeadMat); headBar.position.set(0, v.headY, -v.len / 2 - 0.03); g.add(headBar);
+  const tailBar = new THREE.Mesh(carBarGeo, carTailMat); tailBar.position.set(0, v.tailY, v.len / 2 + 0.03); g.add(tailBar);
+  const tailGlow = new THREE.Sprite(tailGlowMat); tailGlow.scale.set(2.6, 0.7, 1); tailGlow.position.set(0, v.tailY, v.len / 2 + 0.25); g.add(tailGlow);
+  const frontGlow = new THREE.Sprite(frontGlowMat); frontGlow.scale.set(2.4, 0.7, 1); frontGlow.position.set(0, v.headY, -v.len / 2 - 0.25); g.add(frontGlow);
+  // Headlight pool on the road ahead of the car (flips with the car, so oncoming
+  // cars throw their pools toward the player)
+  const pool = new THREE.Mesh(poolGeo, carPoolMat);
+  pool.rotation.x = -Math.PI / 2; pool.position.set(0, 0.05, -v.len / 2 - 2.4); pool.renderOrder = 3; g.add(pool);
   g.visible = false;
   scene.add(g);
   cars.push({
-    mesh: g,
+    mesh: g, wheels, wheelR: v.wheelR, dir,
     z: 150 + i * 190 + (i % 3) * 60,
-    offset: LANES[i % 3],
+    offset: dir > 0 ? SAME_LANES[i % 2] : ONC_LANES[i % 2],
     speed: 17 + (i % 5) * 3.5,
     struck: false, counted: false
   });
 }
 function respawnCar(car, position) {
   car.z = mod(position + 600 + Math.random() * 1400, TRACK_LEN);
-  car.offset = LANES[Math.floor(Math.random() * 3)];
+  const lanes = car.dir > 0 ? SAME_LANES : ONC_LANES;
+  car.offset = lanes[Math.floor(Math.random() * lanes.length)];
   car.speed = 16 + Math.random() * 15;
   car.struck = false; car.counted = false;
 }
@@ -719,16 +909,19 @@ function respawnCar(car, position) {
 const MAX_SPEED = 80;                    // m/s  (~180 mph)
 let position = 0;                        // metres along the track
 let speed = 0;
-let playerX = 0;                         // lateral offset from road centre
+let playerX = 2.4;                       // lateral offset from road centre (starts in the right lane)
 let distance = 0;                        // metres travelled (score)
 let nearMisses = 0;
+let wrongWay = false;                    // player is left of the median, in the oncoming carriageway
+let wwBonus = 0;                         // wrong-way bonus points ticker
+let dashTick = 0;                        // dash redraw counter (banner flashing)
 let shakeT = 0;
 let flash = 0;
 let steerSmooth = 0;
 
 function updateTraffic(dt, positionNow) {
   for (const car of cars) {
-    car.z = mod(car.z + car.speed * dt, TRACK_LEN);
+    car.z = mod(car.z + car.dir * car.speed * dt, TRACK_LEN);
     const relZ = mod(car.z - positionNow, TRACK_LEN);
     if (relZ > TRACK_LEN / 2) {                       // car is behind the player
       if (TRACK_LEN - relZ > 45) respawnCar(car, positionNow);
@@ -744,24 +937,35 @@ function updateTraffic(dt, positionNow) {
     const cx = lerp(pA.x, pB.x, f), cy = lerp(pA.y, pB.y, f);
     car.mesh.visible = true;
     car.mesh.position.set(cx + car.offset - playerX, cy, -relZ);
-    car.mesh.rotation.y = -Math.atan((pB.x - pA.x) / SEG_LEN);
-    car.mesh.rotation.x = Math.atan((pB.y - pA.y) / SEG_LEN);
+    car.mesh.rotation.y = -Math.atan((pB.x - pA.x) / SEG_LEN) + (car.dir < 0 ? Math.PI : 0);
+    car.mesh.rotation.x = (car.dir < 0 ? -1 : 1) * Math.atan((pB.y - pA.y) / SEG_LEN);
+    const wrot = car.speed * dt / car.wheelR;
+    for (let wi = 0; wi < car.wheels.length; wi++) car.wheels[wi].rotation.x -= wrot;
     // Collision: same stretch of road, overlapping laterally
     if (relZ < 4.6 && Math.abs(playerX - car.offset) < 1.7) {
       if (!car.struck) {
         car.struck = true;
-        speed = Math.min(speed, car.speed * 0.45);
-        shakeT = 0.55; flash = 0.55;
+        if (car.dir < 0) {           // head-on: near-total stop, bigger jolt
+          speed = Math.min(speed, 4);
+          shakeT = 0.85; flash = 0.85;
+        } else {
+          speed = Math.min(speed, car.speed * 0.45);
+          shakeT = 0.55; flash = 0.55;
+        }
         thud();
         spawnSparks(car.mesh.position.x, car.mesh.position.y + 0.7, car.mesh.position.z);
       }
     } else if (relZ >= 4.6 && car.struck) {
       car.struck = false;
     }
-    // Near miss: player sweeps past closely at speed without touching
-    if (!car.counted && relZ > 4.6 && relZ < 9 && speed > car.speed + 6) {
+    // Near miss: player sweeps past closely without touching.
+    // Oncoming near-misses score double — the closing speed is the sum of both cars.
+    if (!car.counted && relZ > 4.6 && relZ < 9) {
       const lat = Math.abs(playerX - car.offset);
-      if (lat >= 1.7 && lat < 3.4) { nearMisses++; car.counted = true; }
+      if (lat >= 1.7 && lat < 3.4) {
+        if (car.dir < 0) { nearMisses += 2; car.counted = true; }
+        else if (speed > car.speed + 6) { nearMisses++; car.counted = true; }
+      }
     }
   }
 }
@@ -795,8 +999,15 @@ camera.add(cockpit);
   const dashTop = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.04, 0.5), trimMat);
   dashTop.position.set(0, -0.30, -0.66); dashTop.rotation.x = -0.30;
   cockpit.add(dashTop);
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.07, 1.7), hoodMat);
-  hood.position.set(0, -0.55, -1.60); hood.rotation.x = 0.045;
+  // Sculpted hood: the supercar nose profile extruded across the bonnet width,
+  // so from the seat you look over a sloping wedge, not a box slab
+  const hoodShape = new THREE.Shape();
+  hoodShape.moveTo(0, 0.16);
+  hoodShape.quadraticCurveTo(-0.9, 0.13, -1.55, 0.05);
+  hoodShape.quadraticCurveTo(-1.75, 0.02, -1.75, -0.03);
+  hoodShape.lineTo(-1.75, -0.10); hoodShape.lineTo(0, -0.10); hoodShape.lineTo(0, 0.16);
+  const hood = new THREE.Mesh(extrudeProfile(hoodShape, 1.66), hoodMat);
+  hood.position.set(0, -0.60, -0.72);
   cockpit.add(hood);
   const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.11, 0.03), mirrorMat);
   mirror.position.set(0, 0.30, -0.58);
@@ -843,18 +1054,27 @@ dashGlow.position.set(0, -0.315, -0.748); dashGlow.rotation.x = -0.30;
 cockpit.add(dashGlow);
 
 function drawDash(mph) {
+  dashTick++;
   const g = dashCtx;
   g.fillStyle = '#0b0b16'; g.fillRect(0, 0, 512, 256);
   g.strokeStyle = '#ff2e88'; g.lineWidth = 6; g.strokeRect(6, 6, 500, 244);
+  if (wrongWay && (dashTick >> 1) % 2 === 0) {
+    g.font = '900 36px Arial'; g.fillStyle = '#ff4455'; g.textAlign = 'center';
+    g.fillText('WRONG WAY!', 256, 42);
+  }
   g.fillStyle = '#7df9ff'; g.textAlign = 'center';
-  g.font = '900 130px Arial';
-  g.fillText(String(Math.round(mph)), 256, 148);
-  g.font = '700 30px Arial'; g.fillStyle = '#ffd319';
-  g.fillText('MPH', 256, 190);
-  g.font = '700 27px Arial'; g.fillStyle = '#ffb3d9'; g.textAlign = 'left';
-  g.fillText('DIST  ' + (distance / 1609.34).toFixed(2) + ' MI', 28, 232);
+  g.font = '900 115px Arial';
+  g.fillText(String(Math.round(mph)), 256, 146);
+  g.font = '700 28px Arial'; g.fillStyle = '#ffd319';
+  g.fillText('MPH', 256, 184);
+  g.font = '700 24px Arial'; g.fillStyle = '#ffb3d9'; g.textAlign = 'left';
+  g.fillText('DIST  ' + (distance / 1609.34).toFixed(2) + ' MI', 28, 218);
   g.textAlign = 'right';
-  g.fillText('NEAR MISS  ' + nearMisses, 484, 232);
+  g.fillText('NEAR MISS  ' + nearMisses, 484, 218);
+  if (wwBonus > 0) {
+    g.font = '700 24px Arial'; g.fillStyle = '#ffd319'; g.textAlign = 'center';
+    g.fillText('BONUS  ' + Math.floor(wwBonus), 256, 244);
+  }
   dashTex.needsUpdate = true;
 }
 drawDash(0);
@@ -1074,7 +1294,7 @@ const streaks = new THREE.Points(streakGeo, streakMat);
 streaks.frustumCulled = false;
 scene.add(streaks);
 for (let i = 0; i < STREAKS; i++) {
-  streakDat[i * 3] = (Math.random() < 0.5 ? -1 : 1) * (6.5 + Math.random() * 8);
+  streakDat[i * 3] = (Math.random() < 0.5 ? -1 : 1) * (8.6 + Math.random() * 7);
   streakDat[i * 3 + 1] = 0.4 + Math.random() * 2.6;
   streakDat[i * 3 + 2] = Math.random() * DRAW * SEG_LEN * 0.9;
 }
@@ -1084,7 +1304,7 @@ function updateStreaks(dt, sp) {
   for (let i = 0; i < STREAKS; i++) {
     streakDat[i * 3 + 2] -= speed * 1.15 * dt;
     if (streakDat[i * 3 + 2] < 1) {
-      streakDat[i * 3] = (Math.random() < 0.5 ? -1 : 1) * (6.5 + Math.random() * 8);
+      streakDat[i * 3] = (Math.random() < 0.5 ? -1 : 1) * (8.6 + Math.random() * 7);
       streakDat[i * 3 + 1] = 0.4 + Math.random() * 2.6;
       streakDat[i * 3 + 2] = 40 + Math.random() * (DRAW * SEG_LEN * 0.9 - 40);
     }
@@ -1125,6 +1345,10 @@ function tick() {
 
   // --- speed ---
   const offroad = Math.abs(playerX) > ROAD_HALF;
+  const onMedian = Math.abs(playerX) < MEDIAN_HALF + 0.35;
+  wrongWay = playerX < -(MEDIAN_HALF + 0.15);
+  if (wrongWay && speed > 12) wwBonus += dt * 30;      // wrong-way bonus ticker
+  if (onMedian && speed > 6) speed -= 9 * dt;          // median rumble scrub
   if (input.gas > 0.02) speed += (16 * (1 - speedPercent) + 4) * input.gas * dt;
   if (input.brake > 0.02) speed -= 32 * input.brake * dt;
   speed -= (2.2 + 6 * speedPercent * speedPercent) * dt;            // drag / engine braking
@@ -1168,7 +1392,7 @@ function tick() {
     shakeT = Math.max(0, shakeT - dt);
     const a = shakeT * 0.09;
     shakeGroup.position.set((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, 0);
-  } else if (offroad && speed > 12) {
+  } else if ((offroad && speed > 12) || (onMedian && speed > 6)) {
     shakeGroup.position.set((Math.random() - 0.5) * 0.012, (Math.random() - 0.5) * 0.012, 0);
   } else {
     shakeGroup.position.set(0, 0, 0);
