@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>NEON INVADERS VR — Danny's Arcade</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#040110;
+    font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
+  canvas { display:block; }
+  #panel {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
+    z-index:10; text-align:center; color:#fff;
+  }
+  #panel .box { max-width:580px; padding:24px 20px; }
+  #panel h1 {
+    font-size:58px; letter-spacing:5px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    text-shadow:0 0 34px rgba(39,232,255,.25);
+  }
+  #panel .sub { font-size:15px; letter-spacing:3px; color:#bfeaff; margin-bottom:22px; text-transform:uppercase; }
+  #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#eaf6ff; }
+  #panel p.small { font-size:13px; color:#a9c6e8; }
+  #panel .backlink { margin-top:20px; font-size:13px; }
+  #panel .backlink a { color:#7d72a8; text-decoration:none; }
+  #panel .backlink a:hover { color:#bdb2e8; }
+  #vrBtn {
+    margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+  }
+  #vrBtn:disabled { opacity:.55; cursor:wait; }
+  #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  #hud {
+    position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:5;
+    color:#7df9ff; font-size:20px; font-weight:800; letter-spacing:2px;
+    text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
+  }
+  #muteBtn {
+    position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
+    background:rgba(10,16,38,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<div id="panel">
+  <div class="box">
+    <h1>NEON INVADERS VR</h1>
+    <div class="sub">Space Invaders in VR — unlimited ships, endless waves</div>
+    <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
+    <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
+    <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+    <p class="backlink"><a href="./">← Danny's Arcade</a></p>
+  </div>
+</div>
+
+<div id="hud">SCORE 0 · WAVE 1 · SHIPS LOST 0</div>
+<button id="muteBtn">SOUND: ON</button>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ============================== helpers ==============================
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp  = (a, b, t) => a + (b - a) * t;
+const rand  = (a, b) => a + Math.random() * (b - a);
+
+// ============================== renderer / scene ==============================
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x040110);
+scene.fog = new THREE.Fog(0x040110, 30, 175);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 900);
+
+// Player rig: dolly -> shake -> tilt (desktop look-up only) -> height holder -> camera.
+// Mirrors Rad VR's proven hierarchy; in VR the headset pose drives the camera and
+// the tilt stays at zero, on desktop the tilt aims the view up at the formation.
+const dolly = new THREE.Group();
+const shakeGroup = new THREE.Group();
+const tiltGroup = new THREE.Group();
+const heightHolder = new THREE.Group();
+dolly.add(shakeGroup); shakeGroup.add(tiltGroup); tiltGroup.add(heightHolder); heightHolder.add(camera);
+scene.add(dolly);
+
+// Lights: hemisphere + one directional; emissives and glow sprites carry the neon look
+scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.75));
+const keyLight = new THREE.DirectionalLight(0xbfd8ff, 1.15);
+keyLight.position.set(30, 60, -40);
+scene.add(keyLight);
+
+// Shared radial glow texture (every fake glow in the game uses it)
+function makeGlowTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  gr.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const glowTex = makeGlowTexture();
+function glowSprite(color, scale, opacity) {
+  const m = new THREE.SpriteMaterial({
+    map: glowTex, color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false
+  });
+  const s = new THREE.Sprite(m);
+  s.scale.set(scale, scale, 1);
+  return s;
+}
+
+// ============================== environment: stars, nebulas, grid, platform ==============================
+{ // Starfield: points on a far shell, slight colour variety, fog-exempt
+  const N = 1400;
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  const palette = [new THREE.Color(0xffffff), new THREE.Color(0xbfeaff), new THREE.Color(0xffd9ec), new THREE.Color(0x9fd8ff)];
+  const c = new THREE.Color();
+  for (let i = 0; i < N; i++) {
+    const r = rand(240, 340);
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1));
+    pos[i * 3]     = r * Math.sin(ph) * Math.cos(th);
+    pos[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * (Math.random() < 0.85 ? 1 : -0.4);
+    pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+    c.copy(palette[i % palette.length]).multiplyScalar(rand(0.35, 1));
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const stars = new THREE.Points(g, new THREE.PointsMaterial({
+    size: 1.7, sizeAttenuation: false, vertexColors: true, transparent: true,
+    opacity: 0.95, depthWrite: false, fog: false, toneMapped: false
+  }));
+  stars.frustumCulled = false;
+  scene.add(stars);
+}
+// Nebula clouds: a handful of huge, faint glow sprites
+[[-120, 55, -230, 0xff2e88, 270, 0.13], [140, 35, -250, 0x1fb6d9, 230, 0.12],
+ [0, 95, -270, 0x7b2d8b, 320, 0.14], [-190, -15, -130, 0xff7e47, 170, 0.08],
+ [70, -50, 190, 0x5a3fbf, 210, 0.07], [190, 80, 120, 0x27e8ff, 150, 0.06]
+].forEach(n => {
+  const s = glowSprite(n[3], n[4], n[5]);
+  s.position.set(n[0], n[1], n[2]);
+  scene.add(s);
+});
+{ // Synthwave grid floor far below, faded by fog
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#000000'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#154a66'; g.fillRect(0, 0, 256, 5); g.fillRect(0, 0, 5, 256);
+  g.fillStyle = '#27e8ff'; g.fillRect(0, 0, 256, 2); g.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(70, 70);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const grid = new THREE.Mesh(new THREE.PlaneGeometry(700, 700),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  grid.rotation.x = -Math.PI / 2;
+  grid.position.y = -6;
+  scene.add(grid);
+}
+// Player platform: dark cylinder + glowing rim + patterned top disc
+const PLAT_R = 4.6;
+{
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(PLAT_R, PLAT_R + 0.45, 0.35, 40),
+    new THREE.MeshStandardMaterial({ color: 0x11162a, roughness: 0.6, metalness: 0.5 }));
+  drum.position.y = 0;
+  scene.add(drum);
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#0a0e1e'; g.fillRect(0, 0, 512, 512);
+  g.strokeStyle = '#27e8ff';
+  [230, 170, 110, 55].forEach((r, i) => { g.lineWidth = i % 2 ? 3 : 5; g.globalAlpha = 0.55 - i * 0.09; g.beginPath(); g.arc(256, 256, r, 0, Math.PI * 2); g.stroke(); });
+  g.globalAlpha = 0.35; g.lineWidth = 3;
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    g.beginPath(); g.moveTo(256 + Math.cos(a) * 55, 256 + Math.sin(a) * 55);
+    g.lineTo(256 + Math.cos(a) * 230, 256 + Math.sin(a) * 230); g.stroke();
+  }
+  g.globalAlpha = 1;
+  const topTex = new THREE.CanvasTexture(cv); topTex.colorSpace = THREE.SRGBColorSpace;
+  const top = new THREE.Mesh(new THREE.CircleGeometry(PLAT_R, 40),
+    new THREE.MeshBasicMaterial({ map: topTex, toneMapped: false }));
+  top.rotation.x = -Math.PI / 2; top.position.y = 0.178;
+  scene.add(top);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(PLAT_R + 0.02, 0.05, 10, 48),
+    new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false }));
+  rim.rotation.x = Math.PI / 2; rim.position.y = 0.18;
+  scene.add(rim);
+  const under = glowSprite(0x27e8ff, 13, 0.16); under.position.y = -0.7; scene.add(under);
+}
+// Cannon rail: bar, end caps, support posts
+const RAIL_Z = -1.6, RAIL_MIN = -5, RAIL_MAX = 5;
+{
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x39415e, roughness: 0.35, metalness: 0.85 });
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.08, 0.14), railMat);
+  rail.position.set(0, 0.78, RAIL_Z);
+  scene.add(rail);
+  const capMat = new THREE.MeshBasicMaterial({ color: 0x2bff88, toneMapped: false });
+  [-5.65, 5.65].forEach(x => {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), capMat);
+    cap.position.set(x, 0.78, RAIL_Z);
+    scene.add(cap);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.78, 8), railMat);
+    post.position.set(x * 0.92, 0.39, RAIL_Z);
+    scene.add(post);
+  });
+}
+
+// ============================== the cannon ==============================
+const cannon = new THREE.Group();          // slides along the rail (x only)
+const barrel = new THREE.Group();          // pivots to aim
+let cannonX = 0;
+{
+  const hullMat = new THREE.MeshStandardMaterial({ color: 0x1c2742, roughness: 0.35, metalness: 0.8 });
+  const accentMat = new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false });
+  const sled = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.16, 0.8), hullMat);
+  sled.position.y = 0.88; cannon.add(sled);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.05, 0.5), accentMat);
+  stripe.position.y = 0.82; cannon.add(stripe);
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.22, 14), hullMat);
+  pedestal.position.y = 1.05; cannon.add(pedestal);
+  barrel.position.set(0, 1.16, 0);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12),
+    new THREE.MeshBasicMaterial({ color: 0x2bff88, toneMapped: false }));
+  barrel.add(core);
+  const tubeMat = new THREE.MeshStandardMaterial({ color: 0x9fb6c9, roughness: 0.25, metalness: 0.95 });
+  [-0.1, 0.1].forEach(x => {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.78, 10), tubeMat);
+    tube.rotation.x = Math.PI / 2;              // cylinder axis -> Z
+    tube.position.set(x, 0.03, 0.42);
+    barrel.add(tube);
+    const tip = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.016, 8, 14), accentMat);
+    tip.position.set(x, 0.03, 0.8);
+    barrel.add(tip);
+  });
+  cannon.add(barrel);
+  cannon.position.set(0, 0, RAIL_Z);
+  scene.add(cannon);
+}
+const muzzleFlash = glowSprite(0xbffcff, 0.85, 0);
+muzzleFlash.position.set(0, 1.2, RAIL_Z - 0.9);
+scene.add(muzzleFlash);
+let flashT = 0;
+// Shield shimmer bubble shown briefly after the cannon is hit (invincibility window)
+const shimmer = new THREE.Mesh(new THREE.SphereGeometry(5.4, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false }));
+shimmer.position.set(0, 0.6, 0);
+scene.add(shimmer);
+let shimmerT = 0;
+// Red hit flash (camera-space quad, same trick as Rad VR)
+const flashMat = new THREE.MeshBasicMaterial({ color: 0xff2233, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
+const flashQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), flashMat);
+flashQuad.position.z = -0.35; flashQuad.renderOrder = 999;
+camera.add(flashQuad);
+let flash = 0, shakeT = 0;
+
+// ============================== diegetic panels (canvas textures) ==============================
+function makePanel(w, h) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = Math.round(512 * h / w);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { cv, ctx: cv.getContext('2d'), tex };
+}
+// Score panel, floating left of the formation
+const scorePanel = makePanel(3.6, 2.25);
+const scoreMesh = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.25),
+  new THREE.MeshBasicMaterial({ map: scorePanel.tex, toneMapped: false, fog: false }));
+scoreMesh.position.set(-10.1, 6.9, -13.4);
+scoreMesh.rotation.y = 0.38;
+scene.add(scoreMesh);
+// Announcement panel, centre above the formation (WAVE N / warnings / bonuses)
+const annPanel = makePanel(7.2, 1.8);
+const annMesh = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 1.8),
+  new THREE.MeshBasicMaterial({ map: annPanel.tex, transparent: true, opacity: 0, toneMapped: false, fog: false, depthWrite: false }));
+annMesh.position.set(0, 10.1, -13.2);
+scene.add(annMesh);
+let annT = 0, annDur = 0;
+function showAnnouncement(main, sub, dur) {
+  const g = annPanel.ctx, W = annPanel.cv.width, H = annPanel.cv.height;
+  g.clearRect(0, 0, W, H);
+  g.textAlign = 'center';
+  g.shadowColor = '#27e8ff'; g.shadowBlur = 26;
+  g.fillStyle = '#eaf6ff';
+  g.font = '900 74px Arial';
+  g.fillText(main, W / 2, sub ? 92 : 118);
+  if (sub) {
+    g.shadowBlur = 12; g.fillStyle = '#ffd319'; g.font = '700 40px Arial';
+    g.fillText(sub, W / 2, 152);
+  }
+  annPanel.tex.needsUpdate = true;
+  annDur = dur; annT = dur;
+}
+
+// ============================== game state ==============================
+// NOTE: there is deliberately no lives counter and no end state — SHIPS LOST is a
+// scoreboard stat only. The state machine has exactly two modes: 'menu' and 'play'.
+let mode = 'menu';
+let started = false;
+let score = 0, wave = 1, shipsLost = 0;
+let drawnScore = -1, drawnWave = -1, drawnLost = -1;
+const hud = document.getElementById('hud');
+let hudText = '';
+function drawScorePanel() {
+  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost) return;
+  drawnScore = score; drawnWave = wave; drawnLost = shipsLost;
+  const g = scorePanel.ctx, W = scorePanel.cv.width, H = scorePanel.cv.height;
+  g.fillStyle = 'rgba(8,10,26,0.88)'; g.fillRect(0, 0, W, H);
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 5; g.strokeRect(5, 5, W - 10, H - 10);
+  g.textAlign = 'left';
+  g.fillStyle = '#7df9ff'; g.font = '900 34px Arial';
+  g.fillText('NEON INVADERS VR', 28, 52);
+  g.fillStyle = '#eaf6ff'; g.font = '900 84px Arial';
+  g.fillText(String(score).padStart(6, '0'), 28, 148);
+  g.font = '700 30px Arial'; g.fillStyle = '#8fb4d9';
+  g.fillText('SCORE', 30, 184);
+  g.fillStyle = '#2bff88'; g.font = '900 44px Arial'; g.textAlign = 'right';
+  g.fillText('WAVE ' + wave, W - 28, 148);
+  g.fillStyle = '#ffb3d9'; g.font = '700 30px Arial';
+  g.fillText('SHIPS LOST ' + shipsLost, W - 28, 184);
+  g.fillStyle = '#ffd319'; g.font = '700 26px Arial'; g.textAlign = 'center';
+  g.fillText('SHIPS: ∞ UNLIMITED', W / 2, H - 22);
+  scorePanel.tex.needsUpdate = true;
+  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost;
+  if (t !== hudText) { hudText = t; hud.textContent = t; }
+}
+drawScorePanel();
+
+// ============================== invaders: 5 neon designs ==============================
+const ROW_DEFS = [
+  { color: 0xff3df0, points: 30, kind: 'dart' },      // top row — magenta dart
+  { color: 0x9d5cff, points: 20, kind: 'cruiser' },   // violet cruiser
+  { color: 0x27e8ff, points: 20, kind: 'stingray' },  // cyan stingray
+  { color: 0x2bff88, points: 10, kind: 'beetle' },    // green beetle-drone
+  { color: 0xffb02e, points: 10, kind: 'saucer' }     // amber saucer-drone
+];
+function extrude(shape, depth) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1, curveSegments: 6
+  });
+  geo.translate(0, 0, -depth / 2);
+  return geo;
+}
+function shapeFrom(pts) {
+  const s = new THREE.Shape();
+  s.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
+  s.closePath();
+  return s;
+}
+function invaderBodyGeo(kind) {
+  switch (kind) {
+    case 'dart':
+      return extrude(shapeFrom([[0, 0.44], [0.4, -0.3], [0.12, -0.18], [0.12, -0.44], [-0.12, -0.44], [-0.12, -0.18], [-0.4, -0.3]]), 0.3);
+    case 'cruiser': {
+      const s = new THREE.Shape();
+      s.moveTo(-0.5, 0.02);
+      s.quadraticCurveTo(-0.3, 0.3, 0, 0.4);
+      s.quadraticCurveTo(0.3, 0.3, 0.5, 0.02);
+      s.lineTo(0.32, -0.34); s.lineTo(0.1, -0.2); s.lineTo(-0.1, -0.2); s.lineTo(-0.32, -0.34);
+      s.closePath();
+      return extrude(s, 0.3);
+    }
+    case 'stingray':
+      return extrude(shapeFrom([[0, 0.46], [0.5, 0.02], [0.2, -0.16], [0, -0.46], [-0.2, -0.16], [-0.5, 0.02]]), 0.3);
+    case 'beetle': {
+      const s = new THREE.Shape();
+      s.absellipse(0, 0, 0.44, 0.34, 0, Math.PI * 2);
+      return extrude(s, 0.32);
+    }
+    default: return null; // saucer is built from primitives
+  }
+}
+const COLS = 10, ROWS = 5, DX = 1.35, DY = 1.15;
+const FORM_Z = -14, FORM_TOP_Y = 8.8, DEFENSE_Y = 2.05;
+const formation = new THREE.Group();
+scene.add(formation);
+const invaders = [];
+const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
+{
+  const saucerBeltGeo = new THREE.CylinderGeometry(0.47, 0.53, 0.15, 18);
+  const saucerDomeGeo = new THREE.SphereGeometry(0.27, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+  ROW_DEFS.forEach((def, row) => {
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(def.color).multiplyScalar(0.35),
+      emissive: def.color, emissiveIntensity: 0.55,
+      roughness: 0.4, metalness: 0.3
+    });
+    const coreMat = new THREE.MeshBasicMaterial({ color: def.color, toneMapped: false });
+    const bodyGeo = invaderBodyGeo(def.kind);
+    for (let col = 0; col < COLS; col++) {
+      const grp = new THREE.Group();
+      if (def.kind === 'saucer') {
+        const belt = new THREE.Mesh(saucerBeltGeo, bodyMat); grp.add(belt);
+        const dome = new THREE.Mesh(saucerDomeGeo, bodyMat); dome.scale.y = 0.75; dome.position.y = 0.06; grp.add(dome);
+      } else {
+        grp.add(new THREE.Mesh(bodyGeo, bodyMat));
+      }
+      const core = new THREE.Mesh(coreGeo, coreMat); core.position.z = 0.2; grp.add(core);
+      const glow = glowSprite(def.color, 1.85, 0.34); glow.position.z = -0.1; grp.add(glow);
+      const lx = (col - (COLS - 1) / 2) * DX, ly = -row * DY;
+      grp.position.set(lx, ly, 0);
+      formation.add(grp);
+      invaders.push({ grp, row, col, lx, ly, alive: true, phase: Math.random() * Math.PI * 2, def });
+    }
+  });
+}
+let formX = 0, formY = FORM_TOP_Y, marchDir = 1, aliveCount = COLS * ROWS;
+formation.position.set(formX, formY, FORM_Z);
+
+// ============================== shield bunkers (one InstancedMesh) ==============================
+const SHIELD_Z = -9;
+const shieldCubes = [];   // {x,y,z,alive}
+let shieldMesh = null;
+{
+  const pattern = ['.XXX.', 'XXXXX', 'XXXXX', 'XX.XX'];
+  const centers = [-4.6, -1.55, 1.55, 4.6];
+  for (const cx of centers) {
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) {
+      if (pattern[r][c] !== 'X') continue;
+      shieldCubes.push({ x: cx + (c - 2) * 0.36, y: 2.32 + (1.5 - r) * 0.36, z: SHIELD_Z, alive: true });
+    }
+  }
+  shieldMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(0.34, 0.34, 0.34),
+    new THREE.MeshStandardMaterial({ color: 0x0d2b33, emissive: 0x19e3ff, emissiveIntensity: 0.5, roughness: 0.5, metalness: 0.2 }),
+    shieldCubes.length
+  );
+  shieldMesh.frustumCulled = false;
+  scene.add(shieldMesh);
+}
+const shieldDummy = new THREE.Object3D();
+function refreshShields() {
+  for (let i = 0; i < shieldCubes.length; i++) {
+    const c = shieldCubes[i];
+    shieldDummy.position.set(c.x, c.y, c.z);
+    shieldDummy.scale.setScalar(c.alive ? 1 : 0.0001);
+    shieldDummy.updateMatrix();
+    shieldMesh.setMatrixAt(i, shieldDummy.matrix);
+  }
+  shieldMesh.instanceMatrix.needsUpdate = true;
+}
+function resetShields() { shieldCubes.forEach(c => { c.alive = true; }); refreshShields(); }
+refreshShields();
+// Returns true if the point destroys a shield cube
+function hitShield(x, y, z) {
+  for (const c of shieldCubes) {
+    if (!c.alive) continue;
+    const dx = x - c.x, dy = y - c.y, dz = z - c.z;
+    if (dx * dx + dy * dy + dz * dz < 0.115) { c.alive = false; refreshShields(); return true; }
+  }
+  return false;
+}
+
+// ============================== particles (pooled) ==============================
+const P_COUNT = 320;
+const pPos = new Float32Array(P_COUNT * 3);
+const pCol = new Float32Array(P_COUNT * 3);
+const pVel = new Float32Array(P_COUNT * 3);
+const pLife = new Float32Array(P_COUNT);
+let pCursor = 0;
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3).setUsage(THREE.DynamicDrawUsage));
+const pPoints = new THREE.Points(pGeo, new THREE.PointsMaterial({
+  map: glowTex, size: 0.17, vertexColors: true, transparent: true,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+pPoints.frustumCulled = false;
+scene.add(pPoints);
+for (let i = 0; i < P_COUNT; i++) pPos[i * 3 + 1] = -999;
+const tmpColor = new THREE.Color();
+function spawnBurst(x, y, z, colorHex, count, speed, life) {
+  tmpColor.setHex(colorHex);
+  for (let k = 0; k < count; k++) {
+    const i = pCursor; pCursor = (pCursor + 1) % P_COUNT;
+    pPos[i * 3] = x; pPos[i * 3 + 1] = y; pPos[i * 3 + 2] = z;
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1)), sp = speed * rand(0.3, 1);
+    pVel[i * 3] = sp * Math.sin(ph) * Math.cos(th);
+    pVel[i * 3 + 1] = sp * Math.cos(ph);
+    pVel[i * 3 + 2] = sp * Math.sin(ph) * Math.sin(th);
+    pCol[i * 3] = tmpColor.r; pCol[i * 3 + 1] = tmpColor.g; pCol[i * 3 + 2] = tmpColor.b;
+    pLife[i] = life * rand(0.5, 1.1);
+  }
+  pGeo.attributes.color.needsUpdate = true;
+}
+function updateParticles(dt) {
+  for (let i = 0; i < P_COUNT; i++) {
+    if (pLife[i] <= 0) continue;
+    pLife[i] -= dt;
+    if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; continue; }
+    pVel[i * 3 + 1] -= 3.2 * dt;
+    pPos[i * 3] += pVel[i * 3] * dt;
+    pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
+    pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+  }
+  pGeo.attributes.position.needsUpdate = true;
+}
+
+// ============================== bolts & bombs (pooled) ==============================
+const aimPoint = new THREE.Vector3(0, 6.2, FORM_Z);
+const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
+const UP_Y = new THREE.Vector3(0, 1, 0);
+
+const boltGeo = new THREE.CapsuleGeometry(0.045, 0.42, 3, 8);
+const boltMat = new THREE.MeshBasicMaterial({ color: 0xbffcff, toneMapped: false });
+const bolts = [];
+for (let i = 0; i < 24; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(boltGeo, boltMat));
+  grp.add(glowSprite(0x27e8ff, 0.55, 0.8));
+  grp.visible = false;
+  scene.add(grp);
+  bolts.push({ grp, active: false, vx: 0, vy: 0, vz: 0, life: 0 });
+}
+let fireCooldown = 0;
+function fireBolt() {
+  for (const b of bolts) {
+    if (b.active) continue;
+    // Muzzle = barrel tip in world space
+    tmpV.set(0, 0.03, 0.85);
+    barrel.localToWorld(tmpV);
+    b.grp.position.copy(tmpV);
+    tmpV2.copy(aimPoint).sub(tmpV).normalize();
+    b.vx = tmpV2.x * 42; b.vy = tmpV2.y * 42; b.vz = tmpV2.z * 42;
+    tmpQ.setFromUnitVectors(UP_Y, tmpV2);
+    b.grp.quaternion.copy(tmpQ);
+    b.life = 1.1; b.active = true; b.grp.visible = true;
+    muzzleFlash.position.copy(tmpV);
+    flashT = 0.07;
+    laserSound();
+    return;
+  }
+}
+const bombGeo = new THREE.SphereGeometry(0.14, 12, 10);
+const bombMat = new THREE.MeshBasicMaterial({ color: 0xffa02e, toneMapped: false });
+const bombs = [];
+for (let i = 0; i < 20; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(bombGeo, bombMat));
+  grp.add(glowSprite(0xff5533, 0.8, 0.75));
+  grp.visible = false;
+  scene.add(grp);
+  bombs.push({ grp, active: false, vx: 0, vy: 0, vz: 0 });
+}
+let bombTimer = 1.2;
+function dropBomb() {
+  // Pick a random column that still has invaders; the lowest one drops
+  const colsAlive = [];
+  for (let c = 0; c < COLS; c++) if (invaders.some(v => v.alive && v.col === c)) colsAlive.push(c);
+  if (!colsAlive.length) return;
+  const col = colsAlive[Math.floor(Math.random() * colsAlive.length)];
+  let lowest = null;
+  for (const v of invaders) if (v.alive && v.col === col && (!lowest || v.row > lowest.row)) lowest = v;
+  if (!lowest) return;
+  for (const b of bombs) {
+    if (b.active) continue;
+    const sx = formX + lowest.lx, sy = formY + lowest.grp.position.y - 0.55, sz = FORM_Z;
+    b.grp.position.set(sx, sy, sz);
+    tmpV.set(cannonX + rand(-0.5, 0.5), 0.6, RAIL_Z).sub(b.grp.position).normalize();
+    const sp = Math.min(6.2 + wave * 0.35, 10);
+    b.vx = tmpV.x * sp; b.vy = tmpV.y * sp; b.vz = tmpV.z * sp;
+    b.active = true; b.grp.visible = true;
+    return;
+  }
+}
+
+// ============================== mothership ==============================
+const mother = new THREE.Group();
+let motherActive = false, motherDir = 1, motherTimer = rand(14, 22);
+{
+  const hullMat = new THREE.MeshStandardMaterial({ color: 0x3a0f2a, emissive: 0xff2e88, emissiveIntensity: 0.5, roughness: 0.4, metalness: 0.4 });
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.6, 0.42, 20), hullMat);
+  mother.add(belt);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.75, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0x9fd8ff, roughness: 0.15, metalness: 0.7 }));
+  dome.scale.y = 0.8; dome.position.y = 0.18; mother.add(dome);
+  const bandMat = new THREE.MeshBasicMaterial({ color: 0xffd319, toneMapped: false });
+  for (let i = 0; i < 6; i++) {
+    const a = i / 6 * Math.PI * 2;
+    const light = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), bandMat);
+    light.position.set(Math.cos(a) * 1.48, 0, Math.sin(a) * 1.48);
+    mother.add(light);
+  }
+  mother.add(glowSprite(0xff2e88, 5.5, 0.35));
+  mother.position.set(-19, 11.4, -17);
+  mother.visible = false;
+  scene.add(mother);
+}
+
+// ============================== audio (WebAudio synth, gesture-started) ==============================
+let actx = null, masterGain = null, warbleOsc = null, warbleGain = null;
+let muted = false;
+function startAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.5;
+    masterGain.connect(actx.destination);
+  } catch (e) { /* audio unavailable — game still plays */ }
+}
+function blip(freqA, freqB, dur, type, vol) {
+  if (!actx || muted) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freqA, actx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(freqB, 1), actx.currentTime + dur);
+  g.gain.setValueAtTime(vol, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(g); g.connect(masterGain);
+  o.start(); o.stop(actx.currentTime + dur + 0.02);
+}
+function laserSound() { blip(920, 180, 0.11, 'square', 0.16); }
+function invaderHitSound() { blip(340, 70, 0.14, 'square', 0.22); }
+function stepThump() { blip(68, 45, 0.1, 'sine', 0.3); }
+function boomSound() {
+  if (!actx || muted) return;
+  blip(120, 30, 0.4, 'sine', 0.65);
+  const len = actx.sampleRate * 0.3, buf = actx.createBuffer(1, len, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 420;
+  const g = actx.createGain(); g.gain.value = 0.5;
+  src.connect(f); f.connect(g); g.connect(masterGain);
+  src.start();
+}
+function warbleStart() {
+  if (!actx || muted || warbleOsc) return;
+  warbleOsc = actx.createOscillator(); warbleOsc.type = 'sine'; warbleOsc.frequency.value = 620;
+  const lfo = actx.createOscillator(); lfo.frequency.value = 7;
+  const lfoG = actx.createGain(); lfoG.gain.value = 190;
+  lfo.connect(lfoG); lfoG.connect(warbleOsc.frequency);
+  warbleGain = actx.createGain(); warbleGain.gain.value = 0.06;
+  warbleOsc.connect(warbleGain); warbleGain.connect(masterGain);
+  warbleOsc.start(); lfo.start();
+  warbleOsc.userData.lfo = lfo;
+}
+function warbleStop() {
+  if (!warbleOsc) return;
+  try { warbleOsc.stop(); warbleOsc.userData.lfo.stop(); } catch (e) {}
+  warbleOsc.disconnect(); warbleGain.disconnect();
+  warbleOsc = null; warbleGain = null;
+}
+const muteBtn = document.getElementById('muteBtn');
+function setMuted(m) {
+  muted = m;
+  muteBtn.textContent = m ? 'SOUND: OFF' : 'SOUND: ON';
+  if (masterGain) masterGain.gain.value = m ? 0 : 0.5;
+  if (m) warbleStop();
+}
+muteBtn.addEventListener('click', () => { startAudio(); setMuted(!muted); });
+
+// ============================== input: keyboard / mouse / XR controllers ==============================
+const keys = {};
+let mouseDown = false, mouseSeen = false;
+const mouseNDC = new THREE.Vector2(0, 0);
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+  if (e.code === 'KeyM') setMuted(!muted);
+  startAudio();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('pointermove', e => {
+  mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  mouseSeen = true;
+});
+window.addEventListener('pointerdown', () => { mouseDown = true; startAudio(); });
+window.addEventListener('pointerup', () => { mouseDown = false; });
+
+// XR controllers: target-ray spaces for aim; handedness recorded on connect
+const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
+let rightCtl = null, leftCtl = null;
+[ctlL, ctlR].forEach(c => {
+  c.addEventListener('connected', e => {
+    c.userData.handedness = e.data.handedness;
+    if (e.data.handedness === 'right') rightCtl = c;
+    if (e.data.handedness === 'left') leftCtl = c;
+  });
+  c.addEventListener('disconnected', () => {
+    if (rightCtl === c) rightCtl = null;
+    if (leftCtl === c) leftCtl = null;
+  });
+  scene.add(c);
+});
+// Aim laser from the right controller + aim dot on the formation plane
+const laserGeo = new THREE.BufferGeometry();
+laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
+const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({
+  color: 0x27e8ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+laser.frustumCulled = false; laser.visible = false;
+scene.add(laser);
+const aimDot = glowSprite(0x2bff88, 0.55, 0.9);
+aimDot.position.copy(aimPoint);
+scene.add(aimDot);
+
+const raycaster = new THREE.Raycaster();
+const aimPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -FORM_Z); // plane z = FORM_Z
+const DEAD = 0.12;
+function pollInput(dt) {
+  let steer = 0, fire = false;
+  // Keyboard
+  if (keys['ArrowLeft'] || keys['KeyA']) steer -= 1;
+  if (keys['ArrowRight'] || keys['KeyD']) steer += 1;
+  if (keys['Space']) fire = true;
+  if (mouseDown) fire = true;
+  // XR gamepads: thumbstick (either stick) slides, either trigger fires
+  if (renderer.xr.isPresenting) {
+    const session = renderer.xr.getSession();
+    if (session) {
+      for (const src of session.inputSources) {
+        const gp = src.gamepad;
+        if (!gp) continue;
+        if (gp.axes && gp.axes.length > 2) {
+          const ax = gp.axes[2] || 0;
+          if (Math.abs(ax) > DEAD && Math.abs(ax) > Math.abs(steer)) steer = ax;
+        }
+        if (gp.buttons && gp.buttons[0] && gp.buttons[0].value > 0.35) fire = true;
+      }
+    }
+  }
+  // Slide the cannon
+  cannonX = clamp(cannonX + steer * 9.5 * dt, RAIL_MIN, RAIL_MAX);
+  // Aim resolution
+  let aimed = false;
+  if (renderer.xr.isPresenting && rightCtl) {
+    tmpV.setFromMatrixPosition(rightCtl.matrixWorld);
+    tmpV2.set(0, 0, -1).applyQuaternion(rightCtl.getWorldQuaternion(tmpQ));
+    raycaster.set(tmpV, tmpV2);
+    if (raycaster.ray.intersectPlane(aimPlane, aimPoint)) aimed = true;
+    // Laser from the controller to the aim point
+    const lp = laserGeo.attributes.position.array;
+    lp[0] = tmpV.x; lp[1] = tmpV.y; lp[2] = tmpV.z;
+    lp[3] = aimPoint.x; lp[4] = aimPoint.y; lp[5] = aimPoint.z;
+    laserGeo.attributes.position.needsUpdate = true;
+    laser.visible = true;
+  } else {
+    laser.visible = false;
+    if (mouseSeen && !renderer.xr.isPresenting) {
+      raycaster.setFromCamera(mouseNDC, camera);
+      if (raycaster.ray.intersectPlane(aimPlane, aimPoint)) aimed = true;
+      // Desktop: the cannon also eases toward the aim x when no key steering
+      if (steer === 0) cannonX = clamp(lerp(cannonX, clamp(aimPoint.x, RAIL_MIN, RAIL_MAX), 1 - Math.pow(0.002, dt)), RAIL_MIN, RAIL_MAX);
+    }
+  }
+  if (!aimed) aimPoint.set(cannonX * 0.6, 6.2, FORM_Z);
+  aimPoint.y = clamp(aimPoint.y, 0.4, 12.5);
+  aimPoint.x = clamp(aimPoint.x, -11, 11);
+  aimDot.position.copy(aimPoint);
+  return fire;
+}
+
+// ============================== game flow ==============================
+function resetFormation(fullRestore) {
+  if (fullRestore) {
+    for (const v of invaders) { v.alive = true; v.grp.visible = true; }
+    aliveCount = COLS * ROWS;
+  }
+  formX = 0; marchDir = 1;
+  formY = Math.max(FORM_TOP_Y - (wave - 1) * 0.3, 7.4);
+  formation.position.set(formX, formY, FORM_Z);
+  for (const b of bombs) { b.active = false; b.grp.visible = false; }
+  bombTimer = 1.4;
+}
+function startWave() {
+  resetFormation(true);
+  resetShields();
+  drawScorePanel();
+  showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'They keep coming.', 2.0);
+}
+function startGame() {
+  if (started) return;
+  started = true;
+  mode = 'play';
+  score = 0; wave = 1; shipsLost = 0;
+  drawnScore = drawnWave = drawnLost = -1;
+  cannonX = 0;
+  startWave();
+}
+function playerHit() {
+  spawnBurst(cannonX, 1.1, RAIL_Z, 0xff5533, 34, 5.5, 0.8);
+  spawnBurst(cannonX, 1.1, RAIL_Z, 0xffd319, 18, 4, 0.6);
+  boomSound();
+  flash = 0.85; shakeT = 0.4;
+  if (shimmerT > 0) return;            // already shielded — explosion only, no ship lost
+  shipsLost++;
+  shimmerT = 2;
+  drawScorePanel();
+  showAnnouncement('SHIP HIT!', 'Ships lost: ' + shipsLost + ' — plenty more where that came from', 1.4);
+}
+function formationLanded() {
+  shipsLost++;
+  flash = 0.7; shakeT = 0.35;
+  boomSound();
+  drawScorePanel();
+  showAnnouncement('THEY LANDED!', 'Formation reset — ships lost: ' + shipsLost, 1.8);
+  resetFormation(true);
+}
+
+// ============================== per-frame updates ==============================
+let elapsed = 0;
+function updateFormation(dt) {
+  const deadFrac = 1 - aliveCount / (COLS * ROWS);
+  const marchSpeed = (0.8 + (wave - 1) * 0.12) * (1 + deadFrac * 1.9);
+  formX += marchDir * marchSpeed * dt;
+  if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.6; stepThump(); }
+  else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.6; stepThump(); }
+  formation.position.set(formX, formY, FORM_Z);
+  // Gentle bob + glow pulse per invader
+  for (const v of invaders) {
+    if (!v.alive) continue;
+    v.grp.position.y = v.ly + Math.sin(elapsed * 2.1 + v.phase + v.col * 0.35) * 0.05;
+    const s = 1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18;
+    v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
+  }
+  // Bottom row reached the defense line?
+  if (formY - (ROWS - 1) * DY <= DEFENSE_Y) formationLanded();
+}
+function killInvader(v) {
+  v.alive = false; v.grp.visible = false;
+  aliveCount--;
+  score += v.def.points;
+  spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 16, 4.2, 0.6);
+  invaderHitSound();
+  drawScorePanel();
+  if (aliveCount <= 0) {
+    wave++;
+    startWave();
+  }
+}
+function updateBolts(dt) {
+  const steps = dt > 0.022 ? 2 : 1, sdt = dt / steps;
+  for (const b of bolts) {
+    if (!b.active) continue;
+    for (let s = 0; s < steps && b.active; s++) {
+      b.grp.position.x += b.vx * sdt;
+      b.grp.position.y += b.vy * sdt;
+      b.grp.position.z += b.vz * sdt;
+      const p = b.grp.position;
+      // Shield cubes erode from player fire too
+      if (Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) { b.active = false; break; }
+      // Mothership
+      if (motherActive && Math.abs(p.x - mother.position.x) < 1.6 && Math.abs(p.y - mother.position.y) < 0.75 && Math.abs(p.z - mother.position.z) < 1.4) {
+        const bonus = 50 * (1 + Math.floor(Math.random() * 4));
+        score += bonus;
+        spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xff2e88, 42, 6, 0.9);
+        spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xffd319, 20, 4.5, 0.7);
+        boomSound();
+        motherActive = false; mother.visible = false;
+        warbleStop();
+        motherTimer = rand(25, 40);
+        drawScorePanel();
+        showAnnouncement('BONUS +' + bonus, 'Mothership down!', 1.5);
+        b.active = false; break;
+      }
+      // Invaders (box test in formation space)
+      const fx = p.x - formX, fy = p.y - formY;
+      if (Math.abs(p.z - FORM_Z) < 0.75) {
+        for (const v of invaders) {
+          if (!v.alive) continue;
+          if (Math.abs(fx - v.lx) < 0.6 && Math.abs(fy - v.grp.position.y) < 0.55) {
+            killInvader(v);
+            b.active = false;
+            break;
+          }
+        }
+        if (!b.active) break;
+      }
+      // Bombs can be shot down
+      for (const mb of bombs) {
+        if (!mb.active) continue;
+        const dx = p.x - mb.grp.position.x, dy = p.y - mb.grp.position.y, dz = p.z - mb.grp.position.z;
+        if (dx * dx + dy * dy + dz * dz < 0.2) {
+          mb.active = false; mb.grp.visible = false;
+          score += 5;
+          spawnBurst(p.x, p.y, p.z, 0xffa02e, 10, 3.4, 0.5);
+          invaderHitSound();
+          drawScorePanel();
+          b.active = false;
+          break;
+        }
+      }
+    }
+    if (b.active) {
+      b.life -= dt;
+      if (b.life <= 0 || b.grp.position.y < -0.5 || b.grp.position.y > 16 || b.grp.position.z < -24) b.active = false;
+    }
+    b.grp.visible = b.active;
+  }
+}
+function updateBombs(dt) {
+  bombTimer -= dt;
+  if (bombTimer <= 0) {
+    dropBomb();
+    bombTimer = Math.max(0.38, rand(0.7, 1.25) - wave * 0.06 - (1 - aliveCount / (COLS * ROWS)) * 0.3);
+  }
+  for (const b of bombs) {
+    if (!b.active) continue;
+    b.grp.position.x += b.vx * dt;
+    b.grp.position.y += b.vy * dt;
+    b.grp.position.z += b.vz * dt;
+    const p = b.grp.position;
+    if (Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) {
+      spawnBurst(p.x, p.y, p.z, 0x19e3ff, 8, 3, 0.45);
+      b.active = false; b.grp.visible = false;
+      continue;
+    }
+    // Cannon zone: a hit on the cannon/platform centre costs a ship (never the game)
+    if (p.y <= 1.25 && Math.abs(p.x - cannonX) < 1.05 && Math.abs(p.z - RAIL_Z) < 1.05) {
+      b.active = false; b.grp.visible = false;
+      playerHit();
+      continue;
+    }
+    if (p.y <= 0.22) {
+      spawnBurst(p.x, 0.3, p.z, 0xff5533, 10, 3, 0.5);
+      b.active = false; b.grp.visible = false;
+    }
+  }
+}
+function updateMother(dt) {
+  if (!motherActive) {
+    motherTimer -= dt;
+    if (motherTimer <= 0) {
+      motherActive = true;
+      motherDir = Math.random() < 0.5 ? 1 : -1;
+      mother.position.set(motherDir > 0 ? -18 : 18, 11.4, -17);
+      mother.visible = true;
+      warbleStart();
+    }
+    return;
+  }
+  mother.position.x += motherDir * 3.4 * dt;
+  mother.rotation.y += dt * 0.8;
+  if (mother.position.x > 19 || mother.position.x < -19) {
+    motherActive = false; mother.visible = false;
+    warbleStop();
+    motherTimer = rand(25, 40);
+  }
+}
+
+// ============================== ENTER VR flow (Rad VR pattern) ==============================
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+const panel = document.getElementById('panel');
+let xrSupported = false;
+function setStatus(msg) { statusEl.textContent = msg; }
+function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
+function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+vrBtn.addEventListener('click', async () => {
+  startAudio();
+  startGame();
+  if (!xrSupported) { hidePanel(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    hidePanel();
+    session.addEventListener('end', () => { showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      hidePanel();
+      session.addEventListener('end', () => { showPanel(); vrBtn.disabled = false; });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+    }
+  }
+});
+
+// ============================== main loop ==============================
+const clock = new THREE.Clock();
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
+  const presenting = renderer.xr.isPresenting;
+
+  if (mode === 'play') {
+    const fire = pollInput(dt);
+    fireCooldown -= dt;
+    if (fire && fireCooldown <= 0) { fireBolt(); fireCooldown = 0.16; }
+    updateFormation(dt);
+    updateBolts(dt);
+    updateBombs(dt);
+    updateMother(dt);
+  } else {
+    // Menu: formation idles in place as a backdrop
+    formation.position.set(Math.sin(elapsed * 0.24) * 0.8, FORM_TOP_Y, FORM_Z);
+    for (const v of invaders) {
+      v.grp.position.y = v.ly + Math.sin(elapsed * 2.1 + v.phase + v.col * 0.35) * 0.05;
+    }
+  }
+
+  // Cannon + barrel follow
+  cannon.position.x = cannonX;
+  barrel.lookAt(aimPoint);
+  if (flashT > 0) { flashT -= dt; muzzleFlash.material.opacity = clamp(flashT / 0.07, 0, 1) * 0.95; }
+  else muzzleFlash.material.opacity = 0;
+
+  // Rig: desktop sits at standing height and tilts up at the formation;
+  // in VR the headset owns the pose (tilt zeroed, holder only lifts a
+  // height-less local-space fallback — same rule as Rad VR).
+  if (presenting) {
+    tiltGroup.rotation.x = 0;
+    heightHolder.position.y = camera.position.y < 0.4 ? 1.05 : 0;
+  } else {
+    tiltGroup.rotation.x = 0.26;
+    heightHolder.position.y = 1.6;
+  }
+  if (shakeT > 0) {
+    shakeT = Math.max(0, shakeT - dt);
+    const a = shakeT * 0.1;
+    shakeGroup.position.set((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, 0);
+  } else shakeGroup.position.set(0, 0, 0);
+  flash = Math.max(0, flash - dt * 1.7);
+  flashMat.opacity = flash * 0.75;
+
+  // Shield shimmer countdown
+  if (shimmerT > 0) {
+    shimmerT = Math.max(0, shimmerT - dt);
+    shimmer.material.opacity = 0.22 * (shimmerT / 2) + Math.sin(elapsed * 14) * 0.03;
+  } else shimmer.material.opacity = 0;
+
+  // Announcement fade
+  if (annT > 0) {
+    annT = Math.max(0, annT - dt);
+    annMesh.material.opacity = clamp(annT / Math.min(0.45, annDur), 0, 1);
+  } else annMesh.material.opacity = 0;
+
+  updateParticles(dt);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(tick);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
