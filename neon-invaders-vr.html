@@ -984,6 +984,10 @@ const PICKUP_TYPES = {
   speed:  { label: 'MOVE SPEED', color: 0x9d5cff, upgrade: 'speed' }
 };
 const PICKUP_KEYS = Object.keys(PICKUP_TYPES);
+// Pickup economy split: weapons come only from hard kills, upgrades from
+// regular kills and the wave-start rain (see killInvader / startWave).
+const WEAPON_KEYS = PICKUP_KEYS.filter(k => PICKUP_TYPES[k].weapon);
+const UPGRADE_KEYS = PICKUP_KEYS.filter(k => PICKUP_TYPES[k].upgrade);
 const octaGeo = new THREE.OctahedronGeometry(0.24);
 const icosaGeo = new THREE.IcosahedronGeometry(0.24, 0);
 const pickups = [];
@@ -1307,8 +1311,8 @@ function startWave() {
   markScoreDirty();
   if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster march, double bombs!', 2.2);
   else showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
-  if (wave > 1) { // wave-clear bonus: 3 free pickups rain into the field
-    for (let k = 0; k < 3; k++) spawnPickup(rand(-6, 6), rand(9, 11), FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
+  if (wave > 1) { // wave-clear bonus: 1 free upgrade pickup rains into the field
+    spawnPickup(rand(-6, 6), rand(9, 11), FORM_Z, UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
   }
 }
 function startGame() {
@@ -1351,8 +1355,10 @@ function formationLanded() {
   flash = 0.7; shakeT = 0.35;
   boomSound();
   markScoreDirty();
-  showAnnouncement('THEY LANDED!', 'Formation reset — ships lost: ' + shipsLost, 1.8);
-  resetFormation(true);
+  showAnnouncement('THEY LANDED!', 'Survivors return to the top — ships lost: ' + shipsLost, 1.8);
+  // Landing NO LONGER revives dead invaders: the survivors return to the top
+  // and keep marching, and the wave ends only when every invader is killed.
+  resetFormation(false);
 }
 
 // ============================== per-frame updates ==============================
@@ -1369,8 +1375,8 @@ function updateFormation(dt) {
   // GOAL TIERS: +4% march per tier (hard cap 6 respected); SURGE waves +25%.
   const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.12) * (1 + deadFrac * 1.9) * (1 + tier * 0.04) * (surgeWave ? 1.25 : 1));
   formX += marchDir * marchSpeed * dt;
-  if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.6; stepThump(); }
-  else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.6; stepThump(); }
+  if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.45; stepThump(); }
+  else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.45; stepThump(); }
   formation.position.set(formX, formY, FORM_Z);
   // Gentle bob + glow pulse per invader
   for (const v of invaders) {
@@ -1405,9 +1411,11 @@ function killInvader(v) {
   spawnBurst(kx, ky, kz, v.def.color, 24, 4.6, 0.7);
   spawnShockwave(kx, ky, kz, v.def.color);
   invaderHitSound();
-  // 10% of kills drop a random weapon/upgrade pickup — the arsenal
-  // grows from play, not from a shop.
-  if (Math.random() < 0.10) spawnPickup(kx, ky, kz, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
+  // Pickup economy ("easy, but not that easy"): regular kills only rarely
+  // drop an UPGRADE (5%); WEAPONS come only from hard kills — elites and
+  // divers at 50%, the mothership always (see the mothership hit block).
+  if (v.elite || wasDiving) { if (Math.random() < 0.50) spawnPickup(kx, ky, kz, WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)]); }
+  else if (Math.random() < 0.05) spawnPickup(kx, ky, kz, UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
   markScoreDirty();
   if (aliveCount <= 0) {
     wave++;
@@ -1436,6 +1444,8 @@ function updateBolts(dt) {
         spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xffd319, 20, 4.5, 0.7);
         spawnShockwave(mother.position.x, mother.position.y, mother.position.z, 0xff2e88);
         boomSound();
+        // Mothership kill always drops one weapon pickup (hard-kill economy).
+        spawnPickup(mother.position.x, mother.position.y, mother.position.z, WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)]);
         motherActive = false; mother.visible = false;
         warbleStop();
         motherTimer = rand(25, 40);
