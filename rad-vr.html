@@ -40,6 +40,18 @@
     background:rgba(20,10,40,.7); color:#ffd9ec; border:1px solid #ff71ce; border-radius:8px;
     padding:8px 12px; font-size:13px; letter-spacing:1px;
   }
+  #todBtn {
+    position:fixed; top:52px; right:12px; z-index:20; cursor:pointer; display:none;
+    background:rgba(20,10,40,.7); color:#ffd319; border:1px solid #ffd319; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  #todRow { margin:14px 0 2px; }
+  .todOpt {
+    cursor:pointer; font-size:15px; font-weight:700; letter-spacing:1px; color:#ffeef8;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.25); border-radius:10px;
+    padding:9px 16px; margin:0 4px;
+  }
+  .todOpt.sel { background:linear-gradient(92deg,#27e8ff,#2bff88); color:#06121f; border-color:transparent; }
 </style>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -58,6 +70,12 @@
     <p class="small">NEW: neon road pickups grant <b>weapon items</b> — Turbo Boost, Horn Blast, Oil Slick — <b>hold up to 3 at once</b> (a 4th replaces the oldest) — plus <b>stacking upgrades</b> (Engine, Grip, Armor) with no cap. No lives, no game over, ever.</p>
     <p class="small">Difficulty climbs as you drive: every <b>1,500 m</b> raises the SPEED TIER (traffic +6% faster, +1 car — oncoming traffic joins at Tier 3) and every <b>5,000 points</b> triggers a 30-second RUSH with doubled bonus points.</p>
     <p class="small">XR: <b>left squeeze</b> cycles held items · <b>right squeeze</b> fires selected · Desktop: <b>B</b> boost, <b>H</b> horn, <b>O</b> oil (only if held).</p>
+    <div id="todRow">
+      <button class="todOpt" data-tod="day">☀️ DAY</button>
+      <button class="todOpt sel" data-tod="sunset">🌇 SUNSET</button>
+      <button class="todOpt" data-tod="night">🌙 NIGHT</button>
+    </div>
+    <p class="small">In game: press <b>A</b> on the right controller (or <b>T</b> on desktop) to cycle Day → Sunset → Night.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
   </div>
@@ -65,6 +83,7 @@
 
 <div id="hud">0 MPH</div>
 <button id="muteBtn">SOUND: ON</button>
+<button id="todBtn">TIME: SUNSET</button>
 
 <script type="module">
 import * as THREE from 'three';
@@ -105,7 +124,8 @@ dolly.add(shakeGroup); shakeGroup.add(heightHolder); heightHolder.add(camera);
 scene.add(dolly);
 
 // Lights (env map supplies most ambient; hemi + sun shape the rest)
-scene.add(new THREE.HemisphereLight(0xffc38a, 0x2a1544, 0.55));
+const hemiLight = new THREE.HemisphereLight(0xffc38a, 0x2a1544, 0.55);
+scene.add(hemiLight);
 const sunLight = new THREE.DirectionalLight(0xff9a5c, 1.35);
 sunLight.position.set(-60, 120, -180);
 sunLight.castShadow = true;
@@ -156,6 +176,7 @@ scene.add(sunLight.target);
 }
 
 // ============================== environment (sky, sun, mountains) ==============================
+let skyGeoRef, sunDiscRef, sunGlowRef, starsRef, mMatRef, mMat2Ref;
 const envGroup = new THREE.Group();
 scene.add(envGroup);
 {
@@ -177,6 +198,7 @@ scene.add(envGroup);
   skyGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false, toneMapped: false }));
   sky.renderOrder = -10;
+  skyGeoRef = skyGeo;
   envGroup.add(sky);
 
   // Synthwave sun: warm core + pink glow halo
@@ -187,6 +209,7 @@ scene.add(envGroup);
     new THREE.MeshBasicMaterial({ color: 0xffd319, fog: false, depthWrite: false, toneMapped: false }));
   sun.position.set(150, 165, -1375);
   envGroup.add(glow); envGroup.add(sun);
+  sunGlowRef = glow; sunDiscRef = sun;
 
   // Dusk stars: small bright points high in the dome (fog-exempt, like the neon look)
   {
@@ -211,6 +234,7 @@ scene.add(envGroup);
     }));
     stars.frustumCulled = false;
     envGroup.add(stars);
+    starsRef = stars;
   }
 
   // Silhouetted mountain ridges
@@ -221,6 +245,7 @@ scene.add(envGroup);
     [380, -1330, 460, 240], [880, -1260, 540, 310], [1300, -1180, 480, 260],
     [-1420, -700, 480, 250], [1420, -650, 500, 270], [-1450, -150, 420, 210], [1460, -100, 430, 220]
   ];
+  mMatRef = mMat; mMat2Ref = mMat2;
   ridge.forEach((r, i) => {
     const cone = new THREE.Mesh(new THREE.ConeGeometry(r[2], r[3], 6), i % 2 ? mMat : mMat2);
     cone.position.set(r[0], r[3] / 2 - 12, r[1]);
@@ -281,7 +306,7 @@ function findSegment(z) { return segments[Math.floor(z / SEG_LEN) % segments.len
 // Cross-section points (x offsets): ground, rumble, road, road, rumble, ground
 const CROSS_X = [-GROUND_W, -(ROAD_HALF + RUMBLE_W), -ROAD_HALF, ROAD_HALF, ROAD_HALF + RUMBLE_W, GROUND_W];
 const LANE_X = 4.2;                    // lane divider offset within each carriageway
-const VERTS_PER_SEG = 36;              // 12 ribbon verts + 6 marking quads x 4 verts
+const VERTS_PER_SEG = 12;              // ribbon verts only; markings live in their own unlit mesh (see below)
 const roadPos = new Float32Array(DRAW * VERTS_PER_SEG * 3);
 const roadCol = new Float32Array(DRAW * VERTS_PER_SEG * 3);
 const roadIdx = [];
@@ -290,10 +315,6 @@ for (let s = 0; s < DRAW; s++) {
   for (let p = 0; p < 5; p++) {        // 5 ribbon quads between 6 cross points
     const n0 = b + p, n1 = b + p + 1, f0 = b + 6 + p, f1 = b + 6 + p + 1;
     roadIdx.push(n0, f0, n1, n1, f0, f1);
-  }
-  for (let d = 0; d < 6; d++) {        // road markings (see MARKINGS)
-    const db = b + 12 + d * 4;
-    roadIdx.push(db, db + 2, db + 1, db + 1, db + 2, db + 3);
   }
 }
 // Realistic asphalt canvas texture: dark gray noise, tyre-worn tracks, cracks,
@@ -335,13 +356,6 @@ for (let s = 0; s < DRAW; s++) {
     roadUV[(b + p) * 2] = CROSS_U[p];         roadUV[(b + p) * 2 + 1] = 0;
     roadUV[(b + 6 + p) * 2] = CROSS_U[p];     roadUV[(b + 6 + p) * 2 + 1] = 1;
   }
-  for (let d = 0; d < 6; d++) {
-    const db = b + 12 + d * 4;
-    roadUV[db * 2] = 0.990;       roadUV[db * 2 + 1] = 0;
-    roadUV[(db + 1) * 2] = 0.996; roadUV[(db + 1) * 2 + 1] = 0;
-    roadUV[(db + 2) * 2] = 0.990; roadUV[(db + 2) * 2 + 1] = 1;
-    roadUV[(db + 3) * 2] = 0.996; roadUV[(db + 3) * 2 + 1] = 1;
-  }
 }
 const roadGeo = new THREE.BufferGeometry();
 roadGeo.setAttribute('position', new THREE.BufferAttribute(roadPos, 3).setUsage(THREE.DynamicDrawUsage));
@@ -356,6 +370,29 @@ const road = new THREE.Mesh(roadGeo, new THREE.MeshStandardMaterial({
 road.frustumCulled = false;
 road.receiveShadow = true;
 scene.add(road);
+
+// Road markings in their OWN mesh with an unlit material. Previously the marking
+// quads shared the road's MeshStandardMaterial but their normals were never set,
+// so the lit shader shaded them black — the white lines were invisible. Unlit
+// vertex colors read as white/yellow in any light, day or night.
+const MARK_VERTS = 24;   // 6 marking quads x 4 verts
+const markPos = new Float32Array(DRAW * MARK_VERTS * 3);
+const markCol = new Float32Array(DRAW * MARK_VERTS * 3);
+const markIdx = [];
+for (let s = 0; s < DRAW; s++) {
+  const b = s * MARK_VERTS;
+  for (let d = 0; d < 6; d++) {
+    const db = b + d * 4;
+    markIdx.push(db, db + 2, db + 1, db + 1, db + 2, db + 3);
+  }
+}
+const markGeo = new THREE.BufferGeometry();
+markGeo.setAttribute('position', new THREE.BufferAttribute(markPos, 3).setUsage(THREE.DynamicDrawUsage));
+markGeo.setAttribute('color', new THREE.BufferAttribute(markCol, 3).setUsage(THREE.DynamicDrawUsage));
+markGeo.setIndex(markIdx);
+const markings = new THREE.Mesh(markGeo, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide }));
+markings.frustumCulled = false;
+scene.add(markings);
 
 
 const COL = {
@@ -456,20 +493,22 @@ function updateRoad(position, playerX) {
       setCol(roadCol, b + p, stripCols[p]);
       setCol(roadCol, b + 6 + p, stripCols[p]);
     }
-    // Real US markings: solid lines always, dashed lines on even segments only
+    // Real US markings: solid lines always, dashed lines on even segments only.
+    // Written to the separate UNLIT markings mesh (0.28 wide, +0.06 above the
+    // surface) so white reads as white in any light and never z-fights.
     const showDash = (seg.index % 2 === 0);
     for (let d = 0; d < 6; d++) {
-      const db = b + 12 + d * 4;
+      const db = s * MARK_VERTS + d * 4;
       const mk = MARKINGS[d];
       if (mk.solid || showDash) {
-        setVert(roadPos, db,     near.x + mk.x - 0.09 - playerX, near.y + 0.03, near.z);
-        setVert(roadPos, db + 1, near.x + mk.x + 0.09 - playerX, near.y + 0.03, near.z);
-        setVert(roadPos, db + 2, far.x  + mk.x - 0.09 - playerX, far.y  + 0.03, far.z);
-        setVert(roadPos, db + 3, far.x  + mk.x + 0.09 - playerX, far.y  + 0.03, far.z);
+        setVert(markPos, db,     near.x + mk.x - 0.14 - playerX, near.y + 0.06, near.z);
+        setVert(markPos, db + 1, near.x + mk.x + 0.14 - playerX, near.y + 0.06, near.z);
+        setVert(markPos, db + 2, far.x  + mk.x - 0.14 - playerX, far.y  + 0.06, far.z);
+        setVert(markPos, db + 3, far.x  + mk.x + 0.14 - playerX, far.y  + 0.06, far.z);
       } else {
-        for (let k = 0; k < 4; k++) setVert(roadPos, db + k, near.x - playerX, near.y - 1, near.z);
+        for (let k = 0; k < 4; k++) setVert(markPos, db + k, near.x - playerX, near.y - 1, near.z);
       }
-      for (let k = 0; k < 4; k++) setCol(roadCol, db + k, mk.col);
+      for (let k = 0; k < 4; k++) setCol(markCol, db + k, mk.col);
     }
     // Analytic ribbon normals from the hill slope (for the PBR sheen)
     const dyS = far.y - near.y, nLen = Math.sqrt(SEG_LEN * SEG_LEN + dyS * dyS);
@@ -498,6 +537,8 @@ function updateRoad(position, playerX) {
   roadGeo.attributes.position.needsUpdate = true;
   roadGeo.attributes.color.needsUpdate = true;
   roadGeo.attributes.normal.needsUpdate = true;
+  markGeo.attributes.position.needsUpdate = true;
+  markGeo.attributes.color.needsUpdate = true;
   medGeo.attributes.position.needsUpdate = true;
   medGeo.attributes.color.needsUpdate = true;
   guardGeo.attributes.position.needsUpdate = true;
@@ -706,41 +747,69 @@ for (let i = 0; i < 24; i++) { const p = new THREE.Mesh(postGeo, postMat); p.vis
 // Facade canvases come in pairs per variant: a dim colour map + a black emissive map
 // carrying only the lit windows and the neon crown strip, so windows glow at dusk.
 function makeBuildingTextures(facade, neon) {
+  // Real city facades: concrete / brick / stone tones, window grids with frames,
+  // dark glass in the colour map, ground-floor storefronts. Lit windows live in
+  // three emissive maps (day / sunset / night) so the time-of-day switch changes
+  // the lit ratio without rebuilding textures. Neon stays as a crown-strip accent.
   const W = 128, H = 256;
   const mapCv = document.createElement('canvas'); mapCv.width = W; mapCv.height = H;
-  const emiCv = document.createElement('canvas'); emiCv.width = W; emiCv.height = H;
-  const mg = mapCv.getContext('2d'), eg = emiCv.getContext('2d');
+  const mg = mapCv.getContext('2d');
   mg.fillStyle = facade; mg.fillRect(0, 0, W, H);
-  eg.fillStyle = '#000000'; eg.fillRect(0, 0, W, H);
-  mg.fillStyle = neon; mg.fillRect(0, 0, W, 5);
-  eg.fillStyle = neon; eg.fillRect(0, 0, W, 5);
+  for (let i = 0; i < 900; i++) {  // masonry noise
+    const v = Math.random() < 0.5 ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.04)';
+    mg.fillStyle = v; mg.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+  }
+  mg.fillStyle = 'rgba(0,0,0,0.18)';                       // floor slab lines
+  for (let r = 0; r <= 16; r++) mg.fillRect(0, 14 + r * 14, W, 1);
+  mg.fillStyle = 'rgba(0,0,0,0.30)';                       // darker ground floor
+  mg.fillRect(0, H - 26, W, 26);
+  mg.fillStyle = '#1c2733';                                // storefront glass
+  mg.fillRect(10, H - 22, 42, 16); mg.fillRect(66, H - 22, 42, 16);
+  mg.fillStyle = 'rgba(255,255,255,0.25)';
+  mg.fillRect(10, H - 22, 42, 2); mg.fillRect(66, H - 22, 42, 2);
+  const glassTones = ['#1a2436', '#232f45', '#2c3a52', '#1e2c40'];
   for (let r = 0; r < 16; r++) {
     for (let c = 0; c < 6; c++) {
-      const x = 9 + c * 19, y = 16 + r * 14, lit = Math.random();
-      if (lit < 0.42) continue;                       // dark window
-      const warm = Math.random() < 0.68;
-      const col = warm ? '#ffc46b' : '#a8dcff';
-      mg.fillStyle = col; mg.fillRect(x, y, 10, 8);
-      eg.fillStyle = col; eg.fillRect(x, y, 10, 8);
+      const x = 9 + c * 19, y = 16 + r * 14;
+      mg.fillStyle = '#0d0f14'; mg.fillRect(x - 1, y - 1, 12, 10);   // frame
+      mg.fillStyle = glassTones[(r * 6 + c) % glassTones.length];
+      mg.fillRect(x, y, 10, 8);
+      mg.fillStyle = 'rgba(255,255,255,0.12)'; mg.fillRect(x, y, 10, 2);
     }
   }
+  function emissiveMap(litRatio) {
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#000000'; g.fillRect(0, 0, W, H);
+    g.fillStyle = neon; g.fillRect(0, 0, W, 5);             // neon crown strip
+    for (let r = 0; r < 16; r++) {
+      for (let c = 0; c < 6; c++) {
+        if (Math.random() > litRatio) continue;
+        const warm = Math.random() < 0.68;
+        g.fillStyle = warm ? '#ffc46b' : '#a8dcff';
+        g.fillRect(9 + c * 19, 16 + r * 14, 10, 8);
+      }
+    }
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
   const map = new THREE.CanvasTexture(mapCv); map.colorSpace = THREE.SRGBColorSpace;
-  const emi = new THREE.CanvasTexture(emiCv); emi.colorSpace = THREE.SRGBColorSpace;
-  return { map, emi };
+  return { map, emiDay: emissiveMap(0.08), emiSunset: emissiveMap(0.45), emiNight: emissiveMap(0.70) };
 }
 const BLDG_CAP = 48;                       // instances per variant
 const bldgMeshes = [];
+const bldgMats = [];                         // { mat, emiDay, emiSunset, emiNight } per variant
 const bldgCount = [0, 0, 0];
 {
   const variants = [
-    makeBuildingTextures('#141824', '#19e3ff'),
-    makeBuildingTextures('#18141f', '#ff2e88'),
-    makeBuildingTextures('#101a1c', '#ff9a3d')
+    makeBuildingTextures('#9a958c', '#19e3ff'),   // concrete
+    makeBuildingTextures('#8a5a44', '#ff2e88'),   // brick
+    makeBuildingTextures('#7d7f85', '#ff9a3d')    // stone
   ];
   const bGeo = new THREE.BoxGeometry(1, 1, 1);
   variants.forEach(v => {
     const mat = new THREE.MeshStandardMaterial({
-      map: v.map, emissiveMap: v.emi, emissive: 0xffffff, emissiveIntensity: 1.15,
+      map: v.map, emissiveMap: v.emiSunset, emissive: 0xffffff, emissiveIntensity: 1.15,
       roughness: 0.9, metalness: 0.0, envMapIntensity: 0.3
     });
     const im = new THREE.InstancedMesh(bGeo, mat, BLDG_CAP);
@@ -749,8 +818,34 @@ const bldgCount = [0, 0, 0];
     im.count = 0;
     scene.add(im);
     bldgMeshes.push(im);
+    bldgMats.push({ mat, emiDay: v.emiDay, emiSunset: v.emiSunset, emiNight: v.emiNight });
   });
 }
+// Rooftop dressing: penthouse/setback boxes, water towers, antennas — pooled
+// instanced meshes placed with the buildings so towers read as real city roofs.
+const roofMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 0.9, metalness: 0.1 }), 144);
+roofMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+roofMesh.frustumCulled = false; roofMesh.count = 0; scene.add(roofMesh);
+const towerGeo = mergeParts([
+  { geo: new THREE.CylinderGeometry(1.15, 1.15, 2.4, 10), matrix: m4(0, 3.4, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x7a4a3a) },
+  { geo: new THREE.ConeGeometry(1.3, 0.9, 10),            matrix: m4(0, 5.05, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x4a3228) },
+  { geo: new THREE.CylinderGeometry(0.09, 0.09, 2.4, 5),  matrix: m4(-0.85, 1.2, -0.85, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x1c1c26) },
+  { geo: new THREE.CylinderGeometry(0.09, 0.09, 2.4, 5),  matrix: m4(0.85, 1.2, -0.85, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x1c1c26) },
+  { geo: new THREE.CylinderGeometry(0.09, 0.09, 2.4, 5),  matrix: m4(-0.85, 1.2, 0.85, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x1c1c26) },
+  { geo: new THREE.CylinderGeometry(0.09, 0.09, 2.4, 5),  matrix: m4(0.85, 1.2, 0.85, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x1c1c26) }
+]);
+const towerMesh = new THREE.InstancedMesh(towerGeo, new THREE.MeshLambertMaterial({ vertexColors: true }), 32);
+towerMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+towerMesh.frustumCulled = false; towerMesh.count = 0; scene.add(towerMesh);
+const antGeo = mergeParts([
+  { geo: new THREE.CylinderGeometry(0.05, 0.07, 1, 5), matrix: m4(0, 0.5, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x22222e) },
+  { geo: new THREE.BoxGeometry(0.9, 0.05, 0.05),        matrix: m4(0, 0.92, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x22222e) }
+]);
+const antMesh = new THREE.InstancedMesh(antGeo, new THREE.MeshLambertMaterial({ vertexColors: true }), 48);
+antMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+antMesh.frustumCulled = false; antMesh.count = 0; scene.add(antMesh);
+let roofCount = 0, antCount = 0, towCount = 0;
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(),
       tmpV = new THREE.Vector3(), tmpS = new THREE.Vector3();
 function hash1(n) { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); }
@@ -792,6 +887,7 @@ for (let i = 0; i < 4; i++) {
 function updateProps(playerX) {
   let pi = 0, pa = 0, gi = 0, mi = 0, si = 0, pn = 0, mk = 0;
   bldgCount[0] = bldgCount[1] = bldgCount[2] = 0;
+  roofCount = 0; antCount = 0; towCount = 0;
   for (let s = 0; s < DRAW; s++) {
     const seg = segments[(baseSegment.index + s) % segments.length];
     const pose = slotPose[s];
@@ -799,7 +895,7 @@ function updateProps(playerX) {
       const p = pylons[pi];
       const gl = pylonGlows[pi];
       pi++;
-      p.visible = true; gl.visible = true;
+      p.visible = true; gl.visible = streetlightsOn;
       const px = pose.x + seg.side * (ROAD_HALF + RUMBLE_W + 1.6) - playerX;
       p.position.set(px, pose.y, pose.z);
       p.rotation.y = seg.side > 0 ? 0 : Math.PI;
@@ -833,19 +929,41 @@ function updateProps(playerX) {
       p.position.set(pose.x + seg.side * (ROAD_HALF + RUMBLE_W + 2.6 + (seg.index % 4)) - playerX, pose.y, pose.z);
       p.rotation.y = (seg.index * 0.7) % Math.PI;
     }
-    // Buildings on both sides (instanced, variant rotates by segment)
+    // Buildings on both sides (instanced, variant rotates by segment) with
+    // varied footprints, tiered penthouse tops, and occasional roof dressing.
     if (seg.bldg) {
       const vi = (seg.index >> 1) % 3;
       for (let sd = -1; sd <= 1; sd += 2) {
         if (bldgCount[vi] >= BLDG_CAP) break;
         const h1 = hash1(seg.index * 2 + (sd > 0 ? 1 : 0));
         const h2 = hash1(seg.index * 5 + (sd > 0 ? 7 : 3));
-        const w = 7 + h1 * 4, ht = 13 + h2 * 25;
-        tmpV.set(pose.x + sd * (ROAD_HALF + RUMBLE_W + 3.2 + w / 2 + h1 * 2.5) - playerX,
-                 pose.y + ht / 2 - 0.3, pose.z - SEG_LEN / 2);
-        tmpS.set(w, ht, 8);
+        const w = 7 + h1 * 4, ht = 13 + h2 * 25, dep = 6 + h1 * 4;
+        const bx = pose.x + sd * (ROAD_HALF + RUMBLE_W + 3.2 + w / 2 + h1 * 2.5) - playerX;
+        const bz = pose.z - SEG_LEN / 2, topY = pose.y + ht - 0.3;
+        tmpV.set(bx, pose.y + ht / 2 - 0.3, bz);
+        tmpS.set(w, ht, dep);
         tmpM.compose(tmpV, tmpQ, tmpS);
         bldgMeshes[vi].setMatrixAt(bldgCount[vi]++, tmpM);
+        if (roofCount < 144) {  // tiered penthouse / setback box on the roof
+          const rh = 1.5 + h1 * 1.5;
+          tmpV.set(bx, topY + rh / 2, bz);
+          tmpS.set(w * 0.55, rh, dep * 0.55);
+          tmpM.compose(tmpV, tmpQ, tmpS);
+          roofMesh.setMatrixAt(roofCount++, tmpM);
+        }
+        if (h2 > 0.72 && antCount < 48) {  // antenna mast on a roof corner
+          const ah = 4 + h1 * 3;
+          tmpV.set(bx + w * 0.3, topY, bz - dep * 0.3);
+          tmpS.set(1, ah, 1);
+          tmpM.compose(tmpV, tmpQ, tmpS);
+          antMesh.setMatrixAt(antCount++, tmpM);
+        }
+        if (h1 > 0.82 && towCount < 32) {  // rooftop water tower
+          tmpV.set(bx - w * 0.25, topY, bz + dep * 0.25);
+          tmpS.set(1.4, 1.4, 1.4);
+          tmpM.compose(tmpV, tmpQ, tmpS);
+          towerMesh.setMatrixAt(towCount++, tmpM);
+        }
       }
     }
     // Gantry sign spanning the road
@@ -875,6 +993,9 @@ function updateProps(playerX) {
     bldgMeshes[v].count = bldgCount[v];
     bldgMeshes[v].instanceMatrix.needsUpdate = true;
   }
+  roofMesh.count = roofCount; roofMesh.instanceMatrix.needsUpdate = true;
+  antMesh.count = antCount; antMesh.instanceMatrix.needsUpdate = true;
+  towerMesh.count = towCount; towerMesh.instanceMatrix.needsUpdate = true;
 }
 
 // ============================== traffic ==============================
@@ -1542,14 +1663,14 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
 const DEAD = 0.12;
-let prevSqL = false, prevSqR = false;
+let prevSqL = false, prevSqR = false, prevTodR = false;
 function pollXRInput() {
   // Reads the live XR session's input sources directly. Quest controller mapping:
   // thumbstick = axes[2] (X) / axes[3] (Y), trigger = buttons[0], squeeze = buttons[1].
-  let steer = 0, gas = 0, brake = 0, fire = false, cycle = false;
-  if (!renderer.xr.isPresenting) return { steer, gas, brake, fire, cycle };
+  let steer = 0, gas = 0, brake = 0, fire = false, cycle = false, tod = false;
+  if (!renderer.xr.isPresenting) return { steer, gas, brake, fire, cycle, tod };
   const session = renderer.xr.getSession();
-  if (!session) return { steer, gas, brake, fire, cycle };
+  if (!session) return { steer, gas, brake, fire, cycle, tod };
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
@@ -1564,10 +1685,16 @@ function pollXRInput() {
     const sq = (gp.buttons && gp.buttons[1]) ? (gp.buttons[1].pressed || gp.buttons[1].value > 0.5) : false;
     if (src.handedness === 'left') { if (sq && !prevSqL) cycle = true; prevSqL = sq; }
     else { if (sq && !prevSqR) fire = true; prevSqR = sq; }
+    // A button (right controller) cycles Day -> Sunset -> Night (rising edge)
+    if (src.handedness === 'right') {
+      const ab = (gp.buttons && gp.buttons[4]) ? (gp.buttons[4].pressed || gp.buttons[4].value > 0.5) : false;
+      if (ab && !prevTodR) tod = true;
+      prevTodR = ab;
+    }
   }
-  return { steer, gas, brake, fire, cycle };
+  return { steer, gas, brake, fire, cycle, tod };
 }
-let prevKeyB = false, prevKeyH = false, prevKeyO = false;
+let prevKeyB = false, prevKeyH = false, prevKeyO = false, prevKeyT = false;
 function readInputs() {
   const xr = pollXRInput();
   let keySteer = 0;
@@ -1579,14 +1706,16 @@ function readInputs() {
   if (keys['KeyB'] && !prevKeyB) keyFire = 0;
   if (keys['KeyH'] && !prevKeyH) keyFire = 1;
   if (keys['KeyO'] && !prevKeyO) keyFire = 2;
-  prevKeyB = !!keys['KeyB']; prevKeyH = !!keys['KeyH']; prevKeyO = !!keys['KeyO'];
+  const keyTod = keys['KeyT'] && !prevKeyT;
+  prevKeyB = !!keys['KeyB']; prevKeyH = !!keys['KeyH']; prevKeyO = !!keys['KeyO']; prevKeyT = !!keys['KeyT'];
   return {
     steer: clamp(keySteer + xr.steer, -1, 1),
     gas: Math.max(keyGas, xr.gas),
     brake: Math.max(keyBrake, xr.brake),
     fire: xr.fire || keyFire >= 0,
     fireSel: keyFire >= 0 ? keyFire : -1,
-    cycle: xr.cycle
+    cycle: xr.cycle,
+    tod: xr.tod || keyTod
   };
 }
 
@@ -1598,8 +1727,11 @@ const hud = document.getElementById('hud');
 let xrSupported = false;
 
 function setStatus(msg) { statusEl.textContent = msg; }
-function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
-function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+const todBtn = document.getElementById('todBtn');
+function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; todBtn.style.display = 'block'; }
+function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; todBtn.style.display = 'none'; }
+document.querySelectorAll('.todOpt').forEach(el => el.addEventListener('click', () => setTimeOfDay(el.dataset.tod)));
+todBtn.addEventListener('click', () => cycleTimeOfDay());
 
 if (navigator.xr && navigator.xr.isSessionSupported) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
@@ -1734,12 +1866,14 @@ function updateStreaks(dt, sp) {
 
 // Headlights: one real spotlight (no shadows) + a soft light pool on the road ahead
 // Headlight beams: visible additive cones at dusk (fake volumetrics, cheap)
+const headlightBeams = [];
 [-1, 1].forEach(sd => {
   const beam = new THREE.Mesh(new THREE.ConeGeometry(1.35, 9, 20, 1, true),
     new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false }));
   beam.rotation.x = -Math.PI / 2 - 0.06;
   beam.position.set(sd * 0.35, -0.62, -5.0);
   cockpit.add(beam);
+  headlightBeams.push(beam);
 });
 
 // Wind speed particles: tiny cyan motes streaming past at speed (dolly-attached,
@@ -1788,6 +1922,76 @@ poolLight.rotation.x = -Math.PI / 2;
 poolLight.renderOrder = 3;
 scene.add(poolLight);
 
+
+// ============================== time of day: Day / Sunset / Night ==============
+let todMode = 'sunset';            // default = the current dusk look
+let streetlightsOn = true;         // streetlight glows (updateProps reads this)
+let sunOff = { x: -40, y: 90, z: -90 };
+const TOD_ORDER = ['day', 'sunset', 'night'];
+function paintSky(top, mid, low, hor) {
+  const pos = skyGeoRef.attributes.position;
+  const colors = skyGeoRef.attributes.color.array;
+  const c = new THREE.Color(), tC = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = clamp(pos.getY(i) / 1500, -1, 1);
+    if (t < 0) c.copy(hor).lerp(tC.set(0x30133f), clamp(-t * 2.2, 0, 1));
+    else if (t < 0.18) c.copy(hor).lerp(low, t / 0.18);
+    else if (t < 0.5) c.copy(low).lerp(mid, (t - 0.18) / 0.32);
+    else c.copy(mid).lerp(top, (t - 0.5) / 0.5);
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  skyGeoRef.attributes.color.needsUpdate = true;
+}
+const TOD = {
+  day: {
+    sky: [0x2f6fd0, 0x6fa8e0, 0xa8d0f0, 0xd8ecf8], fog: [0x9fc8e8, 90, 1200],
+    hemi: [0xbfd9ff, 0x5a6b52, 0.9], sun: [0xfff1d6, 2.2], sunOff: [-30, 170, -60],
+    stars: 0, mtn: [0x5a6b8a, 0x6b7d99], disc: [0xfff6c8, -150, 800, -1100, 1, 0],
+    glow: [0xfff6c8, 0], head: [false, 90, 0, 0.0], street: false, emi: ['emiDay', 0.6], expo: 1.05
+  },
+  sunset: {
+    sky: [0x1b1035, 0x7b2d8b, 0xe84a73, 0xff9e4f], fog: [0x54224e, 55, 720],
+    hemi: [0xffc38a, 0x2a1544, 0.55], sun: [0xff9a5c, 1.35], sunOff: [-40, 90, -90],
+    stars: 0.45, mtn: [0x2a1544, 0x3a1c55], disc: [0xffd319, 150, 165, -1375, 1, 0.30],
+    glow: [0xff2975, 0.30], head: [true, 90, 0.07, 0.5], street: true, emi: ['emiSunset', 1.15], expo: 1.12
+  },
+  night: {
+    sky: [0x01010a, 0x0a0a28, 0x141438, 0x232350], fog: [0x04040c, 40, 520],
+    hemi: [0x33456e, 0x0a0a18, 0.4], sun: [0x8fa8e8, 0.5], sunOff: [70, 150, -130],
+    stars: 0.95, mtn: [0x080818, 0x101024], disc: [0xdfe8ff, 300, 700, -1200, 0.55, 0.12],
+    glow: [0x8fa8ff, 0.12], head: [true, 150, 0.15, 0.7], street: true, emi: ['emiNight', 1.5], expo: 0.95
+  }
+};
+function setTimeOfDay(mode) {
+  todMode = mode;
+  const t = TOD[mode];
+  const [top, mid, low, hor] = t.sky.map(c => new THREE.Color(c));
+  paintSky(top, mid, low, hor);
+  scene.fog.color.set(t.fog[0]); scene.fog.near = t.fog[1]; scene.fog.far = t.fog[2];
+  hemiLight.color.set(t.hemi[0]); hemiLight.groundColor.set(t.hemi[1]); hemiLight.intensity = t.hemi[2];
+  sunLight.color.set(t.sun[0]); sunLight.intensity = t.sun[1];
+  sunOff = { x: t.sunOff[0], y: t.sunOff[1], z: t.sunOff[2] };
+  starsRef.material.opacity = t.stars;
+  mMatRef.color.set(t.mtn[0]); mMat2Ref.color.set(t.mtn[1]);
+  sunDiscRef.material.color.set(t.disc[0]);
+  sunDiscRef.position.set(t.disc[1], t.disc[2], t.disc[3]);
+  sunDiscRef.scale.setScalar(t.disc[4]);
+  sunGlowRef.material.color.set(t.glow[0]); sunGlowRef.material.opacity = t.glow[1];
+  sunGlowRef.position.set(t.disc[1], t.disc[2], t.disc[3] - 5);
+  headlight.visible = t.head[0]; headlight.intensity = t.head[1];
+  headlightBeams.forEach(b => { b.visible = t.head[0]; b.material.opacity = t.head[2]; });
+  poolLight.material.opacity = t.head[3];
+  streetlightsOn = t.street;
+  bldgMats.forEach(b => { b.mat.emissiveMap = b[t.emi[0]]; b.mat.emissiveIntensity = t.emi[1]; b.mat.needsUpdate = true; });
+  renderer.toneMappingExposure = t.expo;
+  document.querySelectorAll('.todOpt').forEach(el => el.classList.toggle('sel', el.dataset.tod === mode));
+  const tb = document.getElementById('todBtn');
+  if (tb) tb.textContent = 'TIME: ' + mode.toUpperCase();
+}
+function cycleTimeOfDay() {
+  setTimeOfDay(TOD_ORDER[(TOD_ORDER.indexOf(todMode) + 1) % TOD_ORDER.length]);
+}
+
 // ============================== main loop ==============================
 const clock = new THREE.Clock();
 let dashTimer = 0, hudMph = -1;
@@ -1800,6 +2004,7 @@ function tick() {
   avgFrameMs = avgFrameMs * 0.95 + ft * 0.05;
   if (avgFrameMs > 22) perfHold = true; else if (avgFrameMs < 17) perfHold = false;
   const input = readInputs();
+  if (input.tod) cycleTimeOfDay();
   if (input.cycle && heldItems.length) selectedWeapon = (selectedWeapon + 1) % heldItems.length;
   if (input.fire) {
     if (input.fireSel >= 0) {
@@ -1881,7 +2086,7 @@ function tick() {
   const pNext = segments[(pSeg.index + 1) % segments.length];
   const roadY = lerp(pSeg.y, pNext.y, basePercent);
   dolly.position.y = roadY;
-  sunLight.position.set(-40, roadY + 90, -90);
+  sunLight.position.set(sunOff.x, roadY + sunOff.y, sunOff.z);
   sunLight.target.position.set(0, roadY, 0);
   sunLight.target.updateMatrixWorld();
   dolly.rotation.y = -steerSmooth * 0.03 - playerX * 0.002;
