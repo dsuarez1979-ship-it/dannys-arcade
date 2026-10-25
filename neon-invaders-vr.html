@@ -609,7 +609,7 @@ const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
       const lx = (col - (COLS - 1) / 2) * DX, ly = -row * DY;
       grp.position.set(lx, ly, 0);
       formation.add(grp);
-      invaders.push({ grp, core, row, col, lx, ly, alive: true, phase: Math.random() * Math.PI * 2, def, elite: false, hp: 1, points: def.points });
+      invaders.push({ grp, core, row, col, lx, ly, alive: true, phase: Math.random() * Math.PI * 2, def, elite: false, hp: 1, points: def.points, diving: false, diveT: 0, diveDur: 0, diveX0: 0, diveY0: 0, diveX1: 0, diveY1: 0 });
     }
   });
 }
@@ -652,7 +652,7 @@ function updateInvaderDetails() {
   for (let i = 0; i < invaders.length; i++) {
     const v = invaders[i];
     const gx = v.grp.position.x, gy = v.grp.position.y;
-    if (!v.alive) {
+    if (!v.alive || v.diving) {
       detailDummy.position.set(0, -999, 0);
       detailDummy.scale.setScalar(ZERO_SCALE);
       detailDummy.updateMatrix();
@@ -872,11 +872,12 @@ function fireBeam() {
   for (const v of invaders) {
     if (kills >= maxKills || wave !== w0) break;
     if (!v.alive) continue;
-    tmpA.set(formX + v.lx - muzzlePos.x, formY + v.grp.position.y - muzzlePos.y, FORM_Z - muzzlePos.z);
+    const wx = v.diving ? v.grp.position.x : formX + v.lx, wy = v.diving ? v.grp.position.y : formY + v.grp.position.y, wz = v.diving ? v.grp.position.z : FORM_Z;
+    tmpA.set(wx - muzzlePos.x, wy - muzzlePos.y, wz - muzzlePos.z);
     let t = segLenSq > 0 ? (tmpA.x * tmpB.x + tmpA.y * tmpB.y + tmpA.z * tmpB.z) / segLenSq : 0;
     t = clamp(t, 0, 1);
     const cx = muzzlePos.x + tmpB.x * t, cy = muzzlePos.y + tmpB.y * t, cz = muzzlePos.z + tmpB.z * t;
-    const dx = formX + v.lx - cx, dy = formY + v.grp.position.y - cy, dz = FORM_Z - cz;
+    const dx = wx - cx, dy = wy - cy, dz = wz - cz;
     if (dx * dx + dy * dy + dz * dz < 0.56) { killInvader(v); kills++; }
   }
 }
@@ -929,8 +930,13 @@ function explodeOrb(x, y, z) {
   for (const v of invaders) {
     if (wave !== w0) break;
     if (!v.alive) continue;
-    const dx = formX + v.lx - x, dy = formY + v.grp.position.y - y;
-    if (dx * dx + dy * dy < R2) killInvader(v);
+    if (v.diving) {
+      const dx = v.grp.position.x - x, dy = v.grp.position.y - y, dz = v.grp.position.z - z;
+      if (dx * dx + dy * dy + dz * dz < R2) killInvader(v);
+    } else {
+      const dx = formX + v.lx - x, dy = formY + v.grp.position.y - y;
+      if (dx * dx + dy * dy < R2) killInvader(v);
+    }
   }
   for (const mb of bombs) {
     if (!mb.active) continue;
@@ -1062,11 +1068,11 @@ let bombTimer = 1.2;
 function dropBomb() {
   // Pick a random column that still has invaders; the lowest one drops
   const colsAlive = [];
-  for (let c = 0; c < COLS; c++) if (invaders.some(v => v.alive && v.col === c)) colsAlive.push(c);
+  for (let c = 0; c < COLS; c++) if (invaders.some(v => v.alive && !v.diving && v.col === c)) colsAlive.push(c);
   if (!colsAlive.length) return;
   const col = colsAlive[Math.floor(Math.random() * colsAlive.length)];
   let lowest = null;
-  for (const v of invaders) if (v.alive && v.col === col && (!lowest || v.row > lowest.row)) lowest = v;
+  for (const v of invaders) if (v.alive && !v.diving && v.col === col && (!lowest || v.row > lowest.row)) lowest = v;
   if (!lowest) return;
   for (const b of bombs) {
     if (b.active) continue;
@@ -1279,6 +1285,13 @@ function resetFormation(fullRestore) {
     for (const v of invaders) { v.alive = true; v.grp.visible = true; v.elite = false; v.hp = 1; v.points = v.def.points; }
     aliveCount = COLS * ROWS;
   }
+  // Divers live in world space (children of scene); put every invader back
+  // into formation-local space so the next wave marches correctly.
+  for (const v of invaders) {
+    if (v.diving || v.grp.parent !== formation) { formation.add(v.grp); v.grp.position.set(v.lx, v.ly, 0); v.grp.rotation.set(0, 0, 0); }
+    v.diving = false;
+  }
+  divers.length = 0;
   formX = 0; marchDir = 1;
   formY = Math.max(FORM_TOP_Y - (wave - 1) * 0.3, 7.4);
   formation.position.set(formX, formY, FORM_Z);
@@ -1289,6 +1302,7 @@ function resetFormation(fullRestore) {
 function startWave() {
   surgeWave = (wave % 5 === 0);
   resetFormation(true);
+  diverTimer = rand(18, 26); // grace before the first dive of the wave
   resetShields();
   markScoreDirty();
   if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster march, double bombs!', 2.2);
@@ -1360,7 +1374,7 @@ function updateFormation(dt) {
   formation.position.set(formX, formY, FORM_Z);
   // Gentle bob + glow pulse per invader
   for (const v of invaders) {
-    if (!v.alive) continue;
+    if (!v.alive || v.diving) continue;
     v.grp.position.y = v.ly + Math.sin(elapsed * 2.1 + v.phase + v.col * 0.35) * 0.05;
     const s = (1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18) * (v.elite ? 1.4 : 1);
     v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
@@ -1371,22 +1385,29 @@ function updateFormation(dt) {
   if (formY - (ROWS - 1) * DY <= DEFENSE_Y) formationLanded();
 }
 function killInvader(v) {
+  // Divers live in world space; formation members in formation space.
+  const kx = v.diving ? v.grp.position.x : formX + v.lx;
+  const ky = v.diving ? v.grp.position.y : formY + v.grp.position.y;
+  const kz = v.diving ? v.grp.position.z : FORM_Z;
   if (v.elite && v.hp > 1) { // elite absorbs the first hit — brighter core, 2 HP
     v.hp--;
-    spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 10, 3.5, 0.4);
+    spawnBurst(kx, ky, kz, v.def.color, 10, 3.5, 0.4);
     invaderHitSound();
     markScoreDirty();
     return;
   }
+  const wasDiving = v.diving;
+  if (wasDiving) { v.diving = false; const di = divers.indexOf(v); if (di >= 0) divers.splice(di, 1); }
   v.alive = false; v.grp.visible = false;
   aliveCount--;
   addScore(v.points);
-  spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 24, 4.6, 0.7);
-  spawnShockwave(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color);
+  if (wasDiving) { addScore(DIVER_BONUS); showAnnouncement('DIVER DOWN!', '+' + DIVER_BONUS + ' bonus', 1.4); }
+  spawnBurst(kx, ky, kz, v.def.color, 24, 4.6, 0.7);
+  spawnShockwave(kx, ky, kz, v.def.color);
   invaderHitSound();
   // 10% of kills drop a random weapon/upgrade pickup — the arsenal
   // grows from play, not from a shop.
-  if (Math.random() < 0.10) spawnPickup(formX + v.lx, formY + v.grp.position.y, FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
+  if (Math.random() < 0.10) spawnPickup(kx, ky, kz, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
   markScoreDirty();
   if (aliveCount <= 0) {
     wave++;
@@ -1422,12 +1443,29 @@ function updateBolts(dt) {
         showAnnouncement('BONUS +' + bonus, 'Mothership down!', 1.5);
         b.active = false; break boltStep;
       }
+      // Divers (world-space box test — they fly in z, so the formation-plane
+      // test below can never hit them). The divers list is capped at 2, so
+      // this scan stays cheap even with a full volley in flight. The z
+      // half-depth (1.2) exceeds one frame of bolt travel at the 0.05s dt
+      // cap, so fast bolts cannot tunnel through a diver between frames.
+      for (let di = divers.length - 1; di >= 0; di--) {
+        const v = divers[di];
+        if (!v.alive) continue;
+        const dp = v.grp.position;
+        if (Math.abs(p.x - dp.x) < 0.7 && Math.abs(p.y - dp.y) < 0.65 && Math.abs(p.z - dp.z) < 1.2) {
+          killInvader(v);
+          if (b.pierce > 0) b.pierce--;
+          else b.active = false;
+          break;
+        }
+      }
+      if (!b.active) break boltStep;
       // Invaders (box test in formation space). Cannon Power = pierce: the bolt
       // keeps flying through up to `pierce` invaders instead of dying on one.
       const fx = p.x - formX, fy = p.y - formY;
       if (Math.abs(p.z - FORM_Z) < 0.75) {
         for (const v of invaders) {
-          if (!v.alive) continue;
+          if (!v.alive || v.diving) continue;
           if (Math.abs(fx - v.lx) < 0.6 && Math.abs(fy - v.grp.position.y) < 0.55) {
             killInvader(v);
             if (b.pierce > 0) b.pierce--;
@@ -1474,12 +1512,13 @@ function updateMissiles(dt) {
     let best = null, bestD2 = Infinity;
     for (const v of invaders) {
       if (!v.alive) continue;
-      const dx = formX + v.lx - m.grp.position.x, dy = formY + v.grp.position.y - m.grp.position.y, dz = FORM_Z - m.grp.position.z;
+      const wx = v.diving ? v.grp.position.x : formX + v.lx, wy = v.diving ? v.grp.position.y : formY + v.grp.position.y, wz = v.diving ? v.grp.position.z : FORM_Z;
+      const dx = wx - m.grp.position.x, dy = wy - m.grp.position.y, dz = wz - m.grp.position.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 < bestD2) { bestD2 = d2; best = v; }
     }
     if (best) {
-      tmpA.set(formX + best.lx - m.grp.position.x, formY + best.grp.position.y - m.grp.position.y, FORM_Z - m.grp.position.z).normalize();
+      tmpA.set((best.diving ? best.grp.position.x : formX + best.lx) - m.grp.position.x, (best.diving ? best.grp.position.y : formY + best.grp.position.y) - m.grp.position.y, (best.diving ? best.grp.position.z : FORM_Z) - m.grp.position.z).normalize();
       const k = 1 - Math.exp(-5 * dt);
       m.vx += (tmpA.x * 26 - m.vx) * k;
       m.vy += (tmpA.y * 26 - m.vy) * k;
@@ -1517,8 +1556,13 @@ function updateOrbs(dt) {
     else {
       for (const v of invaders) {
         if (!v.alive) continue;
-        const dx = formX + v.lx - p.x, dy = formY + v.grp.position.y - p.y;
-        if (dx * dx + dy * dy < 1.0) { boom = true; break; }
+        if (v.diving) {
+          const dx = v.grp.position.x - p.x, dy = v.grp.position.y - p.y, dz = v.grp.position.z - p.z;
+          if (dx * dx + dy * dy + dz * dz < 1.0) { boom = true; break; }
+        } else {
+          const dx = formX + v.lx - p.x, dy = formY + v.grp.position.y - p.y;
+          if (dx * dx + dy * dy < 1.0) { boom = true; break; }
+        }
       }
     }
     if (boom) {
@@ -1578,6 +1622,75 @@ function updateMother(dt) {
     motherActive = false; mother.visible = false;
     warbleStop();
     motherTimer = rand(25, 40);
+  }
+}
+
+// ============================== dive-attack invaders ==============================
+// The formation keeps marching side to side exactly as before. On top of that,
+// one living invader occasionally breaks away and swoops toward the rail.
+// Divers reuse the existing invader pool — no new entities, no new geometry:
+// the diver's group is reparented from `formation` to `scene` so it can travel
+// in z, and put back by resetFormation. Its instanced eyes/canopy/ring details
+// are hidden while diving (they live in formation space); the body, core and
+// glow sprite travel with the group, and the glow is boosted so divers read
+// clearly. A diver that reaches the rail counts exactly like a bomb hit:
+// a shield layer absorbs it, otherwise one ship-lost stat — never a game over.
+const divers = []; // invaders currently diving (cap 2)
+let diverTimer = rand(18, 26);
+const DIVER_BONUS = 50;
+function maxDivers() { return (wave >= 4 || tier >= 3) ? 2 : 1; }
+function nextDiverInterval() { return Math.max(9, rand(18, 28) - wave * 1.0 - tier * 0.8); }
+function diverSound() { blip(880, 240, 0.5, 'sawtooth', 0.16); blip(1320, 330, 0.4, 'square', 0.08); }
+function startDiver() {
+  const candidates = [];
+  for (const v of invaders) if (v.alive && !v.diving) candidates.push(v);
+  if (!candidates.length) return;
+  const v = candidates[Math.floor(Math.random() * candidates.length)];
+  // World position right now, before leaving formation space.
+  const wx = formX + v.lx, wy = formY + v.grp.position.y;
+  scene.add(v.grp);
+  v.grp.position.set(wx, wy, FORM_Z);
+  v.grp.rotation.set(0, 0, 0);
+  v.diving = true; v.diveT = 0;
+  v.diveDur = Math.max(3.4, 5.0 - wave * 0.12 - tier * 0.08);
+  v.diveX0 = wx; v.diveY0 = wy;
+  v.diveX1 = clamp(cannonX + rand(-0.8, 0.8), RAIL_MIN, RAIL_MAX); v.diveY1 = 1.9;
+  // Brighter than formation invaders: oversized glow (pulsed per frame below).
+  v.grp.children[v.grp.children.length - 1].scale.set(2.8, 2.8, 1);
+  divers.push(v);
+  diverSound();
+  showAnnouncement('DIVER INBOUND!', 'It broke from the formation — shoot it down!', 1.4);
+}
+function updateDivers(dt) {
+  if (divers.length < maxDivers()) {
+    diverTimer -= dt;
+    if (diverTimer <= 0) { startDiver(); diverTimer = nextDiverInterval(); }
+  }
+  const w0 = wave;
+  for (let i = divers.length - 1; i >= 0; i--) {
+    const v = divers[i];
+    if (!v.alive) { divers.splice(i, 1); continue; }
+    v.diveT += dt;
+    const t = Math.min(v.diveT / v.diveDur, 1);
+    const ease = t * t * (3 - 2 * t);
+    const sway = Math.sin(t * Math.PI * 2 + v.phase) * (1 - t) * 1.2;
+    v.grp.position.x = v.diveX0 + (v.diveX1 - v.diveX0) * ease + sway;
+    v.grp.position.y = v.diveY0 + (v.diveY1 - v.diveY0) * ease + Math.sin(t * Math.PI) * 1.2;
+    v.grp.position.z = FORM_Z + (RAIL_Z - FORM_Z) * ease;
+    v.grp.rotation.z = Math.cos(t * Math.PI * 2 + v.phase) * 0.4;
+    const gs = 2.6 + Math.sin(elapsed * 10 + v.phase) * 0.5;
+    v.grp.children[v.grp.children.length - 1].scale.set(gs, gs, 1);
+    if (t >= 1) {
+      // Reached the rail: exactly like a bomb hit — shield absorbs, else a
+      // ship-lost stat. Never a game over.
+      divers.splice(i, 1);
+      v.diving = false; v.alive = false; v.grp.visible = false;
+      aliveCount--;
+      spawnBurst(v.grp.position.x, 1.4, RAIL_Z, 0xff5533, 24, 5, 0.7);
+      playerHit();
+      if (aliveCount <= 0) { wave++; startWave(); }
+      if (wave !== w0) break;
+    }
   }
 }
 
@@ -1660,6 +1773,7 @@ function tick() {
       fireCooldown = Math.max(0.05, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
     }
     updateFormation(dt);
+    updateDivers(dt);
     updateBolts(dt);
     updateBeams(dt);
     updateMissiles(dt);
