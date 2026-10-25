@@ -79,10 +79,19 @@ import * as THREE from 'three';
 // FREEZE FIX (Quest): the old build ran at pixelRatio min(dpr, 2) with
 // antialiasing while pushing ~250 draw calls in stereo — the Quest GPU choked
 // and the game froze. Fixes here: pixelRatio capped at 1.5 (1.25 while an XR
-// session is presenting), every projectile/pickup/particle/shockwave pooled
-// with a hard cap and recycle-oldest overflow, formation march speed capped,
-// frame dt clamped, and zero allocation in the hot loop (all temps are
-// module-level vectors reused every frame).
+// session is presenting), antialias OFF, every projectile/pickup/particle/
+// shockwave pooled with a hard cap and recycle-oldest overflow, formation
+// march speed capped, frame dt clamped, and zero allocation in the hot loop
+// (all temps are module-level vectors reused every frame).
+// ROUND-2 FREEZE FIX (Danny: froze again after round 1): the remaining
+// culprits were (a) updateBolts ran a 2nd collision substep on slow frames,
+// making slow frames slower until freeze — now a single step, always;
+// (b) the score panel canvas re-uploaded to the GPU on every kill — now a
+// dirty flag flushed at most 4x/second; (c) uncapped weapon levels launched
+// an unbounded volley 20x/second — the fire interval now scales with volley
+// size so launches/second stay bounded; (d) an adaptive safety valve halves
+// particle spawns and skips the shield check on alternate frames whenever
+// the rolling average frame time exceeds ~20ms, recovering automatically.
 
 // ============================== helpers ==============================
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -90,7 +99,9 @@ const lerp  = (a, b, t) => a + (b - a) * t;
 const rand  = (a, b) => a + Math.random() * (b - a);
 
 // ============================== renderer / scene ==============================
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+// ROUND-2 FREEZE FIX: antialias was still true — MSAA in stereo VR is very
+// expensive on Quest. The neon glow aesthetic carries the look without it.
 // FREEZE FIX: was min(dpr, 2) — far too heavy for stereo Quest rendering.
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -416,6 +427,21 @@ function gearString() {
   return 'S' + W.spread + ' T' + W.twin + ' R' + W.rail + ' K' + W.seeker + ' B' + W.bomb +
     ' | F' + U.rate + ' H' + U.shield + ' P' + U.power + ' V' + U.speed;
 }
+// ROUND-2 FREEZE FIX: the score panel canvas re-uploads its texture to the GPU
+// on every redraw, so per-kill redraws stalled VR at high kill rates. Score
+// changes now only mark the panel dirty (markScoreDirty), and tick() flushes
+// the redraw at most 4 times per second — never per kill.
+let scorePanelDirty = true;
+let scorePanelTimer = 0;
+function markScoreDirty() { scorePanelDirty = true; }
+function flushScorePanel(dt) {
+  scorePanelTimer += dt;
+  if (scorePanelDirty && scorePanelTimer >= 0.25) {
+    scorePanelTimer = 0;
+    scorePanelDirty = false;
+    drawScorePanel();
+  }
+}
 function drawScorePanel() {
   const gear = gearString();
   if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && gear === drawnGear) return;
@@ -665,6 +691,8 @@ scene.add(pPoints);
 for (let i = 0; i < P_COUNT; i++) pPos[i * 3 + 1] = -999;
 const tmpColor = new THREE.Color();
 function spawnBurst(x, y, z, colorHex, count, speed, life) {
+  // Adaptive safety valve: halve particle spawns while frames are slow.
+  if (degraded) count = Math.ceil(count / 2);
   tmpColor.setHex(colorHex);
   for (let k = 0; k < count; k++) {
     const i = pCursor; pCursor = (pCursor + 1) % P_COUNT;
@@ -851,7 +879,7 @@ function explodeOrb(x, y, z) {
     const dx = mb.grp.position.x - x, dy = mb.grp.position.y - y, dz = mb.grp.position.z - z;
     if (dx * dx + dy * dy + dz * dz < R2) { mb.active = false; mb.grp.visible = false; score += 5; }
   }
-  drawScorePanel();
+  markScoreDirty();
 }
 // One trigger pull = the whole uncapped arsenal at once.
 let fireCooldown = 0;
@@ -928,7 +956,7 @@ function applyPickup(type) {
   }
   pickupSound();
   spawnBurst(cannonX, 1.4, RAIL_Z, meta.color, 14, 3.5, 0.5);
-  drawScorePanel();
+  markScoreDirty();
 }
 function updatePickups(dt) {
   for (const p of pickups) {
@@ -1192,7 +1220,7 @@ function resetFormation(fullRestore) {
 function startWave() {
   resetFormation(true);
   resetShields();
-  drawScorePanel();
+  markScoreDirty();
   showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
   if (wave > 1) { // wave-clear bonus: 3 free pickups rain into the field
     for (let k = 0; k < 3; k++) spawnPickup(rand(-6, 6), rand(9, 11), FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
@@ -1223,25 +1251,31 @@ function playerHit() {
     U.shield--;
     shimmerT = 1.2;
     shieldSound();
-    drawScorePanel();
+    markScoreDirty();
     showAnnouncement('SHIELD ABSORBED!', 'Layers left: ' + U.shield, 1.0);
     return;
   }
   shipsLost++;
   shimmerT = 2;
-  drawScorePanel();
+  markScoreDirty();
   showAnnouncement('SHIP HIT!', 'Ships lost: ' + shipsLost + ' — plenty more where that came from', 1.4);
 }
 function formationLanded() {
   shipsLost++;
   flash = 0.7; shakeT = 0.35;
   boomSound();
-  drawScorePanel();
+  markScoreDirty();
   showAnnouncement('THEY LANDED!', 'Formation reset — ships lost: ' + shipsLost, 1.8);
   resetFormation(true);
 }
 
 // ============================== per-frame updates ==============================
+// ROUND-2 adaptive safety valve: rolling average frame time. When it exceeds
+// ~20ms the game automatically sheds load (halved particle spawns, shield
+// checks on alternate frames only) until frames recover below ~16ms. This is
+// automatic — no setting, no player action — and weapon/upgrade levels stay
+// uncapped throughout.
+let avgFrameMs = 16, degraded = false, frameNo = 0;
 let elapsed = 0;
 function updateFormation(dt) {
   const deadFrac = 1 - aliveCount / (COLS * ROWS);
@@ -1272,23 +1306,26 @@ function killInvader(v) {
   // 10% of kills drop a random weapon/upgrade pickup — the uncapped arsenal
   // grows from play, not from a shop or a cap.
   if (Math.random() < 0.10) spawnPickup(formX + v.lx, formY + v.grp.position.y, FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
-  drawScorePanel();
+  markScoreDirty();
   if (aliveCount <= 0) {
     wave++;
     startWave();
   }
 }
 function updateBolts(dt) {
-  const steps = dt > 0.022 ? 2 : 1, sdt = dt / steps;
+  // ROUND-2: single collision step per frame, always. The old code ran a 2nd
+  // substep whenever dt > 0.022, so a slow frame did MORE work and got slower
+  // until the game froze — a death spiral. One step, always.
   for (const b of bolts) {
     if (!b.active) continue;
-    for (let s = 0; s < steps && b.active; s++) {
-      b.grp.position.x += b.vx * sdt;
-      b.grp.position.y += b.vy * sdt;
-      b.grp.position.z += b.vz * sdt;
+    boltStep: {
+      b.grp.position.x += b.vx * dt;
+      b.grp.position.y += b.vy * dt;
+      b.grp.position.z += b.vz * dt;
       const p = b.grp.position;
-      // Shield cubes erode from player fire too
-      if (Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) { b.active = false; break; }
+      // Shield cubes erode from player fire too (skipped on alternate frames
+      // while the adaptive safety valve is active — see degraded/frameNo).
+      if ((!degraded || (frameNo % 2 === 0)) && Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) { b.active = false; break boltStep; }
       // Mothership
       if (motherActive && Math.abs(p.x - mother.position.x) < 1.6 && Math.abs(p.y - mother.position.y) < 0.75 && Math.abs(p.z - mother.position.z) < 1.4) {
         const bonus = 50 * (1 + Math.floor(Math.random() * 4));
@@ -1300,9 +1337,9 @@ function updateBolts(dt) {
         motherActive = false; mother.visible = false;
         warbleStop();
         motherTimer = rand(25, 40);
-        drawScorePanel();
+        markScoreDirty();
         showAnnouncement('BONUS +' + bonus, 'Mothership down!', 1.5);
-        b.active = false; break;
+        b.active = false; break boltStep;
       }
       // Invaders (box test in formation space). Cannon Power = pierce: the bolt
       // keeps flying through up to `pierce` invaders instead of dying on one.
@@ -1317,7 +1354,7 @@ function updateBolts(dt) {
             break;
           }
         }
-        if (!b.active) break;
+        if (!b.active) break boltStep;
       }
       // Bombs can be shot down
       for (const mb of bombs) {
@@ -1328,7 +1365,7 @@ function updateBolts(dt) {
           score += 5;
           spawnBurst(p.x, p.y, p.z, 0xffa02e, 10, 3.4, 0.5);
           invaderHitSound();
-          drawScorePanel();
+          markScoreDirty();
           b.active = false;
           break;
         }
@@ -1423,7 +1460,7 @@ function updateBombs(dt) {
     b.grp.position.y += b.vy * dt;
     b.grp.position.z += b.vz * dt;
     const p = b.grp.position;
-    if (Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) {
+    if ((!degraded || (frameNo % 2 === 0)) && Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) {
       spawnBurst(p.x, p.y, p.z, 0x19e3ff, 8, 3, 0.45);
       b.active = false; b.grp.visible = false;
       continue;
@@ -1518,6 +1555,12 @@ const clock = new THREE.Clock();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
+  frameNo++;
+  // Rolling average frame time with hysteresis: degrade above ~20ms, recover
+  // below ~16ms, so the valve doesn't flutter on a single slow frame.
+  avgFrameMs = avgFrameMs * 0.95 + dt * 1000 * 0.05;
+  if (!degraded && avgFrameMs > 20) degraded = true;
+  else if (degraded && avgFrameMs < 16) degraded = false;
   const presenting = renderer.xr.isPresenting;
 
   if (mode === 'play') {
@@ -1525,9 +1568,15 @@ function tick() {
     fireCooldown -= dt;
     if (fire && fireCooldown <= 0) {
       fireWeapons();
-      // Fire Rate upgrade: each level multiplies the interval by 0.94, with a
-      // 0.05s floor so the loop can never outrun the frame budget. No level cap.
-      fireCooldown = Math.max(0.05, 0.16 * Math.pow(0.94, U.rate));
+      // ROUND-2: weapon LEVELS stay uncapped (Danny's rule), but the per-second
+      // work must stay bounded. A powered-up player launches
+      // 1 + 2*spread + twin + seeker + bomb projectiles per pull, so the
+      // interval grows with volley size: launches/sec <= 1/(volley*0.004),
+      // i.e. at most ~250 projectiles/sec no matter the levels. The old
+      // 0.05s floor let a maxed player launch a huge volley 20x/second and
+      // every bolt ran the full collision loop — a freeze path.
+      const volley = 1 + 2 * W.spread + W.twin + W.seeker + W.bomb;
+      fireCooldown = Math.max(0.05, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
     }
     updateFormation(dt);
     updateBolts(dt);
@@ -1537,6 +1586,7 @@ function tick() {
     updatePickups(dt);
     updateBombs(dt);
     updateMother(dt);
+    flushScorePanel(dt);
   } else {
     // Menu: formation idles in place as a backdrop
     formation.position.set(Math.sin(elapsed * 0.24) * 0.8, FORM_TOP_Y, FORM_Z);
