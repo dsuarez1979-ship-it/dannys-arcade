@@ -55,9 +55,9 @@
     <p><b>Thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> = gas &nbsp;·&nbsp; <b>Left trigger</b> = brake</p>
     <p class="small">Two-way highway: cross the median to face oncoming traffic — wrong-way near misses score double and build a bonus.</p>
     <p class="small">No headset handy? Desktop preview works too — arrow keys / WASD drive, M mutes.</p>
-    <p class="small">NEW: neon road pickups grant <b>unlimited weapons</b> — Turbo Boost, Horn Blast, Oil Slick — and <b>stacking upgrades</b> (Engine, Grip, Armor) with no cap. No lives, no game over, ever.</p>
+    <p class="small">NEW: neon road pickups grant <b>weapon items</b> — Turbo Boost, Horn Blast, Oil Slick — <b>hold up to 3 at once</b> (a 4th replaces the oldest) — plus <b>stacking upgrades</b> (Engine, Grip, Armor) with no cap. No lives, no game over, ever.</p>
     <p class="small">Difficulty climbs as you drive: every <b>1,500 m</b> raises the SPEED TIER (traffic +6% faster, +1 car — oncoming traffic joins at Tier 3) and every <b>5,000 points</b> triggers a 30-second RUSH with doubled bonus points.</p>
-    <p class="small">XR: <b>left squeeze</b> cycles weapon · <b>right squeeze</b> fires · Desktop: <b>B</b> boost, <b>H</b> horn, <b>O</b> oil.</p>
+    <p class="small">XR: <b>left squeeze</b> cycles held items · <b>right squeeze</b> fires selected · Desktop: <b>B</b> boost, <b>H</b> horn, <b>O</b> oil (only if held).</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
   </div>
@@ -1136,21 +1136,33 @@ function refreshTrafficActivation() {
 }
 refreshTrafficActivation();   // tier 1: first 5 same-direction cars only
 
-// ============================== weapons + upgrades (UNLIMITED) ==============================
-// No inventory cap, no upgrade cap, no lives, no game over — crashes still only
-// slow you down (see updateTraffic). Pickups respawn so the run never starves.
+// ============================== weapons (3 held items, pickups only) + upgrades (UNLIMITED) ==============================
+// Held weapon ITEMS are capped at 3: the player starts empty, gains items ONLY
+// from neon road pickups, and a 4th pickup replaces the oldest held item.
+// Upgrades below keep stacking with no cap. No lives, no game over — crashes
+// still only slow you down (see updateTraffic). Pickups respawn so the run never starves.
 const WEAPON_DEFS = [
-  { key: 'boost', name: 'BOOST', color: 0x27e8ff },
-  { key: 'horn',  name: 'HORN',  color: 0xffb02e },
-  { key: 'oil',   name: 'OIL',   color: 0xff3df0 }
+  { key: 'boost', name: 'BOOST', label: 'TURBO BOOST', color: 0x27e8ff },
+  { key: 'horn',  name: 'HORN',  label: 'HORN BLAST',  color: 0xffb02e },
+  { key: 'oil',   name: 'OIL',   label: 'OIL SLICK',   color: 0xff3df0 }
 ];
 const UPGRADE_DEFS = [
   { key: 'engine', name: 'ENGINE', color: 0xff7e47 },
   { key: 'grip',   name: 'GRIP',   color: 0x2bff88 },
   { key: 'armor',  name: 'ARMOR',  color: 0x9d5cff }
 ];
-const weapons = { boost: 0, horn: 0, oil: 0 };
-let selectedWeapon = 0;
+const MAX_ITEMS = 3;
+const heldItems = []; // weapon keys in pickup order, oldest first — starts empty
+let selectedWeapon = 0; // index into heldItems
+function weaponDef(key) { return WEAPON_DEFS.find(d => d.key === key); }
+function slotsText() {
+  const parts = [];
+  for (let i = 0; i < MAX_ITEMS; i++) {
+    const k = heldItems[i];
+    parts.push(k ? (i === selectedWeapon ? '▶' + weaponDef(k).name : weaponDef(k).name) : '—');
+  }
+  return parts.join(' ');
+}
 let boostTime = 0;
 const upgrades = { engine: 0, grip: 0, armor: 0 };
 let nextMilestone = 1500;
@@ -1204,7 +1216,17 @@ for (let i = 0; i < 28; i++) {
   pickups.push({ grp, core, dist: 140 + i * 250, lane: PICKUP_LANES[i % 4], isWeapon, def, taken: false, respawnAt: 0 });
 }
 function applyPickup(p) {
-  if (p.isWeapon) { weapons[p.def.key]++; upgradeMsg = p.def.name + ' +1 (x' + weapons[p.def.key] + ')'; }
+  if (p.isWeapon) {
+    if (heldItems.length < MAX_ITEMS) {
+      heldItems.push(p.def.key);
+      upgradeMsg = p.def.label + ' collected — Slot ' + heldItems.length + ' of 3';
+    } else {
+      const outLabel = weaponDef(heldItems.shift()).label;
+      heldItems.push(p.def.key);
+      upgradeMsg = p.def.label + ' — replaces ' + outLabel;
+    }
+    if (selectedWeapon >= heldItems.length) selectedWeapon = 0;
+  }
   else { upgrades[p.def.key]++; upgradeMsg = p.def.name + ' UP! Lv ' + upgrades[p.def.key]; }
   upgradeMsgT = 3;
   pickupSound();
@@ -1257,13 +1279,14 @@ function updateSlicks() {
     s.mesh.position.set(lerp(pA.x, pB.x, f) + s.lane - playerX, lerp(pA.y, pB.y, f) + 0.06, -relDist);
   }
 }
-function fireWeapon(sel) {
-  const def = WEAPON_DEFS[sel];
-  if (weapons[def.key] <= 0) { upgradeMsg = def.name + ' EMPTY — grab a pickup!'; upgradeMsgT = 1.5; return; }
-  weapons[def.key]--;
-  if (sel === 0) {
+function fireWeapon(slot) {
+  if (!heldItems.length || slot < 0 || slot >= heldItems.length) { upgradeMsg = 'NO WEAPON — grab a pickup!'; upgradeMsgT = 1.5; return; }
+  const key = heldItems[slot];
+  heldItems.splice(slot, 1);
+  if (selectedWeapon >= heldItems.length) selectedWeapon = Math.max(0, heldItems.length - 1);
+  if (key === 'boost') {
     boostTime = 3.0; boostSound(); upgradeMsg = 'TURBO BOOST!'; upgradeMsgT = 1.5;
-  } else if (sel === 1) {
+  } else if (key === 'horn') {
     hornSound(); hornRingT = 0.6;
     for (const car of cars) {
       if (!car.active) continue;
@@ -1448,8 +1471,7 @@ function drawDash(mph) {
   g.font = '700 22px Arial'; g.textAlign = 'center';
   g.fillStyle = boostTime > 0 ? '#27e8ff' : '#eaf6ff';
   let line = 'T' + tier + ' · ENG ' + upgrades.engine + ' GRP ' + upgrades.grip + ' ARM ' + upgrades.armor +
-             ' · B ' + weapons.boost + ' H ' + weapons.horn + ' O ' + weapons.oil +
-             ' · ' + WEAPON_DEFS[selectedWeapon].name;
+             ' · ITEMS [' + slotsText() + ']';
   if (boostTime > 0) line = 'BOOST! ' + line;
   if (upgradeMsgT > 0) line += ' ★ ' + upgradeMsg;
   if (tierMsgT > 0) line += ' ◆ ' + tierMsg;
@@ -1778,8 +1800,15 @@ function tick() {
   avgFrameMs = avgFrameMs * 0.95 + ft * 0.05;
   if (avgFrameMs > 22) perfHold = true; else if (avgFrameMs < 17) perfHold = false;
   const input = readInputs();
-  if (input.cycle) selectedWeapon = (selectedWeapon + 1) % 3;
-  if (input.fire) fireWeapon(input.fireSel >= 0 ? input.fireSel : selectedWeapon);
+  if (input.cycle && heldItems.length) selectedWeapon = (selectedWeapon + 1) % heldItems.length;
+  if (input.fire) {
+    if (input.fireSel >= 0) {
+      const key = WEAPON_DEFS[input.fireSel].key;
+      const slot = heldItems.indexOf(key);
+      if (slot < 0) { upgradeMsg = WEAPON_DEFS[input.fireSel].label + ' not held — grab a pickup!'; upgradeMsgT = 1.5; }
+      else fireWeapon(slot);
+    } else fireWeapon(selectedWeapon);
+  }
   const speedPercent = speed / MAX_SPEED;
 
   // --- steering & lateral motion ---
@@ -1892,7 +1921,7 @@ function tick() {
     dashTimer = 0;
     drawDash(mph);
     const r = Math.round(mph);
-    hud.textContent = r + ' MPH · T' + tier + ' · NEXT TIER ' + Math.max(0, Math.ceil(nextTierAt - distance)) + 'm · RUSH ' + Math.max(0, Math.ceil(nextRushAt - pointsTotal())) + 'pts' + (rushT > 0 ? ' · RUSH ' + Math.ceil(rushT) + 's!' : '');
+    hud.textContent = r + ' MPH · T' + tier + ' · ITEMS [' + slotsText() + '] · NEXT TIER ' + Math.max(0, Math.ceil(nextTierAt - distance)) + 'm · RUSH ' + Math.max(0, Math.ceil(nextRushAt - pointsTotal())) + 'pts' + (rushT > 0 ? ' · RUSH ' + Math.ceil(rushT) + 's!' : '');
   }
   updateAudio(speedPercent, input.gas);
 

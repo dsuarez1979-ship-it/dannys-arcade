@@ -53,11 +53,11 @@
 <div id="panel">
   <div class="box">
     <h1>NEON INVADERS VR</h1>
-    <div class="sub">Space Invaders in VR — unlimited ships, weapons &amp; upgrades</div>
+    <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 3 weapon slots</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
     <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
-    <p class="small">New: falling pickups — Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Every pickup stacks forever. No caps.</p>
+    <p class="small">Falling pickups — Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Collect weapons first: max 3 equipped at once — a 4th replaces the oldest. Upgrades stack forever, no caps.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -393,16 +393,22 @@ const annMesh = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 1.8),
 annMesh.position.set(0, 10.1, -13.2);
 scene.add(annMesh);
 let annT = 0, annDur = 0;
+function fitFont(g, text, size, weight, maxW) {
+  let s = size;
+  g.font = weight + ' ' + s + 'px Arial';
+  while (s > 20 && g.measureText(text).width > maxW) { s -= 4; g.font = weight + ' ' + s + 'px Arial'; }
+}
 function showAnnouncement(main, sub, dur) {
   const g = annPanel.ctx, W = annPanel.cv.width, H = annPanel.cv.height;
   g.clearRect(0, 0, W, H);
   g.textAlign = 'center';
   g.shadowColor = '#27e8ff'; g.shadowBlur = 26;
   g.fillStyle = '#eaf6ff';
-  g.font = '900 74px Arial';
+  fitFont(g, main, 74, '900', W - 20);
   g.fillText(main, W / 2, sub ? 92 : 118);
   if (sub) {
-    g.shadowBlur = 12; g.fillStyle = '#ffd319'; g.font = '700 40px Arial';
+    g.shadowBlur = 12; g.fillStyle = '#ffd319';
+    fitFont(g, sub, 40, '700', W - 20);
     g.fillText(sub, W / 2, 152);
   }
   annPanel.tex.needsUpdate = true;
@@ -451,14 +457,31 @@ function assignElites() {
 let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnGear = '', drawnTier = -1, drawnSurge = false;
 const hud = document.getElementById('hud');
 let hudText = '';
-// Weapons and upgrades: every level stacks WITHOUT a maximum. Levels are plain
-// counters — no caps anywhere. Pools (below) are the only physical limits, and
-// they recycle the oldest live item instead of failing.
+// Weapons: PICKUPS ONLY, max 3 equipped at once (Danny's rule — the old
+// "everything at once" volley overwhelmed the frame budget and froze the
+// Quest). The base bolt always fires. Each weapon is a binary slot flag:
+// 0 = not equipped, 1 = equipped. `equipped` keeps insertion order (oldest
+// first); collecting a 4th weapon replaces the oldest equipped one.
+// Upgrades (U) still stack WITHOUT a maximum — only weapons are capped.
+// Pools (below) are the only other physical limits, and they recycle the
+// oldest live item instead of failing.
 const W = { spread: 0, twin: 0, rail: 0, seeker: 0, bomb: 0 };
+const equipped = []; // weapon keys, oldest first, max 3
+const WEAPON_LABELS = { spread: 'SPREAD SHOT', twin: 'TWIN LASER', rail: 'RAIL BEAM', seeker: 'SEEKER MISSILES', bomb: 'BOMB ORBS' };
+const WEAPON_SHORT = { spread: 'SPREAD', twin: 'TWIN', rail: 'RAIL', seeker: 'SEEKER', bomb: 'BOMB' };
 const U = { rate: 0, shield: 0, power: 0, speed: 0 };
+function slotString() {
+  const names = equipped.map(k => WEAPON_LABELS[k]);
+  while (names.length < 3) names.push('—');
+  return names.join(' · ');
+}
+function slotShortString() {
+  const names = equipped.map(k => WEAPON_SHORT[k]);
+  while (names.length < 3) names.push('—');
+  return '[' + names.join('] [') + ']';
+}
 function gearString() {
-  return 'S' + W.spread + ' T' + W.twin + ' R' + W.rail + ' K' + W.seeker + ' B' + W.bomb +
-    ' | F' + U.rate + ' H' + U.shield + ' P' + U.power + ' V' + U.speed;
+  return 'W[' + slotString() + '] | F' + U.rate + ' H' + U.shield + ' P' + U.power + ' V' + U.speed;
 }
 // ROUND-2 FREEZE FIX: the score panel canvas re-uploads its texture to the GPU
 // on every redraw, so per-kill redraws stalled VR at high kill rates. Score
@@ -494,14 +517,14 @@ function drawScorePanel() {
   g.fillStyle = '#ffb3d9'; g.font = '700 30px Arial';
   g.fillText('SHIPS LOST ' + shipsLost, W2 - 28, 184);
   g.textAlign = 'center';
-  g.fillStyle = '#27e8ff'; g.font = '700 26px Arial';
-  g.fillText('WEAPONS  S' + W.spread + '  T' + W.twin + '  R' + W.rail + '  K' + W.seeker + '  B' + W.bomb, W2 / 2, 222);
-  g.fillStyle = '#2bff88';
+  g.fillStyle = '#27e8ff'; g.font = '700 20px Arial';
+  g.fillText('WEAPONS  ' + slotShortString(), W2 / 2, 222);
+  g.fillStyle = '#2bff88'; g.font = '700 26px Arial';
   g.fillText('UPGRADES  F' + U.rate + '  H' + U.shield + '  P' + U.power + '  V' + U.speed, W2 / 2, 256);
   g.fillStyle = surgeWave ? '#ff2e88' : '#ffd319'; g.font = '700 26px Arial';
   g.fillText(surgeWave ? 'SURGE WAVE - DOUBLE POINTS - TIER ' + tier : 'TIER ' + tier + ' - NEXT TIER IN ' + (TIER_POINTS - (score % TIER_POINTS)) + ' PTS', W2 / 2, 292);
   g.fillStyle = '#ffd319'; g.font = '700 26px Arial';
-  g.fillText('SHIPS: ∞ UNLIMITED  ·  WEAPONS: ∞ NO CAP', W2 / 2, H - 22);
+  g.fillText('SHIPS: ∞ UNLIMITED  ·  WEAPONS: 3 SLOTS MAX', W2 / 2, H - 22);
   scorePanel.tex.needsUpdate = true;
   const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · TIER ' + tier + ' · NEXT TIER IN ' + (TIER_POINTS - (score % TIER_POINTS)) + ' PTS' + (surgeWave ? ' · SURGE!' : '') + ' · SHIPS LOST ' + shipsLost + ' · ' + gear;
   if (t !== hudText) { hudText = t; hud.textContent = t; }
@@ -983,11 +1006,21 @@ function spawnPickup(x, y, z, type) {
 function applyPickup(type) {
   const meta = PICKUP_TYPES[type];
   if (meta.weapon) {
-    W[meta.weapon]++;
-    showAnnouncement(meta.label + ' +1', 'Level ' + W[meta.weapon] + ' — no cap!', 1.2);
+    const key = meta.weapon;
+    if (equipped.includes(key)) {
+      score += 100;
+      showAnnouncement(meta.label + ' — ALREADY EQUIPPED', 'Bonus +100 pts', 1.4);
+    } else if (equipped.length < 3) {
+      equipped.push(key); W[key] = 1;
+      showAnnouncement(meta.label, 'Weapon slot ' + equipped.length + ' of 3 — fires with every pull', 1.8);
+    } else {
+      const old = equipped.shift(); W[old] = 0;
+      equipped.push(key); W[key] = 1;
+      showAnnouncement(meta.label, 'Replaces ' + WEAPON_LABELS[old] + ' — oldest weapon swapped out', 1.8);
+    }
   } else {
     U[meta.upgrade]++;
-    showAnnouncement(meta.label + ' +1', 'Level ' + U[meta.upgrade] + ' — no cap!', 1.2);
+    showAnnouncement(meta.label + ' +1', 'Upgrade level ' + U[meta.upgrade] + ' — stacks forever', 1.4);
   }
   pickupSound();
   spawnBurst(cannonX, 1.4, RAIL_Z, meta.color, 14, 3.5, 0.5);
@@ -1270,6 +1303,7 @@ function startGame() {
   mode = 'play';
   score = 0; wave = 1; shipsLost = 0; tier = 0; surgeWave = false;
   W.spread = W.twin = W.rail = W.seeker = W.bomb = 0;
+  equipped.length = 0;
   U.rate = U.shield = U.power = U.speed = 0;
   drawnScore = drawnWave = drawnLost = -1; drawnGear = ''; drawnTier = -1; drawnSurge = false;
   cannonX = 0;
@@ -1350,8 +1384,8 @@ function killInvader(v) {
   spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 24, 4.6, 0.7);
   spawnShockwave(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color);
   invaderHitSound();
-  // 10% of kills drop a random weapon/upgrade pickup — the uncapped arsenal
-  // grows from play, not from a shop or a cap.
+  // 10% of kills drop a random weapon/upgrade pickup — the arsenal
+  // grows from play, not from a shop.
   if (Math.random() < 0.10) spawnPickup(formX + v.lx, formY + v.grp.position.y, FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
   markScoreDirty();
   if (aliveCount <= 0) {
@@ -1617,13 +1651,11 @@ function tick() {
     fireCooldown -= dt;
     if (fire && fireCooldown <= 0) {
       fireWeapons();
-      // ROUND-2: weapon LEVELS stay uncapped (Danny's rule), but the per-second
-      // work must stay bounded. A powered-up player launches
-      // 1 + 2*spread + twin + seeker + bomb projectiles per pull, so the
-      // interval grows with volley size: launches/sec <= 1/(volley*0.004),
-      // i.e. at most ~250 projectiles/sec no matter the levels. The old
-      // 0.05s floor let a maxed player launch a huge volley 20x/second and
-      // every bolt ran the full collision loop — a freeze path.
+      // WEAPON REWORK: at most 3 weapons equipped, each binary, so one pull
+      // launches at most 1 + 2 + 1 + 1 + 1 = 6 projectiles + 1 beam — the
+      // old "everything at once" volley was the freeze path. The interval
+      // still grows with volley size as a second bound, and upgrades
+      // (U.rate) still stack without limit.
       const volley = 1 + 2 * W.spread + W.twin + W.seeker + W.bomb;
       fireCooldown = Math.max(0.05, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
     }

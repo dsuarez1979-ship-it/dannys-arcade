@@ -31,9 +31,16 @@
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
   #hud {
-    position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:5;
-    color:#7df9ff; font-size:20px; font-weight:800; letter-spacing:2px;
+    position:fixed; left:12px; top:52px; z-index:5;
+    color:#7df9ff; font-size:13px; font-weight:800; letter-spacing:1px;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
+    background:rgba(2,8,24,.55); border:1px solid rgba(39,232,255,.4); border-radius:8px; padding:6px 10px;
+  }
+  #banner {
+    position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
+    color:#ffd319; font-size:30px; font-weight:900; letter-spacing:2px; text-align:center;
+    text-shadow:0 2px 12px #000, 0 0 24px rgba(255,211,25,.5); pointer-events:none; display:none;
+    background:rgba(2,8,24,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px;
   }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
@@ -55,11 +62,11 @@
 <div id="panel">
   <div class="box">
     <h1>STAR STRIKE</h1>
-    <div class="sub">An original VR space shooter — unlimited retries, unlimited weapons, unlimited upgrades</div>
+    <div class="sub">An original VR space shooter — unlimited retries, 3 weapon slots, unlimited upgrades</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p>You are rookie pilot <b>Jax Vega</b> in the interceptor <b>Kestrel</b>, holding the line against the Void drone swarm.</p>
     <p><b>Left thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible) &nbsp;·&nbsp; <b>A</b> = Nova Bomb</p>
-    <p>Grab weapon pickups — <b>Triple Laser, Seeker Missiles, Plasma Cannon, Rail Beam, Nova Bomb</b> — and upgrade pickups — <b>Hull Plating, Shield Cells, Engine Speed, Weapon Power</b>. Every pickup stacks with <b>no maximum</b>. Each cleared wave also grants a bonus upgrade.</p>
+    <p>Start with the base laser. Grab weapon pickups — <b>Triple Laser, Seeker Missiles, Plasma Cannon, Rail Beam, Nova Bomb</b> — up to <b>3 equipped at once</b> (a 4th replaces your oldest weapon). Upgrade pickups — <b>Hull Plating, Shield Cells, Engine Speed, Weapon Power</b> — stack with <b>no maximum</b>. Each cleared wave also grants a bonus upgrade.</p>
     <p class="small">Difficulty climbs as you play: every cleared wave makes enemies faster, more numerous, and quicker to fire — and every 10,000 points raises your tier, unlocking elite drones, asteroid storms, and bomber squadrons. Boss waves (every 5th) add a new Ravager attack pattern each time.</p>
     <p class="small">Getting hit costs hull — at zero hull you explode and instantly respawn with your score, weapons and upgrades intact. There is no game over, ever.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse steers, click / Space fires, Shift barrel-rolls, N = Nova Bomb, M mutes.</p>
@@ -69,6 +76,7 @@
 </div>
 
 <div id="hud">SCORE 0</div>
+<div id="banner"></div>
 <button id="muteBtn">SOUND: ON</button>
 <a id="backLink" href="./">← Danny's Arcade</a>
 
@@ -342,11 +350,11 @@ hudCanvas.width = 640; hudCanvas.height = 300;
 const hctx = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
 const hudPanel = new THREE.Mesh(
-  new THREE.PlaneGeometry(2.3, 1.08),
+  new THREE.PlaneGeometry(1.05, 0.49),
   new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false })
 );
 hudPanel.renderOrder = 999;
-hudPanel.position.set(0, -0.72, -1.5);
+hudPanel.position.set(-0.98, 0.62, -1.5); // small, top-left of the view — never center-screen
 camera.add(hudPanel);
 const hudEl = document.getElementById('hud');
 let hudDirty = true;
@@ -367,10 +375,10 @@ function drawHUD(state) {
   hctx.fillText(Math.max(0, Math.round(state.hull)) + '/' + state.maxHull, 420, 96);
   hctx.fillStyle = '#33ffcc'; hctx.fillText('SHIELD ' + Math.max(0, Math.round(state.shield)), 22, 134);
   hctx.fillStyle = '#bfe3ff'; hctx.fillText('RETRIES ' + state.retries, 330, 134);
-  // Weapons row — every stack level shown, no caps anywhere
-  const w = state.wpn, u = state.upg;
+  // Weapons row — the 3 equipped slots by name (empty slots shown as —)
+  const u = state.upg;
   hctx.font = 'bold 22px Arial'; hctx.fillStyle = '#7df9ff';
-  hctx.fillText('WEAPONS  TRP x' + w.triple + '  SKR x' + w.seeker + '  PLS x' + w.plasma + '  RAIL x' + w.rail + '  NOVA x' + w.nova, 22, 172);
+  hctx.fillText('WEAPONS  ' + slotLabel() + (state.slots.includes('nova') ? '  (NOVA x' + state.nova + ')' : ''), 22, 172);
   hctx.fillStyle = '#ffd319';
   hctx.fillText('UPGRADES  PLATE x' + u.plate + '  CELL x' + u.cell + '  ENG x' + u.engine + '  PWR x' + u.power, 22, 204);
   // Difficulty tier + next goal — always visible
@@ -385,7 +393,45 @@ function drawHUD(state) {
     hctx.fillStyle = '#ffd319'; hctx.font = 'bold 26px Arial'; hctx.fillText(state.msg, 22, 248);
   }
   hudTex.needsUpdate = true;
-  hudEl.textContent = 'SCORE ' + state.score + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull + '  ·  WAVE ' + state.wave + '  ·  TIER ' + state.tier;
+  hudEl.textContent = 'SCORE ' + state.score + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull + '  ·  SHIELD ' + Math.max(0, Math.round(state.shield)) + '  ·  WAVE ' + state.wave + '  ·  ' + slotLabel();
+}
+
+// ============================== pickup banner (DOM + in-VR 3D banner) ==============
+// Every pickup gets a clear on-screen label the moment it is collected. The DOM
+// banner serves the desktop preview; the transient center-view 3D banner serves
+// Quest VR, where DOM is not visible. Both auto-hide; neither is always-on.
+const bannerEl = document.getElementById('banner');
+let bannerTimer = null;
+const bannerCanvas = document.createElement('canvas');
+bannerCanvas.width = 640; bannerCanvas.height = 128;
+const bctx = bannerCanvas.getContext('2d');
+const bannerTex = new THREE.CanvasTexture(bannerCanvas);
+const bannerMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.5, 0.3),
+  new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true, depthTest: false })
+);
+bannerMesh.renderOrder = 1000;
+bannerMesh.position.set(0, 0.35, -1.5);
+bannerMesh.visible = false;
+camera.add(bannerMesh);
+let bannerT = 0;
+function showBanner(text, dur) {
+  S.msg = text; S.msgT = dur || 2.5;
+  if (bannerEl) {
+    bannerEl.textContent = text;
+    bannerEl.style.display = 'block';
+    if (bannerTimer) clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { bannerEl.style.display = 'none'; }, (dur || 2.5) * 1000);
+  }
+  bctx.clearRect(0, 0, 640, 128);
+  bctx.fillStyle = 'rgba(2,8,24,0.72)'; bctx.fillRect(0, 0, 640, 128);
+  bctx.strokeStyle = '#ffd319'; bctx.lineWidth = 4; bctx.strokeRect(4, 4, 632, 120);
+  bctx.font = 'bold 34px Arial'; bctx.fillStyle = '#ffd319'; bctx.textAlign = 'center';
+  bctx.fillText(text, 320, 78);
+  bannerTex.needsUpdate = true;
+  bannerMesh.visible = true;
+  bannerT = dur || 2.5;
+  hudDirty = true;
 }
 
 // ============================== audio (original synth) ==============================
@@ -491,10 +537,14 @@ const S = {
   tier: 0, bossCount: 0, eliteLvl: 0, stormLvl: 0, bomberLvl: 0,
   fireCd: 0, rollT: 0, rollCd: 0, msgT: 0, spawnQueue: 0, spawnT: 0, shake: 0,
   seekerCd: 0, railCd: 0, railVis: 0,
-  // Unlimited stacks — no maximum on any weapon or upgrade, ever.
-  wpn: { triple: 0, seeker: 0, plasma: 0, rail: 0, nova: 0 },
+  // Weapons: base laser only at start; pickups equip up to 3 slots, a 4th
+  // replaces the oldest. Upgrades stack with no maximum, unchanged.
+  slots: [], nova: 0,
   upg: { plate: 0, cell: 0, engine: 0, power: 0 },
 };
+const WPN_NAMES = { triple: 'TRIPLE LASER', seeker: 'SEEKER MISSILES', plasma: 'PLASMA CANNON', rail: 'RAIL BEAM', nova: 'NOVA BOMB' };
+const hasWpn = (k) => S.slots.includes(k);
+const slotLabel = () => [0, 1, 2].map(i => S.slots[i] ? WPN_NAMES[S.slots[i]] : '—').join(' | ');
 const boltDmg = () => 1 + S.upg.power;
 const speedMul = () => 1 + S.upg.engine * 0.15;
 
@@ -634,7 +684,7 @@ for (let i = 0; i < 14; i++) {
   ROCKS.push({ m, on: false, vx: 0, vy: 0, vz: 0, rx: rand(0, 3), ry: rand(0, 3) });
 }
 
-// Pickups: one pool entry per kind (x2) — every kind stacks without limit
+// Pickups: one pool entry per kind (x2) — weapons equip into max 3 slots, upgrades stack without limit
 const PICKUP_KINDS = ['triple', 'seeker', 'plasma', 'rail', 'nova', 'plate', 'cell', 'engine', 'power', 'hull', 'shield'];
 const PICKUPS = [];
 for (const kind of PICKUP_KINDS) {
@@ -822,8 +872,7 @@ function grantWaveBonus() {
   const pick = ups[Math.floor(rand(0, ups.length))];
   applyUpgrade(pick);
   const names = { plate: 'HULL PLATING', cell: 'SHIELD CELLS', engine: 'ENGINE SPEED', power: 'WEAPON POWER' };
-  S.msg = 'WAVE BONUS: ' + names[pick] + ' +1 (NO LIMIT)';
-  S.msgT = 3;
+  showBanner('WAVE BONUS: ' + names[pick] + ' +1 (NO LIMIT)', 3);
 }
 function applyUpgrade(kind) {
   if (kind === 'plate') { S.upg.plate++; S.maxHull += 25; S.hull += 25; }
@@ -832,11 +881,30 @@ function applyUpgrade(kind) {
   else if (kind === 'power') { S.upg.power++; }
 }
 function applyWeapon(kind) {
-  if (kind === 'triple') S.wpn.triple++;
-  else if (kind === 'seeker') S.wpn.seeker++;
-  else if (kind === 'plasma') S.wpn.plasma++;
-  else if (kind === 'rail') S.wpn.rail++;
-  else if (kind === 'nova') S.wpn.nova++;
+  // Max 3 weapons equipped at once. A 4th replaces the oldest equipped weapon.
+  // Re-collecting an equipped weapon just tops it up (nova: +3 bombs).
+  const name = WPN_NAMES[kind];
+  if (kind === 'nova') {
+    if (!hasWpn('nova')) {
+      if (S.slots.length >= 3) { const out = S.slots.shift(); showBanner(name + ' — replaces ' + WPN_NAMES[out]); }
+      else showBanner(name + ' — Slot ' + (S.slots.length + 1));
+      S.slots.push('nova');
+      S.nova = 3;
+    } else {
+      S.nova += 3;
+      showBanner(name + ' +3 (x' + S.nova + ' TOTAL)');
+    }
+    return;
+  }
+  if (hasWpn(kind)) { showBanner(name + ' — ALREADY EQUIPPED'); return; }
+  if (S.slots.length >= 3) {
+    const out = S.slots.shift();
+    if (out === 'nova') S.nova = 0; // bombs go away with the weapon
+    showBanner(name + ' — replaces ' + WPN_NAMES[out]);
+  } else {
+    showBanner(name + ' — Slot ' + (S.slots.length + 1));
+  }
+  S.slots.push(kind);
 }
 
 // ============================== damage / respawn (unlimited retries) ==============================
@@ -869,8 +937,8 @@ function tryRoll() {
   S.rollT = 0.55; S.rollCd = 1.4; sfxRoll();
 }
 function tryNova() {
-  if (S.mode !== 'play' || S.wpn.nova <= 0) return;
-  S.wpn.nova--;
+  if (S.mode !== 'play' || !hasWpn('nova') || S.nova <= 0) return;
+  S.nova--;
   sfxNova();
   shockwave(px, py, -10, 8);
   burst(px, py, -10, 100, 18, 0xff3df0);
@@ -893,7 +961,7 @@ function tryNova() {
     S.bossHp -= 50 + S.upg.power * 5;
     if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave++; clearField(); startWave(S.wave); }
   }
-  S.msg = 'NOVA BOMB! ' + S.wpn.nova + ' LEFT';
+  S.msg = 'NOVA BOMB! ' + S.nova + ' LEFT';
   S.msgT = 2; hudDirty = true;
 }
 function fireRail() {
@@ -949,7 +1017,7 @@ function beginGame() {
   if (S.mode === 'play') return;
   S.mode = 'play'; S.score = 0; S.hull = 100; S.maxHull = 100; S.shield = 0; S.wave = 1;
   S.retries = 0; S.bossHp = 0; S.tier = 0; S.bossCount = 0; S.eliteLvl = 0; S.stormLvl = 0; S.bomberLvl = 0;
-  S.wpn = { triple: 0, seeker: 0, plasma: 0, rail: 0, nova: 0 };
+  S.slots = []; S.nova = 0; // base laser only; weapons come from pickups, max 3
   S.upg = { plate: 0, cell: 0, engine: 0, power: 0 };
   startWave(1);
   hudDirty = true;
@@ -1015,30 +1083,30 @@ function tick() {
     if (S.rollT > 0) { S.rollT -= dt; ship.rotation.z += dt * 11; }
     if (S.rollCd > 0) S.rollCd -= dt;
 
-    // --- firing: base bolt + uncapped triple spread + plasma + seekers + rail ---
+    // --- firing: base laser + equipped slot weapons (max 3, all fire together) ---
     S.fireCd -= dt;
     const firing = xr.fire || keys['Space'] || mouse.down;
     if (firing && S.fireCd <= 0) {
       S.fireCd = 0.22;
-      const n = 1 + S.wpn.triple * 2; // no cap: every Triple pickup adds 2 more bolts
+      const n = hasWpn('triple') ? 3 : 1; // base laser, +2 bolts while Triple Laser is equipped
       for (let i = 0; i < n; i++) {
         const off = i - (n - 1) / 2;
         fireBolt(pBolts, px + off * 0.5, py, -1, off * 3, 0, -70, boltDmg());
       }
-      for (let i = 0; i < S.wpn.plasma; i++) {
-        fireBolt(pPlasma, px + (i - (S.wpn.plasma - 1) / 2) * 0.8, py - 0.2, -1, 0, 0, -45, 3 + S.upg.power);
+      if (hasWpn('plasma')) {
+        fireBolt(pPlasma, px, py - 0.2, -1, 0, 0, -45, 3 + S.upg.power);
       }
       sfxLaser();
       muzzle.position.set(px, py, -1.2); muzzleT = 0.06;
       muzzle.material.opacity = 0.9;
     }
     S.seekerCd -= dt;
-    if (S.wpn.seeker > 0 && S.seekerCd <= 0) {
+    if (hasWpn('seeker') && S.seekerCd <= 0) {
       S.seekerCd = 0.9;
-      for (let i = 0; i < S.wpn.seeker; i++) fireMissile(px + (i - (S.wpn.seeker - 1) / 2) * 0.6, py);
+      fireMissile(px, py);
     }
     S.railCd -= dt;
-    if (S.wpn.rail > 0 && S.railCd <= 0) fireRail();
+    if (hasWpn('rail') && S.railCd <= 0) fireRail();
     if (S.railVis > 0) {
       S.railVis -= dt;
       railBeam.position.x = px; railBeam.position.y = py;
@@ -1219,14 +1287,13 @@ function tick() {
             engine: 'ENGINE SPEED', power: 'WEAPON POWER', hull: 'HULL REPAIR', shield: 'SHIELD BOOST',
           };
           if (['triple', 'seeker', 'plasma', 'rail', 'nova'].includes(p.kind)) {
-            applyWeapon(p.kind);
-            S.msg = names[p.kind] + ' +1 — NO LIMIT (x' + S.wpn[p.kind] + ')';
+            applyWeapon(p.kind); // banner set inside: slot / replace / top-up
           } else if (['plate', 'cell', 'engine', 'power'].includes(p.kind)) {
             applyUpgrade(p.kind);
-            S.msg = names[p.kind] + ' +1 — NO LIMIT (x' + S.upg[p.kind] + ')';
-          } else if (p.kind === 'hull') { S.hull = Math.min(S.maxHull, S.hull + 40); S.msg = 'HULL +40'; }
-          else { S.shield += 50; S.msg = 'SHIELD +50'; }
-          S.msgT = 2; sfxPickup(); hudDirty = true;
+            showBanner(names[p.kind] + ' +1 (x' + S.upg[p.kind] + ', NO LIMIT)', 2);
+          } else if (p.kind === 'hull') { S.hull = Math.min(S.maxHull, S.hull + 40); showBanner('HULL +40', 2); }
+          else { S.shield += 50; showBanner('SHIELD +50', 2); }
+          sfxPickup(); hudDirty = true;
         }
       }
     }
@@ -1339,6 +1406,7 @@ function tick() {
       camera.position.set(rand(-0.08, 0.08) * S.shake, rand(-0.08, 0.08) * S.shake, 0);
     } else camera.position.set(0, 0, 0);
     if (S.msgT > 0) { S.msgT -= dt; if (S.msgT <= 0) { S.msg = ''; hudDirty = true; } }
+    if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) bannerMesh.visible = false; }
     // Performance guard: track frame health; tier progression holds while degraded.
     avgMs = avgMs * 0.95 + dt * 1000 * 0.05;
     if (avgMs > 20) degraded = true; else if (avgMs < 16) degraded = false;
