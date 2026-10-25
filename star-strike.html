@@ -60,6 +60,7 @@
     <p>You are rookie pilot <b>Jax Vega</b> in the interceptor <b>Kestrel</b>, holding the line against the Void drone swarm.</p>
     <p><b>Left thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible) &nbsp;·&nbsp; <b>A</b> = Nova Bomb</p>
     <p>Grab weapon pickups — <b>Triple Laser, Seeker Missiles, Plasma Cannon, Rail Beam, Nova Bomb</b> — and upgrade pickups — <b>Hull Plating, Shield Cells, Engine Speed, Weapon Power</b>. Every pickup stacks with <b>no maximum</b>. Each cleared wave also grants a bonus upgrade.</p>
+    <p class="small">Difficulty climbs as you play: every cleared wave makes enemies faster, more numerous, and quicker to fire — and every 10,000 points raises your tier, unlocking elite drones, asteroid storms, and bomber squadrons. Boss waves (every 5th) add a new Ravager attack pattern each time.</p>
     <p class="small">Getting hit costs hull — at zero hull you explode and instantly respawn with your score, weapons and upgrades intact. There is no game over, ever.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse steers, click / Space fires, Shift barrel-rolls, N = Nova Bomb, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
@@ -372,6 +373,10 @@ function drawHUD(state) {
   hctx.fillText('WEAPONS  TRP x' + w.triple + '  SKR x' + w.seeker + '  PLS x' + w.plasma + '  RAIL x' + w.rail + '  NOVA x' + w.nova, 22, 172);
   hctx.fillStyle = '#ffd319';
   hctx.fillText('UPGRADES  PLATE x' + u.plate + '  CELL x' + u.cell + '  ENG x' + u.engine + '  PWR x' + u.power, 22, 204);
+  // Difficulty tier + next goal — always visible
+  const nextAt = (state.tier + 1) * 10000;
+  hctx.font = 'bold 22px Arial'; hctx.fillStyle = '#ff7e47';
+  hctx.fillText('TIER ' + state.tier + '  ·  NEXT TIER AT ' + nextAt + ' PTS (' + Math.max(0, nextAt - state.score) + ' TO GO)', 22, 272);
   if (state.bossHp > 0) {
     hctx.fillStyle = '#ff3355'; hctx.font = 'bold 26px Arial'; hctx.fillText('RAVAGER', 22, 248);
     hctx.fillStyle = '#123'; hctx.fillRect(150, 228, 400, 18);
@@ -380,7 +385,7 @@ function drawHUD(state) {
     hctx.fillStyle = '#ffd319'; hctx.font = 'bold 26px Arial'; hctx.fillText(state.msg, 22, 248);
   }
   hudTex.needsUpdate = true;
-  hudEl.textContent = 'SCORE ' + state.score + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull + '  ·  WAVE ' + state.wave;
+  hudEl.textContent = 'SCORE ' + state.score + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull + '  ·  WAVE ' + state.wave + '  ·  TIER ' + state.tier;
 }
 
 // ============================== audio (original synth) ==============================
@@ -483,6 +488,7 @@ function pollXR() {
 const S = {
   mode: 'menu', score: 0, hull: 100, maxHull: 100, shield: 0, wave: 1,
   retries: 0, bossHp: 0, bossMax: 0, msg: 'WAVE 1 INCOMING',
+  tier: 0, bossCount: 0, eliteLvl: 0, stormLvl: 0, bomberLvl: 0,
   fireCd: 0, rollT: 0, rollCd: 0, msgT: 0, spawnQueue: 0, spawnT: 0, shake: 0,
   seekerCd: 0, railCd: 0, railVis: 0,
   // Unlimited stacks — no maximum on any weapon or upgrade, ever.
@@ -491,6 +497,33 @@ const S = {
 };
 const boltDmg = () => 1 + S.upg.power;
 const speedMul = () => 1 + S.upg.engine * 0.15;
+
+// ============================== goal-based difficulty escalation ==============
+// Waves cleared (wave-1): enemy speed +5%/wave, enemy fire rate +4%/wave,
+// squadron groups +1 ship/wave (capped at +3/group; the 26-enemy pool is the
+// hard on-screen cap). Score tiers: every 10,000 pts = one tier up, unlocking
+// a new wrinkle in rotation (elite drones -> asteroid storms -> bomber
+// squadrons); wrinkles stack and never decrease within a run. Boss waves
+// (every 5th) add one attack pattern per appearance. Tier-ups are HELD while
+// frames are degraded (see tick) so difficulty never outruns frame rate.
+const waveCleared = () => Math.max(0, S.wave - 1);
+const diffSpeed = () => Math.pow(1.05, waveCleared());
+const diffFire = () => Math.pow(1.04, waveCleared());
+const squadBonus = () => Math.min(waveCleared(), 3);
+let avgMs = 16, degraded = false;
+const sfxTier = () => { blip(523, 523, 0.12, 'square', 0.22); setTimeout(() => blip(659, 659, 0.12, 'square', 0.22), 110); setTimeout(() => blip(784, 784, 0.2, 'square', 0.22), 220); };
+function checkTier() {
+  if (degraded) return; // hold progression until frames recover
+  const t = Math.floor(S.score / 10000);
+  if (t <= S.tier) return;
+  S.tier = t;
+  const names = ['ELITE DRONES', 'ASTEROID STORM', 'BOMBER SQUADRON'];
+  const name = names[(t - 1) % 3];
+  if ((t - 1) % 3 === 0) S.eliteLvl++;
+  else if ((t - 1) % 3 === 1) S.stormLvl++;
+  else S.bomberLvl++;
+  S.msg = 'TIER ' + t + ' — ' + name + ' UNLOCKED'; S.msgT = 3; sfxTier(); hudDirty = true;
+}
 const PX = { min: -7, max: 7 }, PY = { min: -2.5, max: 3.5 };
 let px = 0, py = 0, pvx = 0, pvy = 0, prevRoll = false, prevNova = false;
 
@@ -689,18 +722,47 @@ const boss = new THREE.Group();
 }
 boss.visible = false; boss.position.set(0, 1, -60); scene.add(boss);
 let bossFireT = 0, bossT = 0;
+// Boss attack patterns: base twin-turret volley; 2nd appearance adds a double
+// volley; 3rd adds a 3-bolt spread fan per turret.
+function bossVolley() {
+  for (const s of [-4.5, 4.5]) {
+    const bx = boss.position.x + s, by = boss.position.y;
+    const dx = px - bx, dy = py - by;
+    const d = Math.max(1, Math.hypot(dx, dy));
+    const ux = dx / d, uy = dy / d;
+    const angles = bossSpread ? [-0.22, 0, 0.22] : [0];
+    for (const a of angles) {
+      const c = Math.cos(a), sn = Math.sin(a);
+      fireBolt(eBolts, bx, by, -52, (ux * c - uy * sn) * 6, (ux * sn + uy * c) * 6, 24, 1);
+    }
+  }
+}
 
 // ============================== waves ==============================
-function spawnEnemy(kind, x, y) {
+function spawnEnemy(kind, x, y, opts) {
   for (const e of ENEMIES) {
     if (e.on || e.kind !== kind) continue;
     e.on = true; e.g.visible = true;
-    e.baseX = x; e.baseY = y; e.t = 0; e.fireT = rand(1, 2.5);
+    e.baseX = x; e.baseY = y; e.t = 0; e.fireT = rand(1, 2.5) / diffFire();
     e.hp = kind === 'shard' ? 2 : 1;
+    e.score = kind === 'shard' ? 200 : 100;
+    e.elite = !!(opts && opts.elite);
+    e.bomber = !!(opts && opts.bomber);
+    if (e.elite) { e.hp = 2; e.score = 200; e.g.scale.setScalar(1.3); }
+    else e.g.scale.setScalar(1);
     e.g.position.set(x, y, -90);
     return;
   }
 }
+// Squadron spawn with tier wrinkles: elites (faster, 2 HP, double points) and
+// bombers (spread fire) roll per drone once their tier is unlocked.
+function spawnScaled(kind, x, y) {
+  const opts = {};
+  if (kind === 'drone' && S.eliteLvl > 0 && Math.random() < Math.min(0.25 * S.eliteLvl, 0.75)) opts.elite = true;
+  if (kind === 'drone' && S.bomberLvl > 0 && Math.random() < Math.min(0.2 * S.bomberLvl, 0.6)) opts.bomber = true;
+  spawnEnemy(kind, x, y, opts);
+}
+function clearField() { for (const e of ENEMIES) { e.on = false; e.g.visible = false; } }
 function spawnRock() {
   for (const r of ROCKS) {
     if (r.on) continue;
@@ -718,26 +780,39 @@ function spawnPickup(kind, x, y) {
     return;
   }
 }
+let bossFireInterval = 0.7, bossDouble = false, bossSpread = false, bossVolleyPending = 0;
 function startWave(n) {
   S.msg = 'WAVE ' + n; S.msgT = 2.5; hudDirty = true;
-  if (n === 5) {
-    boss.visible = true; S.bossMax = 300; S.bossHp = 300; bossT = 0; bossFireT = 1;
-    S.msg = 'WARNING: RAVAGER CARRIER'; hudDirty = true;
+  if (n % 5 === 0) {
+    // Boss wave: every 5th wave. Each appearance adds one attack pattern.
+    S.bossCount++;
+    const ap = S.bossCount;
+    boss.visible = true; S.bossMax = 300 + 100 * (ap - 1); S.bossHp = S.bossMax;
+    bossT = 0; bossFireT = 1;
+    bossDouble = ap >= 2; bossSpread = ap >= 3;
+    bossFireInterval = ap >= 5 ? 0.55 : 0.7;
+    if (ap >= 4) { // drone escorts from the 4th appearance on
+      spawnEnemy('drone', -4, 2); spawnEnemy('drone', 4, 2);
+    }
+    S.msg = 'WARNING: RAVAGER CARRIER' + (ap > 1 ? ' — ATTACK PATTERN ' + ap : ''); hudDirty = true;
     return;
   }
   const count = 4 + n * 2;
   S.spawnQueue = count; S.spawnT = 0.5;
+  // Asteroid storm tier: a denser rock field arrives with each wave.
+  if (S.stormLvl > 0) for (let i = 0; i < S.stormLvl + 1; i++) spawnRock();
 }
 function queueSpawn() {
   const kind = Math.random() < 0.35 ? 'shard' : 'drone';
   const form = Math.floor(rand(0, 3));
+  const b = squadBonus(); // +1 ship per squadron per wave cleared (capped +3)
   if (form === 0) {
     const x0 = rand(-5, 5);
-    for (let i = 0; i < 3 && S.spawnQueue > 0; i++) { spawnEnemy(kind, x0 + (i - 1) * 2.2, rand(1, 3)); S.spawnQueue--; }
+    for (let i = 0; i < 3 + b && S.spawnQueue > 0; i++) { spawnScaled(kind, x0 + (i - 1) * 2.2, rand(1, 3)); S.spawnQueue--; }
   } else if (form === 1) {
-    for (let i = 0; i < 2 && S.spawnQueue > 0; i++) { spawnEnemy(kind, rand(-6, 6), rand(-1, 3)); S.spawnQueue--; }
+    for (let i = 0; i < 2 + b && S.spawnQueue > 0; i++) { spawnScaled(kind, rand(-6, 6), rand(-1, 3)); S.spawnQueue--; }
   } else {
-    spawnEnemy(kind, rand(-6, 6), rand(0, 3)); S.spawnQueue--;
+    for (let i = 0; i < 1 + b && S.spawnQueue > 0; i++) { spawnScaled(kind, rand(-6, 6), rand(0, 3)); S.spawnQueue--; }
   }
   if (Math.random() < 0.3) spawnRock();
 }
@@ -816,7 +891,7 @@ function tryNova() {
   }
   if (S.bossHp > 0) {
     S.bossHp -= 50 + S.upg.power * 5;
-    if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave = 6; startWave(6); }
+    if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave++; clearField(); startWave(S.wave); }
   }
   S.msg = 'NOVA BOMB! ' + S.wpn.nova + ' LEFT';
   S.msgT = 2; hudDirty = true;
@@ -844,7 +919,7 @@ function fireRail() {
   }
   if (S.bossHp > 0 && Math.abs(boss.position.x - px) < 8) {
     S.bossHp -= dmg;
-    if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave = 6; startWave(6); }
+    if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave++; clearField(); startWave(S.wave); }
   }
   hudDirty = true;
 }
@@ -873,7 +948,7 @@ if (navigator.xr && navigator.xr.isSessionSupported) {
 function beginGame() {
   if (S.mode === 'play') return;
   S.mode = 'play'; S.score = 0; S.hull = 100; S.maxHull = 100; S.shield = 0; S.wave = 1;
-  S.retries = 0; S.bossHp = 0;
+  S.retries = 0; S.bossHp = 0; S.tier = 0; S.bossCount = 0; S.eliteLvl = 0; S.stormLvl = 0; S.bomberLvl = 0;
   S.wpn = { triple: 0, seeker: 0, plasma: 0, rail: 0, nova: 0 };
   S.upg = { plate: 0, cell: 0, engine: 0, power: 0 };
   startWave(1);
@@ -975,7 +1050,7 @@ function tick() {
       S.spawnT -= dt;
       if (S.spawnT <= 0) { queueSpawn(); S.spawnT = 0.6; }
     }
-    if (Math.random() < dt * 0.5) spawnRock();
+    if (Math.random() < dt * 0.5 * (1 + S.stormLvl)) spawnRock();
 
     // --- enemies ---
     let anyEnemy = false;
@@ -983,7 +1058,7 @@ function tick() {
       if (!e.on) continue;
       anyEnemy = true;
       e.t += dt;
-      const speed = 6 + S.wave * 0.6;
+      const speed = (6 + S.wave * 0.6) * diffSpeed() * (e.elite ? 1.3 : 1);
       e.g.position.z += speed * dt;
       if (e.kind === 'drone') {
         e.g.position.x = e.baseX + Math.sin(e.t * 2.2) * 1.4;
@@ -996,10 +1071,17 @@ function tick() {
       e.g.rotation.y += dt * 1.5;
       e.fireT -= dt;
       if (e.fireT <= 0 && e.g.position.z > -60 && e.g.position.z < -5) {
-        e.fireT = rand(1.6, 3.2);
+        e.fireT = rand(1.6, 3.2) / diffFire();
         const dx = px - e.g.position.x, dy = py - e.g.position.y;
         const d = Math.max(1, Math.hypot(dx, dy));
-        fireBolt(eBolts, e.g.position.x, e.g.position.y, e.g.position.z + 1, dx / d * 8, dy / d * 8, 26, 1);
+        if (e.bomber) {
+          for (const a of [-0.22, 0, 0.22]) {
+            const c = Math.cos(a), sn = Math.sin(a);
+            fireBolt(eBolts, e.g.position.x, e.g.position.y, e.g.position.z + 1, (dx * c - dy * sn) / d * 8, (dx * sn + dy * c) / d * 8, 26, 1);
+          }
+        } else {
+          fireBolt(eBolts, e.g.position.x, e.g.position.y, e.g.position.z + 1, dx / d * 8, dy / d * 8, 26, 1);
+        }
       }
       if (e.g.position.z > 8) { e.on = false; e.g.visible = false; continue; }
       // player bolts + plasma vs enemy
@@ -1078,7 +1160,7 @@ function tick() {
         S.bossHp -= 2 + S.upg.power;
         burst(ms.m.position.x, ms.m.position.y, ms.m.position.z, 10, 4);
         spent = true; hudDirty = true;
-        if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; sfxBoom(); burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave = 6; startWave(6); }
+        if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; sfxBoom(); burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave++; clearField(); startWave(S.wave); }
       }
       if (spent) { ms.on = false; ms.m.visible = false; continue; }
       if (ms.m.position.z < -95 || ms.m.position.z > 8) { ms.on = false; ms.m.visible = false; }
@@ -1157,12 +1239,13 @@ function tick() {
       boss.rotation.y = Math.sin(bossT * 0.5) * 0.15;
       bossFireT -= dt;
       if (bossFireT <= 0) {
-        bossFireT = 0.7;
-        for (const s of [-4.5, 4.5]) {
-          const dx = px - (boss.position.x + s), dy = py - boss.position.y;
-          const d = Math.max(1, Math.hypot(dx, dy));
-          fireBolt(eBolts, boss.position.x + s, boss.position.y, -52, dx / d * 6, dy / d * 6, 24, 1);
-        }
+        bossFireT = bossFireInterval;
+        bossVolley();
+        if (bossDouble) bossVolleyPending = 0.25;
+      }
+      if (bossVolleyPending > 0) {
+        bossVolleyPending -= dt;
+        if (bossVolleyPending <= 0) bossVolley();
       }
       for (const list of [pBolts, pPlasma]) {
         for (const b of list) {
@@ -1178,7 +1261,7 @@ function tick() {
               S.score += 5000; sfxBoom();
               burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10);
               S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3;
-              S.wave = 6; startWave(6);
+              S.wave++; clearField(); startWave(S.wave);
               hudDirty = true;
             }
             break;
@@ -1256,6 +1339,10 @@ function tick() {
       camera.position.set(rand(-0.08, 0.08) * S.shake, rand(-0.08, 0.08) * S.shake, 0);
     } else camera.position.set(0, 0, 0);
     if (S.msgT > 0) { S.msgT -= dt; if (S.msgT <= 0) { S.msg = ''; hudDirty = true; } }
+    // Performance guard: track frame health; tier progression holds while degraded.
+    avgMs = avgMs * 0.95 + dt * 1000 * 0.05;
+    if (avgMs > 20) degraded = true; else if (avgMs < 16) degraded = false;
+    checkTier();
     drawHUD(S);
   } else {
     ship.position.set(Math.sin(time * 0.5) * 1.5, Math.sin(time * 0.8) * 0.4, 0);

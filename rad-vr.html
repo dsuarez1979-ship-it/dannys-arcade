@@ -56,6 +56,7 @@
     <p class="small">Two-way highway: cross the median to face oncoming traffic — wrong-way near misses score double and build a bonus.</p>
     <p class="small">No headset handy? Desktop preview works too — arrow keys / WASD drive, M mutes.</p>
     <p class="small">NEW: neon road pickups grant <b>unlimited weapons</b> — Turbo Boost, Horn Blast, Oil Slick — and <b>stacking upgrades</b> (Engine, Grip, Armor) with no cap. No lives, no game over, ever.</p>
+    <p class="small">Difficulty climbs as you drive: every <b>1,500 m</b> raises the SPEED TIER (traffic +6% faster, +1 car — oncoming traffic joins at Tier 3) and every <b>5,000 points</b> triggers a 30-second RUSH with doubled bonus points.</p>
     <p class="small">XR: <b>left squeeze</b> cycles weapon · <b>right squeeze</b> fires · Desktop: <b>B</b> boost, <b>H</b> horn, <b>O</b> oil.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -280,7 +281,7 @@ function findSegment(z) { return segments[Math.floor(z / SEG_LEN) % segments.len
 // Cross-section points (x offsets): ground, rumble, road, road, rumble, ground
 const CROSS_X = [-GROUND_W, -(ROAD_HALF + RUMBLE_W), -ROAD_HALF, ROAD_HALF, ROAD_HALF + RUMBLE_W, GROUND_W];
 const LANE_X = 4.2;                    // lane divider offset within each carriageway
-const VERTS_PER_SEG = 20;              // 12 ribbon verts + 2 dashes x 4 verts
+const VERTS_PER_SEG = 36;              // 12 ribbon verts + 6 marking quads x 4 verts
 const roadPos = new Float32Array(DRAW * VERTS_PER_SEG * 3);
 const roadCol = new Float32Array(DRAW * VERTS_PER_SEG * 3);
 const roadIdx = [];
@@ -290,17 +291,18 @@ for (let s = 0; s < DRAW; s++) {
     const n0 = b + p, n1 = b + p + 1, f0 = b + 6 + p, f1 = b + 6 + p + 1;
     roadIdx.push(n0, f0, n1, n1, f0, f1);
   }
-  for (let d = 0; d < 2; d++) {        // lane dashes
+  for (let d = 0; d < 6; d++) {        // road markings (see MARKINGS)
     const db = b + 12 + d * 4;
     roadIdx.push(db, db + 2, db + 1, db + 1, db + 2, db + 3);
   }
 }
-// Asphalt canvas texture: dark noise, tyre-worn tracks, faded lane paint.
-// The far-right column (u ~0.99) is a solid paint patch the dash quads sample.
+// Realistic asphalt canvas texture: dark gray noise, tyre-worn tracks, cracks,
+// repair patches. Paint lives in geometry markings, not the texture.
+// The far-right column (u ~0.99) is a solid paint patch the marking quads sample.
 function makeAsphaltTexture() {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
   const g = cv.getContext('2d');
-  g.fillStyle = '#43434e'; g.fillRect(0, 0, 512, 512);
+  g.fillStyle = '#3b3b41'; g.fillRect(0, 0, 512, 512);
   for (let i = 0; i < 5200; i++) {
     const v = 140 + Math.random() * 60;
     g.fillStyle = 'rgba(' + v + ',' + v + ',' + (v + 12) + ',' + (0.05 + Math.random() * 0.10) + ')';
@@ -309,24 +311,13 @@ function makeAsphaltTexture() {
   // Tyre-polished dark tracks inside the road band (u 0.38..0.62 -> x 195..317)
   g.fillStyle = 'rgba(12,12,18,0.20)';
   [206, 234, 266, 296].forEach(x => { g.fillRect(x - 6, 0, 12, 512); });
-  // Worn lane paint (faint, broken) at the two carriageway divider positions
-  g.fillStyle = 'rgba(230,230,220,0.35)';
-  [223, 289].forEach(x => {
-    for (let y = 0; y < 512; y += 46) if (Math.random() > 0.25) g.fillRect(x - 1, y, 3, 26);
-  });
-  // Median edge paint (double amber) peeking out from under the concrete strip
-  g.fillStyle = 'rgba(255,176,46,0.8)';
-  g.fillRect(249, 0, 3, 512); g.fillRect(260, 0, 3, 512);
+  // (No painted lines in the texture — real markings are geometry quads.)
   // Occasional cracks / tar seams across the segment
   g.fillStyle = 'rgba(10,10,14,0.35)';
   for (let i = 0; i < 4; i++) g.fillRect(195, Math.random() * 512, 122, 2);
-  // Dark repair patches + faint neon sheen (dusk light bouncing off the asphalt)
+  // Dark repair patches
   g.fillStyle = 'rgba(20,20,28,0.45)';
   g.fillRect(200, 60, 60, 90); g.fillRect(260, 330, 45, 70);
-  g.fillStyle = 'rgba(39,232,255,0.05)';
-  g.fillRect(195, 120, 122, 10);
-  g.fillStyle = 'rgba(255,61,240,0.05)';
-  g.fillRect(195, 400, 122, 10);
   // Solid paint patch for the dash quads
   g.fillStyle = '#e9e9e4'; g.fillRect(505, 0, 7, 512);
   const tex = new THREE.CanvasTexture(cv);
@@ -344,7 +335,7 @@ for (let s = 0; s < DRAW; s++) {
     roadUV[(b + p) * 2] = CROSS_U[p];         roadUV[(b + p) * 2 + 1] = 0;
     roadUV[(b + 6 + p) * 2] = CROSS_U[p];     roadUV[(b + 6 + p) * 2 + 1] = 1;
   }
-  for (let d = 0; d < 2; d++) {
+  for (let d = 0; d < 6; d++) {
     const db = b + 12 + d * 4;
     roadUV[db * 2] = 0.990;       roadUV[db * 2 + 1] = 0;
     roadUV[(db + 1) * 2] = 0.996; roadUV[(db + 1) * 2 + 1] = 0;
@@ -360,51 +351,30 @@ roadGeo.setAttribute('uv', new THREE.BufferAttribute(roadUV, 2));
 roadGeo.setIndex(roadIdx);
 const road = new THREE.Mesh(roadGeo, new THREE.MeshStandardMaterial({
   map: makeAsphaltTexture(), vertexColors: true,
-  roughness: 0.38, metalness: 0.06, envMapIntensity: 0.9, side: THREE.DoubleSide
+  roughness: 0.92, metalness: 0.0, envMapIntensity: 0.25, side: THREE.DoubleSide
 }));
 road.frustumCulled = false;
 road.receiveShadow = true;
 scene.add(road);
 
-// Neon edge guide-lines (Asphalt-style): separate additive ribbon hugging the road edges
-const GLOW_VERTS = 16;                       // 4 lines x 4 verts per segment
-const GLOW_LINES = [
-  { x: -(ROAD_HALF - 0.35),    c: new THREE.Color(0x19e3ff) },   // road edges
-  { x:  (ROAD_HALF - 0.35),    c: new THREE.Color(0xff2e88) },
-  { x: -(MEDIAN_HALF + 0.18),  c: new THREE.Color(0xffb02e) },   // median edges (amber)
-  { x:  (MEDIAN_HALF + 0.18),  c: new THREE.Color(0xffb02e) }
-];
-const glowPos = new Float32Array(DRAW * GLOW_VERTS * 3);
-const glowColArr = new Float32Array(DRAW * GLOW_VERTS * 3);
-const glowIdx = [];
-{
-  for (let s = 0; s < DRAW; s++) {
-    const b = s * GLOW_VERTS;
-    for (let l = 0; l < 4; l++) {
-      const lb = b + l * 4, c = GLOW_LINES[l].c;
-      glowIdx.push(lb, lb + 2, lb + 1, lb + 1, lb + 2, lb + 3);
-      for (let k = 0; k < 4; k++) { glowColArr[(lb + k) * 3] = c.r; glowColArr[(lb + k) * 3 + 1] = c.g; glowColArr[(lb + k) * 3 + 2] = c.b; }
-    }
-  }
-}
-const glowGeo = new THREE.BufferGeometry();
-glowGeo.setAttribute('position', new THREE.BufferAttribute(glowPos, 3).setUsage(THREE.DynamicDrawUsage));
-glowGeo.setAttribute('color', new THREE.BufferAttribute(glowColArr, 3));
-glowGeo.setIndex(glowIdx);
-const glowRoad = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-  vertexColors: true, transparent: true, opacity: 1.0,
-  blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false
-}));
-glowRoad.frustumCulled = false;
-glowRoad.renderOrder = 2;
-scene.add(glowRoad);
 
 const COL = {
   groundA: new THREE.Color(0x53306e), groundB: new THREE.Color(0x472a63),
   roadA:   new THREE.Color(0xd9d9e4), roadB:   new THREE.Color(0xc6c6d4),
-  rumbleA: new THREE.Color(0xff2e88), rumbleB: new THREE.Color(0xf2f2f2),
-  dash:    new THREE.Color(0xffe95a)
+  rumbleA: new THREE.Color(0xd8cbb2), rumbleB: new THREE.Color(0xc9bda6),
+  markWhite: new THREE.Color(0xf2f2ee), markYellow: new THREE.Color(0xffc61a)
 };
+
+// Real US road markings: solid white edge lines on both shoulders, dashed white
+// lane lines between same-direction lanes, solid double-yellow at the median.
+const MARKINGS = [
+  { x: -(ROAD_HALF - 0.35), solid: true,  col: COL.markWhite },
+  { x:  (ROAD_HALF - 0.35), solid: true,  col: COL.markWhite },
+  { x: -LANE_X,              solid: false, col: COL.markWhite },
+  { x:  LANE_X,              solid: false, col: COL.markWhite },
+  { x: -(MEDIAN_HALF + 0.22), solid: true, col: COL.markYellow },
+  { x:  (MEDIAN_HALF + 0.22), solid: true, col: COL.markYellow },
+];
 function setVert(arr, i, x, y, z) { arr[i * 3] = x; arr[i * 3 + 1] = y; arr[i * 3 + 2] = z; }
 function setCol(arr, i, c) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
 function setNor(arr, i, y, z) { arr[i * 3] = 0; arr[i * 3 + 1] = y; arr[i * 3 + 2] = z; }
@@ -431,6 +401,28 @@ const median = new THREE.Mesh(medGeo, new THREE.MeshStandardMaterial({
 median.frustumCulled = false;
 median.receiveShadow = true;
 scene.add(median);
+
+// Steel guardrails on both outer edges: continuous W-beam bands following the road
+const GUARD_VERTS = 8;   // 2 sides x 4 verts (vertical band)
+const GUARD_X = ROAD_HALF + RUMBLE_W + 0.25;
+const guardPos = new Float32Array(DRAW * GUARD_VERTS * 3);
+const guardCol = new Float32Array(DRAW * GUARD_VERTS * 3);
+const guardIdx = [];
+for (let s = 0; s < DRAW; s++) {
+  const b = s * GUARD_VERTS;
+  for (let sd = 0; sd < 2; sd++) {
+    const gb2 = b + sd * 4;
+    guardIdx.push(gb2, gb2 + 2, gb2 + 1, gb2 + 1, gb2 + 2, gb2 + 3);
+  }
+}
+const guardGeo = new THREE.BufferGeometry();
+guardGeo.setAttribute('position', new THREE.BufferAttribute(guardPos, 3).setUsage(THREE.DynamicDrawUsage));
+guardGeo.setAttribute('color', new THREE.BufferAttribute(guardCol, 3).setUsage(THREE.DynamicDrawUsage));
+guardGeo.setIndex(guardIdx);
+const guardrail = new THREE.Mesh(guardGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.85, envMapIntensity: 0.7, side: THREE.DoubleSide }));
+guardrail.frustumCulled = false;
+scene.add(guardrail);
+const COL_GUARD_A = new THREE.Color(0xb9c2cc), COL_GUARD_B = new THREE.Color(0x9aa4ae);
 const COL_MED_A = new THREE.Color(0x8f8c99), COL_MED_B = new THREE.Color(0x807d8a);
 
 // Per-slot road-centre poses (near edge), recomputed every frame; traffic reuses them
@@ -464,35 +456,36 @@ function updateRoad(position, playerX) {
       setCol(roadCol, b + p, stripCols[p]);
       setCol(roadCol, b + 6 + p, stripCols[p]);
     }
-    // Lane dashes (both dividers), only on even segments; degenerate (hidden) otherwise
+    // Real US markings: solid lines always, dashed lines on even segments only
     const showDash = (seg.index % 2 === 0);
-    for (let d = 0; d < 2; d++) {
+    for (let d = 0; d < 6; d++) {
       const db = b + 12 + d * 4;
-      const cx = (d === 0 ? -LANE_X : LANE_X);
-      if (showDash) {
-        setVert(roadPos, db,     near.x + cx - 0.09 - playerX, near.y + 0.03, near.z);
-        setVert(roadPos, db + 1, near.x + cx + 0.09 - playerX, near.y + 0.03, near.z);
-        setVert(roadPos, db + 2, far.x  + cx - 0.09 - playerX, far.y  + 0.03, far.z);
-        setVert(roadPos, db + 3, far.x  + cx + 0.09 - playerX, far.y  + 0.03, far.z);
+      const mk = MARKINGS[d];
+      if (mk.solid || showDash) {
+        setVert(roadPos, db,     near.x + mk.x - 0.09 - playerX, near.y + 0.03, near.z);
+        setVert(roadPos, db + 1, near.x + mk.x + 0.09 - playerX, near.y + 0.03, near.z);
+        setVert(roadPos, db + 2, far.x  + mk.x - 0.09 - playerX, far.y  + 0.03, far.z);
+        setVert(roadPos, db + 3, far.x  + mk.x + 0.09 - playerX, far.y  + 0.03, far.z);
       } else {
         for (let k = 0; k < 4; k++) setVert(roadPos, db + k, near.x - playerX, near.y - 1, near.z);
       }
-      for (let k = 0; k < 4; k++) setCol(roadCol, db + k, COL.dash);
+      for (let k = 0; k < 4; k++) setCol(roadCol, db + k, mk.col);
     }
     // Analytic ribbon normals from the hill slope (for the PBR sheen)
     const dyS = far.y - near.y, nLen = Math.sqrt(SEG_LEN * SEG_LEN + dyS * dyS);
     const nY = SEG_LEN / nLen, nZ = dyS / nLen;
     for (let p = 0; p < 12; p++) setNor(roadNor, b + p, nY, nZ);
-    // Neon edge guide-lines (road edges + amber median edges)
-    const gb = s * GLOW_VERTS;
-    for (let l = 0; l < 4; l++) {
-      const lb = gb + l * 4;
-      const cx = GLOW_LINES[l].x;
-      setVert(glowPos, lb,     near.x + cx - 0.09 - playerX, near.y + 0.045, near.z);
-      setVert(glowPos, lb + 1, near.x + cx + 0.09 - playerX, near.y + 0.045, near.z);
-      setVert(glowPos, lb + 2, far.x  + cx - 0.09 - playerX, far.y  + 0.045, far.z);
-      setVert(glowPos, lb + 3, far.x  + cx + 0.09 - playerX, far.y  + 0.045, far.z);
-    }
+    // Guardrail bands on both outer edges (vertical steel strips, alternating tint)
+    const gb2 = s * GUARD_VERTS;
+    const grdC = seg.alt ? COL_GUARD_B : COL_GUARD_A;
+    [-GUARD_X, GUARD_X].forEach((gx, si) => {
+      const vb = gb2 + si * 4;
+      setVert(guardPos, vb,     near.x + gx - playerX, near.y + 0.15, near.z);
+      setVert(guardPos, vb + 1, near.x + gx - playerX, near.y + 0.78, near.z);
+      setVert(guardPos, vb + 2, far.x  + gx - playerX, far.y  + 0.15, far.z);
+      setVert(guardPos, vb + 3, far.x  + gx - playerX, far.y  + 0.78, far.z);
+      for (let k = 0; k < 4; k++) setCol(guardCol, vb + k, grdC);
+    });
     // Low concrete median strip (slightly raised, alternating tint)
     const mb = s * MED_VERTS;
     const mC = seg.alt ? COL_MED_B : COL_MED_A;
@@ -505,9 +498,10 @@ function updateRoad(position, playerX) {
   roadGeo.attributes.position.needsUpdate = true;
   roadGeo.attributes.color.needsUpdate = true;
   roadGeo.attributes.normal.needsUpdate = true;
-  glowGeo.attributes.position.needsUpdate = true;
   medGeo.attributes.position.needsUpdate = true;
   medGeo.attributes.color.needsUpdate = true;
+  guardGeo.attributes.position.needsUpdate = true;
+  guardGeo.attributes.color.needsUpdate = true;
 }
 
 // ============================== merged-geometry helper (props built once) ==============================
@@ -610,30 +604,91 @@ const pineMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const pines = [];
 for (let i = 0; i < 16; i++) { const p = new THREE.Mesh(pineGeo, pineMat); p.visible = false; p.castShadow = true; scene.add(p); pines.push(p); }
 
-// Neon road signs: glowing panel on two posts, pooled
-const signTex = (() => {
-  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#10243e'; g.fillRect(0, 0, 256, 128);
-  g.strokeStyle = '#27e8ff'; g.lineWidth = 5; g.strokeRect(6, 6, 244, 116);
-  g.fillStyle = '#eaf7ff'; g.textAlign = 'center';
-  g.font = '900 34px Arial'; g.fillText('SUNSET BLVD', 128, 56);
-  g.font = '700 26px Arial'; g.fillStyle = '#ffd319'; g.fillText('NEON DR  →', 128, 96);
+// Real US-style road signs (canvas textures, no external files; fictional place
+// names only). Speed limit, green highway direction/exit, yellow diamond warnings,
+// merge — plus small green mile markers on the right shoulder.
+function makeSignTexture(draw, w, h) {
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const g = cv.getContext('2d'); draw(g);
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
-})();
+}
+function speedLimitTex(n) { return makeSignTexture(g => {
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = '#111111'; g.lineWidth = 10; g.strokeRect(8, 8, 240, 240);
+  g.fillStyle = '#111111'; g.textAlign = 'center';
+  g.font = '700 30px Arial'; g.fillText('SPEED', 128, 62); g.fillText('LIMIT', 128, 96);
+  g.font = '900 110px Arial'; g.fillText(String(n), 128, 210);
+}, 256, 256); }
+function greenSignTex(lines, arrow) { return makeSignTexture(g => {
+  g.fillStyle = '#0d5c2e'; g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.strokeRect(8, 8, 496, 240);
+  g.fillStyle = '#ffffff'; g.textAlign = 'center';
+  g.font = '900 40px Arial';
+  lines.forEach((ln, i) => g.fillText(ln, 256, 90 + i * 52));
+  if (arrow) { g.font = '900 52px Arial'; g.fillText(arrow, 256, 222); }
+}, 512, 256); }
+function diamondTex(kind) { return makeSignTexture(g => {
+  g.clearRect(0, 0, 256, 256);
+  g.save(); g.translate(128, 128); g.rotate(Math.PI / 4);
+  g.fillStyle = '#ffbf00'; g.fillRect(-88, -88, 176, 176);
+  g.strokeStyle = '#111111'; g.lineWidth = 8; g.strokeRect(-88, -88, 176, 176);
+  g.restore();
+  g.strokeStyle = '#111111'; g.fillStyle = '#111111'; g.lineCap = 'round';
+  if (kind === 'curve') {
+    g.lineWidth = 16; g.beginPath();
+    g.moveTo(72, 200); g.quadraticCurveTo(72, 84, 172, 80); g.stroke();
+    g.beginPath(); g.moveTo(172, 80); g.lineTo(140, 84); g.lineTo(164, 110); g.closePath(); g.fill();
+  } else {  // merge: straight lane + joining lane
+    g.lineWidth = 14;
+    g.beginPath(); g.moveTo(104, 208); g.lineTo(104, 62); g.stroke();
+    g.beginPath(); g.moveTo(104, 62); g.lineTo(86, 92); g.moveTo(104, 62); g.lineTo(122, 92); g.stroke();
+    g.beginPath(); g.moveTo(172, 208); g.lineTo(104, 122); g.stroke();
+  }
+}, 256, 256); }
+function signVariant(tex, w, h) { return { tex, w, h, geo: new THREE.PlaneGeometry(w, h) }; }
+const SIGN_VARIANTS = [
+  signVariant(speedLimitTex(55), 1.1, 1.4),
+  signVariant(speedLimitTex(65), 1.1, 1.4),
+  signVariant(greenSignTex(['RAD CITY', '2 MILES'], '→'), 2.6, 1.3),
+  signVariant(greenSignTex(['SUNSET BLVD', 'NEXT EXIT'], '→'), 2.6, 1.3),
+  signVariant(greenSignTex(['NEON BAY', '5 MILES'], '↑'), 2.6, 1.3),
+  signVariant(greenSignTex(['EXIT 12', 'PALM GROVE'], '→'), 2.6, 1.3),
+  signVariant(diamondTex('curve'), 1.4, 1.4),
+  signVariant(diamondTex('merge'), 1.4, 1.4),
+];
+const signPostMat = new THREE.MeshLambertMaterial({ color: 0x23232e });
 const signs = [];
+for (let i = 0; i < 10; i++) {
+  const grp = new THREE.Group();
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.3),
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false }));
+  panel.position.y = 1.7; grp.add(panel);
+  const postL = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.6, 0.09), signPostMat);
+  postL.position.set(-0.9, 1.3, 0); grp.add(postL);
+  const postR = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.6, 0.09), signPostMat);
+  postR.position.set(0.9, 1.3, 0); grp.add(postR);
+  grp.userData.panel = panel; grp.userData.postL = postL; grp.userData.postR = postR;
+  grp.visible = false; scene.add(grp); signs.push(grp);
+}
+// Small green mile markers (own pool, own textures)
+const mileTexs = [12, 27, 34, 48, 55, 63].map(n => makeSignTexture(g => {
+  g.fillStyle = '#0d5c2e'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.strokeRect(8, 8, 240, 240);
+  g.fillStyle = '#ffffff'; g.textAlign = 'center';
+  g.font = '700 30px Arial'; g.fillText('MILE', 128, 80);
+  g.font = '900 90px Arial'; g.fillText(String(n), 128, 180);
+}, 256, 256));
+const mileMarkers = [];
 for (let i = 0; i < 6; i++) {
   const grp = new THREE.Group();
-  const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2),
-    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.DoubleSide, toneMapped: false }));
-  panel.position.y = 0.6; grp.add(panel);
-  const postMat2 = new THREE.MeshLambertMaterial({ color: 0x23232e });
-  [-0.9, 0.9].forEach(px => {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.6, 0.09), postMat2);
-    post.position.set(px, -0.2, 0); grp.add(post);
-  });
-  grp.visible = false; scene.add(grp); signs.push(grp);
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.7),
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false }));
+  panel.position.y = 1.2; grp.add(panel);
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.2, 0.08), signPostMat);
+  post.position.set(0, 0.6, 0); grp.add(post);
+  grp.userData.panel = panel;
+  grp.visible = false; scene.add(grp); mileMarkers.push(grp);
 }
 
 
@@ -704,13 +759,13 @@ function hash1(n) { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.
 const gantrySignTex = (() => {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128;
   const g = cv.getContext('2d');
-  g.fillStyle = '#10243e'; g.fillRect(0, 0, 512, 128);
-  g.strokeStyle = '#7df9ff'; g.lineWidth = 5; g.strokeRect(6, 6, 500, 116);
+  g.fillStyle = '#0d5c2e'; g.fillRect(0, 0, 512, 128);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 5; g.strokeRect(6, 6, 500, 116);
   g.fillStyle = '#eaf7ff'; g.textAlign = 'center';
   g.font = '900 52px Arial';
   g.fillText('RAD CITY  →', 256, 60);
   g.font = '700 30px Arial'; g.fillStyle = '#ffd319';
-  g.fillText('SUNSET BLVD', 256, 104);
+  g.fillText('SUNSET BLVD EXIT', 256, 104);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -735,7 +790,7 @@ for (let i = 0; i < 4; i++) {
 }
 
 function updateProps(playerX) {
-  let pi = 0, pa = 0, gi = 0, mi = 0, si = 0, pn = 0;
+  let pi = 0, pa = 0, gi = 0, mi = 0, si = 0, pn = 0, mk = 0;
   bldgCount[0] = bldgCount[1] = bldgCount[2] = 0;
   for (let s = 0; s < DRAW; s++) {
     const seg = segments[(baseSegment.index + s) % segments.length];
@@ -751,8 +806,22 @@ function updateProps(playerX) {
       gl.position.set(px - seg.side * 1.35, pose.y + 5.5, pose.z);
     } else if (seg.obj === 'sign' && si < signs.length) {
       const s = signs[si++];
+      const v = SIGN_VARIANTS[seg.index % SIGN_VARIANTS.length];
+      s.userData.panel.geometry = v.geo;
+      s.userData.panel.material.map = v.tex;
+      s.userData.panel.material.needsUpdate = true;
+      s.userData.postL.position.x = -(v.w / 2 - 0.15);
+      s.userData.postR.position.x = (v.w / 2 - 0.15);
       s.visible = true;
-      s.position.set(pose.x + seg.side * (ROAD_HALF + RUMBLE_W + 1.4) - playerX, pose.y + 1.6, pose.z);
+      s.position.set(pose.x + seg.side * (ROAD_HALF + RUMBLE_W + 1.4) - playerX, pose.y, pose.z);
+    }
+    // Small green mile markers on the right shoulder, every 50 segments
+    if (seg.index % 50 === 25 && mk < mileMarkers.length) {
+      const m = mileMarkers[mk++];
+      m.userData.panel.material.map = mileTexs[seg.index % mileTexs.length];
+      m.userData.panel.material.needsUpdate = true;
+      m.visible = true;
+      m.position.set(pose.x + (ROAD_HALF + RUMBLE_W + 0.9) - playerX, pose.y, pose.z);
     } else if (seg.obj === 'pine' && pn < pines.length) {
       const pn2 = pines[pn++];
       pn2.visible = true;
@@ -798,6 +867,7 @@ function updateProps(playerX) {
   for (; pi < pylons.length; pi++) { pylons[pi].visible = false; pylonGlows[pi].visible = false; }
   for (; pa < palms.length; pa++) palms[pa].visible = false;
   for (; si < signs.length; si++) signs[si].visible = false;
+  for (; mk < mileMarkers.length; mk++) mileMarkers[mk].visible = false;
   for (; pn < pines.length; pn++) pines[pn].visible = false;
   for (; mi < posts.length; mi++) posts[mi].visible = false;
   for (; gi < gantries.length; gi++) gantries[gi].visible = false;
@@ -1018,7 +1088,7 @@ for (let i = 0; i < 12; i++) {
   g.visible = false;
   scene.add(g);
   cars.push({
-    mesh: g, wheels, wheelR: v.wheelR, dir,
+    mesh: g, wheels, wheelR: v.wheelR, dir, active: false,
     z: 150 + i * 190 + (i % 3) * 60,
     offset: dir > 0 ? SAME_LANES[i % 2] : ONC_LANES[i % 2],
     speed: 17 + (i % 5) * 3.5,
@@ -1046,6 +1116,25 @@ let dashTick = 0;                        // dash redraw counter (banner flashing
 let shakeT = 0;
 let flash = 0;
 let steerSmooth = 0;
+
+// ============================== difficulty tiers (goal-based) ==============================
+// Tier up every 1,500 m: traffic +6% speed, +1 active car (to the 12-car pool cap),
+// oncoming traffic joins at tier 3, near-miss bonuses grow with the tier.
+// Every 5,000 points: a 30 s RUSH (denser, faster traffic, bonus points doubled).
+// Tiers never decrease within a run. Progression holds while frames degrade.
+let tier = 1, nextTierAt = 1500, nextRushAt = 5000;
+let bonusPts = 0, rushT = 0, tierMsg = '', tierMsgT = 0, tierCooldown = 0;
+let perfHold = false, avgFrameMs = 16, lastFrameT = performance.now();
+function pointsTotal() { return Math.floor(distance + bonusPts + wwBonus); }
+function tierSpeedMul() { return (1 + (tier - 1) * 0.06) * (rushT > 0 ? 1.25 : 1); }
+function refreshTrafficActivation() {
+  let s = 0, o = 0;
+  for (const car of cars) {
+    if (car.dir > 0) car.active = (s++ < Math.min(7, 4 + tier));   // t1: 5, t2: 6, t3+: 7
+    else car.active = tier >= 3 && (o++ < Math.min(5, tier - 2));  // t3: 1 … t7+: 5
+  }
+}
+refreshTrafficActivation();   // tier 1: first 5 same-direction cars only
 
 // ============================== weapons + upgrades (UNLIMITED) ==============================
 // No inventory cap, no upgrade cap, no lives, no game over — crashes still only
@@ -1177,6 +1266,7 @@ function fireWeapon(sel) {
   } else if (sel === 1) {
     hornSound(); hornRingT = 0.6;
     for (const car of cars) {
+      if (!car.active) continue;
       const relZ = mod(car.z - position, TRACK_LEN);
       if (relZ < 90) respawnCar(car, position);   // traffic ahead scatters
     }
@@ -1186,6 +1276,7 @@ function fireWeapon(sel) {
     const s = slicks[slickCursor]; slickCursor = (slickCursor + 1) % slicks.length;
     s.dist = mod(position - 6, TRACK_LEN); s.lane = playerX; s.active = true; s.until = distance + 1200;
     for (const car of cars) {   // followers behind hit the slick: slowed + wobbling
+      if (!car.active) continue;
       if (car.dir <= 0) continue;
       const relZ = mod(car.z - position, TRACK_LEN);
       if (relZ > TRACK_LEN / 2 && TRACK_LEN - relZ < 150) { car.speed *= 0.55; car.wobble = 3; }
@@ -1196,7 +1287,9 @@ function fireWeapon(sel) {
 
 function updateTraffic(dt, positionNow) {
   for (const car of cars) {
-    car.z = mod(car.z + car.dir * car.speed * dt, TRACK_LEN);
+    if (!car.active) { car.mesh.visible = false; continue; }
+    const effSpeed = car.speed * tierSpeedMul();
+    car.z = mod(car.z + car.dir * effSpeed * dt, TRACK_LEN);
     const relZ = mod(car.z - positionNow, TRACK_LEN);
     if (relZ > TRACK_LEN / 2) {                       // car is behind the player
       if (TRACK_LEN - relZ > 45) respawnCar(car, positionNow);
@@ -1216,7 +1309,7 @@ function updateTraffic(dt, positionNow) {
     if (car.wobble > 0) { car.wobble -= dt; car.mesh.rotation.z = Math.sin(Date.now() * 0.02) * 0.09; }
     else car.mesh.rotation.z = 0;
     car.mesh.rotation.x = (car.dir < 0 ? -1 : 1) * Math.atan((pB.y - pA.y) / SEG_LEN);
-    const wrot = car.speed * dt / car.wheelR;
+    const wrot = effSpeed * dt / car.wheelR;
     for (let wi = 0; wi < car.wheels.length; wi++) car.wheels[wi].rotation.x -= wrot;
     // Collision: same stretch of road, overlapping laterally
     if (relZ < 4.6 && Math.abs(playerX - car.offset) < 1.7) {
@@ -1226,7 +1319,7 @@ function updateTraffic(dt, positionNow) {
           speed = Math.min(speed, 4 + upgrades.armor * 3);
           shakeT = 0.85; flash = 0.85;
         } else {
-          speed = Math.min(speed, car.speed * 0.45 + upgrades.armor * 2);
+          speed = Math.min(speed, effSpeed * 0.45 + upgrades.armor * 2);
           shakeT = 0.55; flash = 0.55;
         }
         thud();
@@ -1240,8 +1333,8 @@ function updateTraffic(dt, positionNow) {
     if (!car.counted && relZ > 4.6 && relZ < 9) {
       const lat = Math.abs(playerX - car.offset);
       if (lat >= 1.7 && lat < 3.4) {
-        if (car.dir < 0) { nearMisses += 2; car.counted = true; }
-        else if (speed > car.speed + 6) { nearMisses++; car.counted = true; }
+        if (car.dir < 0) { nearMisses += 2; bonusPts += 100 * tier * (rushT > 0 ? 2 : 1); car.counted = true; }
+        else if (speed > effSpeed + 6) { nearMisses++; bonusPts += 50 * tier * (rushT > 0 ? 2 : 1); car.counted = true; }
       }
     }
   }
@@ -1354,11 +1447,13 @@ function drawDash(mph) {
   g.fillText('NEAR MISS  ' + nearMisses, 484, 218);
   g.font = '700 22px Arial'; g.textAlign = 'center';
   g.fillStyle = boostTime > 0 ? '#27e8ff' : '#eaf6ff';
-  let line = 'ENG ' + upgrades.engine + ' GRP ' + upgrades.grip + ' ARM ' + upgrades.armor +
+  let line = 'T' + tier + ' · ENG ' + upgrades.engine + ' GRP ' + upgrades.grip + ' ARM ' + upgrades.armor +
              ' · B ' + weapons.boost + ' H ' + weapons.horn + ' O ' + weapons.oil +
              ' · ' + WEAPON_DEFS[selectedWeapon].name;
   if (boostTime > 0) line = 'BOOST! ' + line;
   if (upgradeMsgT > 0) line += ' ★ ' + upgradeMsg;
+  if (tierMsgT > 0) line += ' ◆ ' + tierMsg;
+  if (rushT > 0) line = 'RUSH ' + Math.ceil(rushT) + 's! ' + line;
   if (wwBonus > 0) line += ' BONUS ' + Math.floor(wwBonus);
   g.fillText(line, 256, 244);
   dashTex.needsUpdate = true;
@@ -1677,6 +1772,11 @@ let dashTimer = 0, hudMph = -1;
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  // Frame-time guard: hold difficulty progression while frames degrade
+  const ftNow = performance.now();
+  const ft = Math.min(ftNow - lastFrameT, 200); lastFrameT = ftNow;
+  avgFrameMs = avgFrameMs * 0.95 + ft * 0.05;
+  if (avgFrameMs > 22) perfHold = true; else if (avgFrameMs < 17) perfHold = false;
   const input = readInputs();
   if (input.cycle) selectedWeapon = (selectedWeapon + 1) % 3;
   if (input.fire) fireWeapon(input.fireSel >= 0 ? input.fireSel : selectedWeapon);
@@ -1717,6 +1817,22 @@ function tick() {
     upgradeMsgT = 3;
     nextMilestone += 1500;
     pickupSound();
+  }
+
+  // --- difficulty tiers + RUSH (held while frames degrade, catch up 1 tier/sec) ---
+  if (tierCooldown > 0) tierCooldown -= dt;
+  if (tierMsgT > 0) tierMsgT -= dt;
+  if (rushT > 0) rushT -= dt;
+  if (!perfHold && tierCooldown <= 0) {
+    if (distance >= nextTierAt) {
+      tier++; nextTierAt += 1500; tierCooldown = 1.0;
+      refreshTrafficActivation();
+      tierMsg = 'SPEED TIER ' + tier + (tier === 3 ? ' — ONCOMING TRAFFIC JOINS!' : ' — traffic faster, denser!');
+      tierMsgT = 4; pickupSound();
+    } else if (pointsTotal() >= nextRushAt) {
+      nextRushAt += 5000; rushT = 30;
+      tierMsg = 'RUSH! Bonus points DOUBLED!'; tierMsgT = 4; pickupSound();
+    }
   }
 
   // --- world rebuild (treadmill: road/props/traffic move around the player) ---
@@ -1776,7 +1892,7 @@ function tick() {
     dashTimer = 0;
     drawDash(mph);
     const r = Math.round(mph);
-    if (r !== hudMph) { hudMph = r; hud.textContent = r + ' MPH · ' + WEAPON_DEFS[selectedWeapon].name; }
+    hud.textContent = r + ' MPH · T' + tier + ' · NEXT TIER ' + Math.max(0, Math.ceil(nextTierAt - distance)) + 'm · RUSH ' + Math.max(0, Math.ceil(nextRushAt - pointsTotal())) + 'pts' + (rushT > 0 ? ' · RUSH ' + Math.ceil(rushT) + 's!' : '');
   }
   updateAudio(speedPercent, input.gas);
 

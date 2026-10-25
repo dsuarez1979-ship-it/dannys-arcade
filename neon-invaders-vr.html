@@ -380,8 +380,8 @@ function makePanel(w, h) {
   return { cv, ctx: cv.getContext('2d'), tex };
 }
 // Score panel, floating left of the formation
-const scorePanel = makePanel(3.6, 2.25);
-const scoreMesh = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.25),
+const scorePanel = makePanel(3.6, 2.55);
+const scoreMesh = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.55),
   new THREE.MeshBasicMaterial({ map: scorePanel.tex, toneMapped: false, fog: false }));
 scoreMesh.position.set(-10.1, 6.9, -13.4);
 scoreMesh.rotation.y = 0.38;
@@ -415,7 +415,40 @@ function showAnnouncement(main, sub, dur) {
 let mode = 'menu';
 let started = false;
 let score = 0, wave = 1, shipsLost = 0;
-let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnGear = '';
+// ============================== goal-based difficulty tiers ==============================
+// Every 2500 score = one tier up, on top of the existing per-wave escalation.
+// Tiers never decrease within a run. Each tier: formation march +4% (hard cap
+// 6 respected), enemy bomb rate +5% (0.38s floor respected). From tier 3, one
+// random invader per row becomes an elite: brighter core, 2 HP, double points.
+// Every 5th wave is a SURGE wave: faster march, double bomb rate, double points.
+// FREEZE GUARD: tiers add no entities and change no pools or caps; while the
+// adaptive valve reports degraded frames, new tier-ups pause until recovery.
+const TIER_POINTS = 2500;
+let tier = 0, surgeWave = false;
+function addScore(n) {
+  score += surgeWave ? n * 2 : n;
+  checkTierUp();
+}
+function checkTierUp() {
+  const target = Math.floor(score / TIER_POINTS);
+  if (target <= tier) return;
+  if (degraded) return; // pause escalation while frames degrade; retries on the next score gain
+  tier = target;
+  markScoreDirty();
+  showAnnouncement('TIER ' + tier, tier >= 3 ? 'Faster march - more bombs - ELITES inbound' : 'Faster march - more bombs', 1.8);
+  pickupSound();
+  assignElites();
+}
+function assignElites() {
+  if (tier < 3) return;
+  for (let row = 0; row < ROWS; row++) {
+    const alive = invaders.filter(v => v.row === row && v.alive);
+    if (!alive.length || alive.some(v => v.elite)) continue;
+    const pick = alive[Math.floor(Math.random() * alive.length)];
+    pick.elite = true; pick.hp = 2; pick.points = pick.def.points * 2;
+  }
+}
+let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnGear = '', drawnTier = -1, drawnSurge = false;
 const hud = document.getElementById('hud');
 let hudText = '';
 // Weapons and upgrades: every level stacks WITHOUT a maximum. Levels are plain
@@ -444,8 +477,8 @@ function flushScorePanel(dt) {
 }
 function drawScorePanel() {
   const gear = gearString();
-  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && gear === drawnGear) return;
-  drawnScore = score; drawnWave = wave; drawnLost = shipsLost; drawnGear = gear;
+  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && gear === drawnGear && tier === drawnTier && surgeWave === drawnSurge) return;
+  drawnScore = score; drawnWave = wave; drawnLost = shipsLost; drawnGear = gear; drawnTier = tier; drawnSurge = surgeWave;
   const g = scorePanel.ctx, W2 = scorePanel.cv.width, H = scorePanel.cv.height;
   g.fillStyle = 'rgba(8,10,26,0.88)'; g.fillRect(0, 0, W2, H);
   g.strokeStyle = '#27e8ff'; g.lineWidth = 5; g.strokeRect(5, 5, W2 - 10, H - 10);
@@ -465,10 +498,12 @@ function drawScorePanel() {
   g.fillText('WEAPONS  S' + W.spread + '  T' + W.twin + '  R' + W.rail + '  K' + W.seeker + '  B' + W.bomb, W2 / 2, 222);
   g.fillStyle = '#2bff88';
   g.fillText('UPGRADES  F' + U.rate + '  H' + U.shield + '  P' + U.power + '  V' + U.speed, W2 / 2, 256);
+  g.fillStyle = surgeWave ? '#ff2e88' : '#ffd319'; g.font = '700 26px Arial';
+  g.fillText(surgeWave ? 'SURGE WAVE - DOUBLE POINTS - TIER ' + tier : 'TIER ' + tier + ' - NEXT TIER IN ' + (TIER_POINTS - (score % TIER_POINTS)) + ' PTS', W2 / 2, 292);
   g.fillStyle = '#ffd319'; g.font = '700 26px Arial';
   g.fillText('SHIPS: ∞ UNLIMITED  ·  WEAPONS: ∞ NO CAP', W2 / 2, H - 22);
   scorePanel.tex.needsUpdate = true;
-  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost + ' · ' + gear;
+  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · TIER ' + tier + ' · NEXT TIER IN ' + (TIER_POINTS - (score % TIER_POINTS)) + ' PTS' + (surgeWave ? ' · SURGE!' : '') + ' · SHIPS LOST ' + shipsLost + ' · ' + gear;
   if (t !== hudText) { hudText = t; hud.textContent = t; }
 }
 drawScorePanel();
@@ -551,7 +586,7 @@ const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
       const lx = (col - (COLS - 1) / 2) * DX, ly = -row * DY;
       grp.position.set(lx, ly, 0);
       formation.add(grp);
-      invaders.push({ grp, row, col, lx, ly, alive: true, phase: Math.random() * Math.PI * 2, def });
+      invaders.push({ grp, core, row, col, lx, ly, alive: true, phase: Math.random() * Math.PI * 2, def, elite: false, hp: 1, points: def.points });
     }
   });
 }
@@ -617,7 +652,7 @@ function updateInvaderDetails() {
     detailDummy.updateMatrix();
     canopyMesh.setMatrixAt(i, detailDummy.matrix);
     detailDummy.position.set(gx, gy, 0.22);
-    detailDummy.scale.setScalar(pulse);
+    detailDummy.scale.setScalar(pulse * (v.elite ? 1.6 : 1));
     detailDummy.updateMatrix();
     ringMesh.setMatrixAt(i, detailDummy.matrix);
   }
@@ -877,7 +912,7 @@ function explodeOrb(x, y, z) {
   for (const mb of bombs) {
     if (!mb.active) continue;
     const dx = mb.grp.position.x - x, dy = mb.grp.position.y - y, dz = mb.grp.position.z - z;
-    if (dx * dx + dy * dy + dz * dz < R2) { mb.active = false; mb.grp.visible = false; score += 5; }
+    if (dx * dx + dy * dy + dz * dz < R2) { mb.active = false; mb.grp.visible = false; addScore(5); }
   }
   markScoreDirty();
 }
@@ -1208,7 +1243,7 @@ function pollInput(dt) {
 // ============================== game flow ==============================
 function resetFormation(fullRestore) {
   if (fullRestore) {
-    for (const v of invaders) { v.alive = true; v.grp.visible = true; }
+    for (const v of invaders) { v.alive = true; v.grp.visible = true; v.elite = false; v.hp = 1; v.points = v.def.points; }
     aliveCount = COLS * ROWS;
   }
   formX = 0; marchDir = 1;
@@ -1216,12 +1251,15 @@ function resetFormation(fullRestore) {
   formation.position.set(formX, formY, FORM_Z);
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
   bombTimer = 1.4;
+  assignElites();
 }
 function startWave() {
+  surgeWave = (wave % 5 === 0);
   resetFormation(true);
   resetShields();
   markScoreDirty();
-  showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
+  if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster march, double bombs!', 2.2);
+  else showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
   if (wave > 1) { // wave-clear bonus: 3 free pickups rain into the field
     for (let k = 0; k < 3; k++) spawnPickup(rand(-6, 6), rand(9, 11), FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
   }
@@ -1230,10 +1268,10 @@ function startGame() {
   if (started) return;
   started = true;
   mode = 'play';
-  score = 0; wave = 1; shipsLost = 0;
+  score = 0; wave = 1; shipsLost = 0; tier = 0; surgeWave = false;
   W.spread = W.twin = W.rail = W.seeker = W.bomb = 0;
   U.rate = U.shield = U.power = U.speed = 0;
-  drawnScore = drawnWave = drawnLost = -1; drawnGear = '';
+  drawnScore = drawnWave = drawnLost = -1; drawnGear = ''; drawnTier = -1; drawnSurge = false;
   cannonX = 0;
   for (const p of pickups) { p.active = false; p.grp.visible = false; }
   for (const m of missiles) { m.active = false; m.grp.visible = false; }
@@ -1280,7 +1318,8 @@ let elapsed = 0;
 function updateFormation(dt) {
   const deadFrac = 1 - aliveCount / (COLS * ROWS);
   // FREEZE FIX: march speed is hard-capped so late waves can't spiral.
-  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.12) * (1 + deadFrac * 1.9));
+  // GOAL TIERS: +4% march per tier (hard cap 6 respected); SURGE waves +25%.
+  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.12) * (1 + deadFrac * 1.9) * (1 + tier * 0.04) * (surgeWave ? 1.25 : 1));
   formX += marchDir * marchSpeed * dt;
   if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.6; stepThump(); }
   else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.6; stepThump(); }
@@ -1289,17 +1328,25 @@ function updateFormation(dt) {
   for (const v of invaders) {
     if (!v.alive) continue;
     v.grp.position.y = v.ly + Math.sin(elapsed * 2.1 + v.phase + v.col * 0.35) * 0.05;
-    const s = 1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18;
+    const s = (1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18) * (v.elite ? 1.4 : 1);
     v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
+    if (v.core) v.core.scale.setScalar(v.elite ? 1.8 : 1); // elite: brighter, bigger core
   }
   updateInvaderDetails();
   // Bottom row reached the defense line?
   if (formY - (ROWS - 1) * DY <= DEFENSE_Y) formationLanded();
 }
 function killInvader(v) {
+  if (v.elite && v.hp > 1) { // elite absorbs the first hit — brighter core, 2 HP
+    v.hp--;
+    spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 10, 3.5, 0.4);
+    invaderHitSound();
+    markScoreDirty();
+    return;
+  }
   v.alive = false; v.grp.visible = false;
   aliveCount--;
-  score += v.def.points;
+  addScore(v.points);
   spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 24, 4.6, 0.7);
   spawnShockwave(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color);
   invaderHitSound();
@@ -1329,7 +1376,7 @@ function updateBolts(dt) {
       // Mothership
       if (motherActive && Math.abs(p.x - mother.position.x) < 1.6 && Math.abs(p.y - mother.position.y) < 0.75 && Math.abs(p.z - mother.position.z) < 1.4) {
         const bonus = 50 * (1 + Math.floor(Math.random() * 4));
-        score += bonus;
+        addScore(bonus);
         spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xff2e88, 42, 6, 0.9);
         spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xffd319, 20, 4.5, 0.7);
         spawnShockwave(mother.position.x, mother.position.y, mother.position.z, 0xff2e88);
@@ -1362,7 +1409,7 @@ function updateBolts(dt) {
         const dx = p.x - mb.grp.position.x, dy = p.y - mb.grp.position.y, dz = p.z - mb.grp.position.z;
         if (dx * dx + dy * dy + dz * dz < 0.2) {
           mb.active = false; mb.grp.visible = false;
-          score += 5;
+          addScore(5);
           spawnBurst(p.x, p.y, p.z, 0xffa02e, 10, 3.4, 0.5);
           invaderHitSound();
           markScoreDirty();
@@ -1452,7 +1499,9 @@ function updateBombs(dt) {
   bombTimer -= dt;
   if (bombTimer <= 0) {
     dropBomb();
-    bombTimer = Math.max(0.38, rand(0.7, 1.25) - wave * 0.06 - (1 - aliveCount / (COLS * ROWS)) * 0.3);
+    // GOAL TIERS: +5% bomb rate per tier (interval x0.95^tier, 0.38s floor kept);
+    // SURGE waves drop bombs at double rate (interval x0.5) for that wave only.
+    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.06 - (1 - aliveCount / (COLS * ROWS)) * 0.3) * Math.pow(0.95, tier) * (surgeWave ? 0.5 : 1));
   }
   for (const b of bombs) {
     if (!b.active) continue;
