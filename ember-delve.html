@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Ember Delve VR — Danny's Arcade</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0605; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  #panel { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: radial-gradient(900px 600px at 50% 30%, #3a1503 0%, #120701 60%, #000 100%); color: #ffe9c9; text-align: center; padding: 24px; z-index: 10; }
+  #panel h1 { margin: 0; font-size: clamp(38px, 8vw, 72px); letter-spacing: 3px; color: #ffb347; text-shadow: 0 0 24px rgba(255,140,0,.55); }
+  #panel p { margin: 0; max-width: 560px; line-height: 1.5; color: #e8c9a0; font-size: 16px; }
+  #panel .tag { font-size: 12px; letter-spacing: 2px; color: #ffb347; font-weight: 700; }
+  #vrBtn { margin-top: 10px; font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #1a0d02; background: linear-gradient(180deg, #ffc46b, #ff8c1a); border: none; border-radius: 14px; padding: 16px 34px; cursor: pointer; box-shadow: 0 6px 24px rgba(255,140,0,.4); }
+  #vrBtn:disabled { opacity: .55; }
+  #status { font-size: 13px; color: #b99a7a; min-height: 18px; }
+  #back { color: #ffb347; text-decoration: none; font-size: 14px; }
+  #hud { position: fixed; left: 12px; top: 12px; z-index: 5; display: none; color: #ffe9c9; background: rgba(0,0,0,.45); border: 1px solid rgba(255,180,90,.35); border-radius: 10px; padding: 8px 12px; font-size: 15px; line-height: 1.5; pointer-events: none; }
+  #msg { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 5; color: #ffd98a; background: rgba(0,0,0,.55); border-radius: 10px; padding: 8px 16px; font-size: 17px; display: none; pointer-events: none; text-align: center; max-width: 90vw; }
+  #dmg { position: fixed; inset: 0; z-index: 4; background: radial-gradient(ellipse at center, transparent 40%, rgba(255,0,0,.55) 100%); opacity: 0; pointer-events: none; transition: opacity .12s; }
+  #muteBtn { position: fixed; right: 12px; top: 12px; z-index: 6; background: rgba(0,0,0,.5); color: #ffe9c9; border: 1px solid rgba(255,180,90,.4); border-radius: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div id="panel">
+  <div class="tag">DANNY'S ARCADE · VR QUEST</div>
+  <h1>EMBER DELVE</h1>
+  <p><b>Kael the Ember Knight</b> enters the Sunken Halls of Cindermaw. Five chambers. Switch puzzles, locked doors, ember-crystals, monsters — and something big asleep at the bottom.</p>
+  <p><b>Quest:</b> left stick to walk · right stick to turn · right trigger to swing your sword · left trigger to block.<br><b>Desktop:</b> WASD to walk · mouse to look (click to lock) · click to swing · right mouse to block.</p>
+  <p>Fall in battle and you wake at the chamber door — retries are unlimited. There is no way to lose this delve for good.</p>
+  <button id="vrBtn">ENTER VR</button>
+  <div id="status"></div>
+  <a id="back" href="./">← Danny's Arcade</a>
+</div>
+<div id="hud"></div>
+<div id="msg"></div>
+<div id="dmg"></div>
+<button id="muteBtn">SOUND: ON</button>
+<script type="module">
+import * as THREE from 'three';
+
+// ============================== Ember Delve VR — original dungeon crawler ==============================
+// Hero: Kael the Ember Knight. World: the Sunken Halls of Cindermaw. All names, creatures and
+// designs below are original to this game. Collect ember-crystals, open locked doors, delve deep.
+
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050202);
+scene.fog = new THREE.FogExp2(0x050202, 0.028);
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 120);
+camera.position.set(0, 1.6, 4);
+scene.add(camera);
+
+scene.add(new THREE.AmbientLight(0x332211, 0.9));
+const torch = new THREE.PointLight(0xff8833, 30, 16, 1.8);
+torch.position.set(0, 2.2, 4);
+scene.add(torch);
+
+// ---- procedural stone texture (no external assets) ----
+function stoneTexture(base, dark) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+    const l = 8 + Math.random() * 14;
+    g.fillStyle = `rgba(0,0,0,${0.08 + Math.random() * 0.14})`;
+    g.fillRect(x * 64 + 2, y * 64 + 2, 60, 60);
+    g.strokeStyle = dark; g.lineWidth = 2;
+    g.strokeRect(x * 64 + 1, y * 64 + 1, 62, 62);
+    g.fillStyle = `rgba(255,255,255,${Math.random() * 0.05})`;
+    g.fillRect(x * 64 + 6, y * 64 + 6, 20, 8);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const wallTex = stoneTexture('#4a3a2e', '#241a12');
+const floorTex = stoneTexture('#3a2f26', '#1d1510');
+wallTex.repeat.set(4, 2); floorTex.repeat.set(4, 4);
+const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.95 });
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1 });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a120c, roughness: 1 });
+const goldMat = new THREE.MeshStandardMaterial({ color: 0xffc44d, metalness: 0.7, roughness: 0.3, emissive: 0x553300 });
+const emberMat = new THREE.MeshStandardMaterial({ color: 0xff5a00, emissive: 0xff4400, emissiveIntensity: 2.2, roughness: 0.3 });
+const doorMat = new THREE.MeshStandardMaterial({ color: 0x2a1c10, roughness: 0.9 });
+const lockedMat = new THREE.MeshStandardMaterial({ color: 0x3a0d08, emissive: 0xaa1100, emissiveIntensity: 0.9, roughness: 0.8 });
+
+// ---- glow sprite texture ----
+function glowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,200,120,1)'); grad.addColorStop(0.4, 'rgba(255,120,20,0.6)'); grad.addColorStop(1, 'rgba(255,80,0,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+const glowTex = glowTexture();
+
+// ============================== dungeon layout ==============================
+// Five chambers in a line heading north (-Z). Each room: x in [-6, 6], z span 12.
+const ROOMS = [
+  { name: 'Entry Hall', z0: 6, z1: -6, spawn: [0, 4] },
+  { name: 'Chamber of Switches', z0: -6, z1: -18, spawn: [0, -8] },
+  { name: 'Treasure Vault', z0: -18, z1: -30, spawn: [0, -20] },
+  { name: 'Monster Den', z0: -30, z1: -42, spawn: [0, -32] },
+  { name: 'Cindermaw\'s Lair', z0: -42, z1: -56, spawn: [0, -44] },
+];
+const ROOM_W = 6; // half width
+function buildRoom(r) {
+  const grp = new THREE.Group();
+  const depth = r.z0 - r.z1, cz = (r.z0 + r.z1) / 2;
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W * 2, 0.2, depth), floorMat);
+  floor.position.set(0, -0.1, cz); grp.add(floor);
+  const ceil = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W * 2, 0.2, depth), darkMat);
+  ceil.position.set(0, 4.1, cz); grp.add(ceil);
+  for (const sx of [-1, 1]) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.2, depth), wallMat);
+    wall.position.set(sx * (ROOM_W + 0.2), 2, cz); grp.add(wall);
+  }
+  // back wall (north end) — solid except a doorway gap handled by door slab
+  const back = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W * 2, 4.2, 0.4), wallMat);
+  back.position.set(0, 2, r.z1 - 0.2); grp.add(back);
+  const front = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W * 2, 4.2, 0.4), wallMat);
+  front.position.set(0, 2, r.z0 + 0.2); grp.add(front);
+  // torch sconces (emissive flames, no real lights — perf)
+  for (const [tx, tz] of [[-5, cz - 2], [5, cz + 2]]) {
+    const flame = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), emberMat);
+    flame.position.set(tx, 2.6, tz); grp.add(flame);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff8833, transparent: true, opacity: 0.7, depthWrite: false }));
+    spr.scale.set(1.1, 1.1, 1); spr.position.copy(flame.position); grp.add(spr);
+  }
+  scene.add(grp);
+  return grp;
+}
+ROOMS.forEach(buildRoom);
+
+// ---- doors between rooms (index i = door from room i to room i+1) ----
+const doors = [];
+function buildDoor(i) {
+  const z = ROOMS[i].z1;
+  const grp = new THREE.Group();
+  for (const sx of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4.2, 0.8), wallMat);
+    post.position.set(sx * 1.4, 2, z); grp.add(post);
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.6, 0.8), wallMat);
+  lintel.position.set(0, 4.0, z); grp.add(lintel);
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.6, 0.3), i === 0 ? doorMat : lockedMat);
+  slab.position.set(0, 1.8, z); grp.add(slab);
+  scene.add(grp);
+  doors.push({ slab, open: i === 0, locked: i !== 0, z });
+}
+for (let i = 0; i < 4; i++) buildDoor(i);
+function openDoor(i) {
+  const d = doors[i];
+  if (d.open) return;
+  d.open = true; d.locked = false;
+  d.slab.material = doorMat;
+  d.slab.position.y = -1.8; // slides into the floor
+  sfxDoor();
+  showMsg(i === 1 ? 'The switch chamber rumbles — the vault door grinds open!' :
+    i === 2 ? 'The brass key turns — the den door swings open!' :
+    'The bone key turns — Cindermaw stirs below!');
+}
+
+// ============================== player state ==============================
+const player = { x: 0, z: 4, yaw: 0, hp: 5, maxHp: 5, keys: 0, crystals: 0, room: 0, blocking: false, hurtCd: 0, swingT: -1, dead: false };
+const START_POS = ROOMS.map(r => r.spawn);
+function roomAt(z) {
+  for (let i = 0; i < ROOMS.length; i++) if (z <= ROOMS[i].z0 + 0.01 && z >= ROOMS[i].z1 - 0.01) return i;
+  return player.room;
+}
+function respawn() {
+  const s = START_POS[player.room];
+  player.x = s[0]; player.z = s[1];
+  player.hp = player.maxHp; player.dead = false; player.hurtCd = 1;
+  spawnRoomEnemies(player.room);
+  showMsg('You wake at the chamber door, sword in hand. Delve again!');
+  drawHud();
+}
+function moveToRoom(i) {
+  if (i === player.room) return;
+  player.room = i;
+  spawnRoomEnemies(i);
+  showMsg(ROOMS[i].name);
+  drawHud();
+}
+
+// ============================== HUD (DOM + visor panel in VR) ==============================
+const hudEl = document.getElementById('hud');
+const msgEl = document.getElementById('msg');
+const dmgEl = document.getElementById('dmg');
+let msgTimer = 0;
+function showMsg(t) { msgEl.textContent = t; msgEl.style.display = 'block'; msgTimer = 3.2; }
+function hearts() { return '♥'.repeat(player.hp) + '♡'.repeat(player.maxHp - player.hp); }
+function drawHud() {
+  hudEl.innerHTML = `<b>${ROOMS[player.room].name}</b><br>❤ ${hearts()} &nbsp; ◆ ${player.crystals} &nbsp; 🗝 ${player.keys}`;
+}
+const visorCanvas = document.createElement('canvas'); visorCanvas.width = 512; visorCanvas.height = 128;
+const visorCtx = visorCanvas.getContext('2d');
+const visorTex = new THREE.CanvasTexture(visorCanvas);
+const visor = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.155),
+  new THREE.MeshBasicMaterial({ map: visorTex, transparent: true, depthTest: false }));
+visor.position.set(0, -0.34, -0.7);
+visor.renderOrder = 99;
+camera.add(visor);
+function drawVisor() {
+  const g = visorCtx;
+  g.clearRect(0, 0, 512, 128);
+  g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, 0, 512, 128);
+  g.fillStyle = '#ffb347'; g.font = '700 26px Arial'; g.textAlign = 'left';
+  g.fillText(ROOMS[player.room].name, 14, 34);
+  g.fillStyle = '#ff5566'; g.font = '700 30px Arial';
+  g.fillText(hearts(), 14, 76);
+  g.fillStyle = '#ffd98a'; g.font = '700 26px Arial';
+  g.fillText('◆ ' + player.crystals + '    🗝 ' + player.keys, 14, 112);
+  visorTex.needsUpdate = true;
+}
+
+// ============================== audio (WebAudio synth, gesture-started) ==============================
+let actx = null, masterGain = null, muted = false;
+function startAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.4;
+    masterGain.connect(actx.destination);
+  } catch (e) { /* audio unavailable — game still plays */ }
+}
+function tone(freq, dur, type, vol, slideTo) {
+  if (!actx || muted) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, actx.currentTime);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, actx.currentTime + dur);
+  g.gain.setValueAtTime(vol, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(g); g.connect(masterGain); o.start(); o.stop(actx.currentTime + dur + 0.02);
+}
+function noiseBurst(dur, vol, freq) {
+  if (!actx || muted) return;
+  const len = Math.floor(actx.sampleRate * dur), buf = actx.createBuffer(1, len, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const f = actx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq;
+  const g = actx.createGain(); g.gain.value = vol;
+  src.connect(f); f.connect(g); g.connect(masterGain); src.start();
+}
+const sfxSwing = () => noiseBurst(0.18, 0.5, 900);
+const sfxHit = () => tone(120, 0.2, 'sine', 0.6, 40);
+const sfxHurt = () => tone(220, 0.25, 'square', 0.4, 90);
+const sfxPickup = () => { tone(880, 0.12, 'sine', 0.4); setTimeout(() => tone(1320, 0.18, 'sine', 0.4), 90); };
+const sfxDoor = () => tone(90, 0.7, 'sawtooth', 0.35, 45);
+const sfxRoar = () => tone(70, 1.0, 'sawtooth', 0.6, 35);
+const sfxVictory = () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.3, 'triangle', 0.5), i * 130)); };
+const muteBtn = document.getElementById('muteBtn');
+function setMuted(m) { muted = m; muteBtn.textContent = m ? 'SOUND: OFF' : 'SOUND: ON'; if (masterGain) masterGain.gain.value = m ? 0 : 0.4; }
+muteBtn.addEventListener('click', () => { startAudio(); setMuted(!muted); });
+
+// ============================== sword ==============================
+const swordGrp = new THREE.Group();
+const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.85, 0.12),
+  new THREE.MeshStandardMaterial({ color: 0xcfe8ff, metalness: 0.85, roughness: 0.25, emissive: 0x224455 }));
+blade.position.y = 0.55;
+const guard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.16), goldMat);
+guard.position.y = 0.12;
+const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.22), darkMat);
+grip.position.y = 0.0;
+swordGrp.add(blade, guard, grip);
+swordGrp.position.set(0.28, -0.28, -0.55);
+swordGrp.rotation.set(0.3, 0, -0.5);
+camera.add(swordGrp);
+let swingClock = -1;
+function swingSword() {
+  if (swingClock >= 0 || player.dead) return;
+  swingClock = 0; sfxSwing();
+}
+function swordTipWorld() {
+  const v = new THREE.Vector3(0, 0.95, 0);
+  return swordGrp.localToWorld(v);
+}
+
+// ============================== pickups: keys + ember-crystals ==============================
+const pickups = []; // {mesh, kind, room, taken}
+const keyGeo = new THREE.TorusGeometry(0.09, 0.03, 8, 16);
+const crystalGeo = new THREE.OctahedronGeometry(0.16);
+function addPickup(kind, x, z, room) {
+  let mesh;
+  if (kind === 'key') {
+    mesh = new THREE.Group();
+    const ring = new THREE.Mesh(keyGeo, goldMat);
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.22, 0.04), goldMat);
+    stem.position.y = -0.16;
+    mesh.add(ring, stem);
+  } else {
+    mesh = new THREE.Mesh(crystalGeo, emberMat);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff6622, transparent: true, opacity: 0.8, depthWrite: false }));
+    spr.scale.set(0.9, 0.9, 1); mesh.add(spr);
+  }
+  mesh.position.set(x, kind === 'key' ? 1.1 : 1.0, z);
+  scene.add(mesh);
+  pickups.push({ mesh, kind, room, taken: false, baseY: mesh.position.y });
+}
+// treasure vault: crystals + brass key
+addPickup('crystal', -3, -24, 2); addPickup('crystal', 3, -24, 2); addPickup('crystal', 0, -27, 2);
+addPickup('crystal', -2, -21, 2); addPickup('crystal', 2, -21, 2);
+addPickup('key', 0, -28.5, 2);
+// entry hall: two crystals to teach pickup
+addPickup('crystal', -3, 0, 0); addPickup('crystal', 3, 0, 0);
+// monster den: crystals
+addPickup('crystal', -4, -36, 3); addPickup('crystal', 4, -36, 3);
+
+// ============================== floor switches (puzzle room) ==============================
+const switches = [];
+const plateGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.12, 20);
+function addSwitch(x, z) {
+  const mesh = new THREE.Mesh(plateGeo, new THREE.MeshStandardMaterial({ color: 0x554433, roughness: 0.8 }));
+  mesh.position.set(x, 0.06, z); scene.add(mesh);
+  const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.05, 20), emberMat);
+  glow.position.set(x, 0.14, z); glow.visible = false; scene.add(glow);
+  switches.push({ mesh, glow, x, z, pressed: false });
+}
+addSwitch(-3, -12); addSwitch(0, -15); addSwitch(3, -12);
+let puzzleSolved = false;
+
+// ============================== enemies (original designs) ==============================
+const enemies = []; // {grp, kind, hp, room, speed, dmg, state, ...}
+const blobGeo = new THREE.SphereGeometry(0.55, 14, 12);
+const blobMat = new THREE.MeshStandardMaterial({ color: 0x5a8a3a, roughness: 0.6 });
+const batBodyGeo = new THREE.SphereGeometry(0.28, 10, 8);
+const batMat = new THREE.MeshStandardMaterial({ color: 0x2a1a2e, roughness: 0.9 });
+const boneMat = new THREE.MeshStandardMaterial({ color: 0xe8e0cc, roughness: 0.8 });
+function makeBlob(x, z, room) {
+  const grp = new THREE.Group();
+  const body = new THREE.Mesh(blobGeo, blobMat); body.scale.y = 0.7; body.position.y = 0.4;
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff66 }));
+  eye.position.set(0, 0.55, 0.48);
+  grp.add(body, eye); grp.position.set(x, 0, z); scene.add(grp);
+  enemies.push({ grp, kind: 'blob', hp: 2, room, speed: 1.3, dmg: 1, atkCd: 0, bob: Math.random() * 6 });
+}
+function makeBat(x, z, room) {
+  const grp = new THREE.Group();
+  const body = new THREE.Mesh(batBodyGeo, batMat); body.position.y = 1.5;
+  const wGeo = new THREE.PlaneGeometry(0.6, 0.3);
+  const wMat = new THREE.MeshStandardMaterial({ color: 0x1a1020, side: THREE.DoubleSide, roughness: 0.9 });
+  const wl = new THREE.Mesh(wGeo, wMat); wl.position.set(-0.45, 1.55, 0);
+  const wr = new THREE.Mesh(wGeo, wMat); wr.position.set(0.45, 1.55, 0);
+  grp.add(body, wl, wr); grp.position.set(x, 0, z); scene.add(grp);
+  enemies.push({ grp, kind: 'bat', hp: 1, room, speed: 2.3, dmg: 1, atkCd: 0, wl, wr, bob: Math.random() * 6 });
+}
+function makeSkeleton(x, z, room) {
+  const grp = new THREE.Group();
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7, 0.3), boneMat); torso.position.y = 1.0;
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), boneMat); skull.position.y = 1.6;
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2200 });
+  const e1 = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), eyeMat); e1.position.set(-0.09, 1.62, 0.2);
+  const e2 = e1.clone(); e2.position.x = 0.09;
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.6, 0.16), boneMat); legL.position.set(-0.16, 0.3, 0);
+  const legR = legL.clone(); legR.position.x = 0.16;
+  grp.add(torso, skull, e1, e2, legL, legR); grp.position.set(x, 0, z); scene.add(grp);
+  enemies.push({ grp, kind: 'skeleton', hp: 3, room, speed: 1.7, dmg: 1, atkCd: 0, bob: Math.random() * 6 });
+}
+// boss: Cindermaw, the Molten Colossus (original)
+const bossGrp = new THREE.Group();
+const bossBody = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.2, 1.2),
+  new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.9 }));
+bossBody.position.y = 1.5;
+const bossCore = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 10), emberMat);
+bossCore.position.set(0, 1.7, 0.65);
+const bossHead = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.8),
+  new THREE.MeshStandardMaterial({ color: 0x2a1e16, roughness: 0.9 }));
+bossHead.position.y = 2.95;
+const bossArmGeo = new THREE.BoxGeometry(0.5, 1.6, 0.5);
+const bossArmL = new THREE.Mesh(bossArmGeo, bossBody.material); bossArmL.position.set(-1.25, 1.9, 0);
+const bossArmR = new THREE.Mesh(bossArmGeo, bossBody.material); bossArmR.position.set(1.25, 1.9, 0);
+bossGrp.add(bossBody, bossCore, bossHead, bossArmL, bossArmR);
+bossGrp.position.set(0, 0, -52);
+bossGrp.visible = false;
+scene.add(bossGrp);
+const boss = { hp: 30, maxHp: 30, atkCd: 0, slamT: -1, alive: false, enraged: false };
+let bossKeyDropped = false;
+
+function clearRoomEnemies(room) {
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    if (enemies[i].room === room) { scene.remove(enemies[i].grp); enemies.splice(i, 1); }
+  }
+}
+function spawnRoomEnemies(room) {
+  clearRoomEnemies(room);
+  if (room === 3) {
+    makeBlob(-3, -36, 3); makeBlob(3, -38, 3);
+    makeBat(-2, -34, 3); makeBat(2, -40, 3);
+    makeSkeleton(-4, -39, 3); makeSkeleton(4, -35, 3);
+  }
+  if (room === 4 && !boss.alive && boss.hp > 0) {
+    bossGrp.visible = true; boss.alive = true; boss.hp = boss.maxHp;
+    sfxRoar(); showMsg('CINDERMAW wakes! The Molten Colossus guards the Ember Crown!');
+  }
+}
+
+// ============================== particles (pooled) ==============================
+const PMAX = 200;
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(PMAX * 3);
+const pVel = new Float32Array(PMAX * 3);
+const pLife = new Float32Array(PMAX);
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
+const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ map: glowTex, color: 0xffaa33, size: 0.22, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+points.frustumCulled = false;
+scene.add(points);
+for (let i = 0; i < PMAX; i++) pPos[i * 3 + 1] = -999;
+let pCursor = 0;
+function burst(x, y, z, n, color) {
+  points.material.color.set(color);
+  for (let k = 0; k < n; k++) {
+    const i = pCursor; pCursor = (pCursor + 1) % PMAX;
+    pPos[i * 3] = x; pPos[i * 3 + 1] = y; pPos[i * 3 + 2] = z;
+    pVel[i * 3] = (Math.random() - 0.5) * 4;
+    pVel[i * 3 + 1] = Math.random() * 3 + 1;
+    pVel[i * 3 + 2] = (Math.random() - 0.5) * 4;
+    pLife[i] = 0.5 + Math.random() * 0.4;
+  }
+}
+function updateParticles(dt) {
+  for (let i = 0; i < PMAX; i++) {
+    if (pLife[i] <= 0) continue;
+    pLife[i] -= dt;
+    if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; continue; }
+    pVel[i * 3 + 1] -= 5 * dt;
+    pPos[i * 3] += pVel[i * 3] * dt;
+    pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
+    pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+  }
+  pGeo.attributes.position.needsUpdate = true;
+}
+
+// ============================== input ==============================
+const keys = {};
+let pointerLocked = false;
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyM') setMuted(!muted);
+  if (e.code === 'Space') { swingSword(); e.preventDefault(); }
+  startAudio();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('mousedown', e => {
+  startAudio();
+  if (!renderer.xr.isPresenting && panel.style.display === 'none') {
+    if (e.button === 0) swingSword();
+    if (e.button === 2) player.blocking = true;
+    if (!pointerLocked) renderer.domElement.requestPointerLock?.();
+  }
+});
+window.addEventListener('mouseup', e => { if (e.button === 2) player.blocking = false; });
+window.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('pointerlockchange', () => { pointerLocked = document.pointerLockElement === renderer.domElement; });
+window.addEventListener('mousemove', e => {
+  if (pointerLocked && !renderer.xr.isPresenting) player.yaw -= e.movementX * 0.0022;
+});
+const DEAD = 0.14;
+let prevTrigR = false, prevTrigL = false;
+function pollXR() {
+  // Returns {mx, mz, turn, swing, block} for Quest controllers.
+  const out = { mx: 0, mz: 0, turn: 0, swing: false, block: false };
+  if (!renderer.xr.isPresenting) return out;
+  const session = renderer.xr.getSession();
+  if (!session) return out;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad; if (!gp) continue;
+    const ax = gp.axes || [];
+    const tx = ax.length > 3 ? ax[2] : ax[0] || 0;
+    const ty = ax.length > 3 ? ax[3] : ax[1] || 0;
+    const trig = gp.buttons && gp.buttons[0] ? (gp.buttons[0].pressed || gp.buttons[0].value > 0.5) : false;
+    if (src.handedness === 'left') {
+      if (Math.abs(tx) > DEAD) out.mx = tx;
+      if (Math.abs(ty) > DEAD) out.mz = ty;
+      if (trig && !prevTrigL) out.block = true;
+      prevTrigL = trig;
+      if (trig) player.blocking = true; else if (!prevTrigL) player.blocking = false;
+    } else {
+      if (Math.abs(tx) > DEAD) out.turn = -tx;
+      if (trig && !prevTrigR) out.swing = true;
+      prevTrigR = trig;
+    }
+  }
+  return out;
+}
+// attach sword to right controller in VR, camera otherwise
+let rightCtrl = null;
+function updateSwordMount() {
+  if (renderer.xr.isPresenting) {
+    if (!rightCtrl) {
+      try {
+        const c = renderer.xr.getController(1);
+        if (c) { rightCtrl = c; scene.add(c); }
+      } catch (e) { /* no controller */ }
+    }
+    if (rightCtrl && swordGrp.parent !== rightCtrl) {
+      rightCtrl.add(swordGrp);
+      swordGrp.position.set(0, -0.05, -0.15);
+      swordGrp.rotation.set(0.2, 0, -0.3);
+    }
+  } else if (swordGrp.parent !== camera) {
+    camera.add(swordGrp);
+    swordGrp.position.set(0.28, -0.28, -0.55);
+    swordGrp.rotation.set(0.3, 0, -0.5);
+  }
+}
+
+// ============================== combat + world update ==============================
+function dist2(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return dx * dx + dz * dz; }
+function damagePlayer(n) {
+  if (player.dead || player.hurtCd > 0) return;
+  if (player.blocking) { sfxHit(); showMsg('Blocked!'); return; }
+  player.hp -= n; player.hurtCd = 1.0; sfxHurt();
+  dmgEl.style.opacity = 0.9; setTimeout(() => { dmgEl.style.opacity = 0; }, 180);
+  drawHud(); drawVisor();
+  if (player.hp <= 0) { player.dead = true; setTimeout(respawn, 900); }
+}
+function hitEnemy(e, dmg) {
+  e.hp -= dmg; sfxHit();
+  const p = e.grp.position;
+  burst(p.x, 1.2, p.z, 14, 0xffcc55);
+  if (e.hp <= 0) {
+    burst(p.x, 1.2, p.z, 26, 0xff7722);
+    scene.remove(e.grp);
+    enemies.splice(enemies.indexOf(e), 1);
+    if (e.room === 3 && enemies.filter(x => x.room === 3).length === 0 && !bossKeyDropped) {
+      bossKeyDropped = true;
+      addPickup('key', 0, -36, 3);
+      showMsg('The den falls silent — a bone key gleams where the last monster stood!');
+    }
+  }
+}
+function hitBoss(dmg) {
+  boss.hp -= dmg; sfxHit();
+  burst(bossGrp.position.x, 1.8, bossGrp.position.z, 16, 0xff5522);
+  bossCore.material.emissiveIntensity = 3.5;
+  if (boss.hp <= 0 && boss.alive) {
+    boss.alive = false;
+    burst(0, 2, -52, 60, 0xffaa00);
+    bossGrp.visible = false;
+    sfxVictory();
+    showMsg('CINDERMAW falls! The Ember Crown is yours — YOU DELVED THE HALLS!');
+    setTimeout(() => {
+      // reset the delve for another run
+      boss.hp = boss.maxHp; bossKeyDropped = false;
+      player.room = 0; player.x = 0; player.z = 4;
+      player.hp = player.maxHp; player.keys = 0;
+      doors.forEach((d, i) => { if (i > 0) { d.open = false; d.locked = true; d.slab.material = lockedMat; d.slab.position.y = 1.8; } });
+      switches.forEach(s => { s.pressed = false; s.glow.visible = false; });
+      puzzleSolved = false;
+      pickups.forEach(p => { if (!p.taken) return; p.taken = false; p.mesh.visible = true; });
+      spawnRoomEnemies(0);
+      showMsg('The halls stir anew — delve again!');
+      drawHud(); drawVisor();
+    }, 6000);
+  }
+}
+
+function update(dt, t) {
+  // ---- movement ----
+  const xr = pollXR();
+  let mx = 0, mz = 0;
+  if (keys['KeyW'] || keys['ArrowUp']) mz -= 1;
+  if (keys['KeyS'] || keys['ArrowDown']) mz += 1;
+  if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
+  if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
+  mx += xr.mx; mz += xr.mz;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 1) { mx /= ml; mz /= ml; }
+  if (xr.swing) swingSword();
+  player.yaw += xr.turn * 1.9 * dt;
+  if (!player.dead && ml > 0.01) {
+    const speed = 3.4;
+    const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
+    let nx = player.x + (mx * cos - mz * sin) * speed * dt;
+    let nz = player.z + (mx * sin + mz * cos) * speed * dt;
+    // wall clamp for current room, with doorway gap at each boundary
+    const r = ROOMS[player.room];
+    const gap = 1.15;
+    const clampZ = (z, lo, hi) => Math.max(lo + 0.5, Math.min(hi - 0.5, z));
+    nx = Math.max(-ROOM_W + 0.5, Math.min(ROOM_W - 0.5, nx));
+    // north boundary
+    if (nz < r.z1 + 0.5) {
+      const doorIdx = player.room; // door to next room
+      const doorOpen = doorIdx < 4 && doors[doorIdx].open && Math.abs(nx) < gap;
+      if (doorOpen) { moveToRoom(player.room + 1); nz = ROOMS[player.room].z0 - 0.7; }
+      else nz = r.z1 + 0.5;
+    }
+    // south boundary
+    if (nz > r.z0 - 0.5) {
+      const doorIdx = player.room - 1;
+      const doorOpen = doorIdx >= 0 && doors[doorIdx].open && Math.abs(nx) < gap;
+      if (doorOpen) { moveToRoom(player.room - 1); nz = ROOMS[player.room].z1 + 0.7; }
+      else nz = r.z0 - 0.5;
+    }
+    player.x = nx; player.z = nz;
+  }
+  // ---- swing ----
+  if (swingClock >= 0) {
+    swingClock += dt;
+    const k = swingClock / 0.28;
+    if (k >= 1) { swingClock = -1; swordGrp.rotation.z = -0.5; }
+    else swordGrp.rotation.z = -0.5 + Math.sin(k * Math.PI) * 1.4;
+    // hit check mid-swing
+    if (k > 0.2 && k < 0.8) {
+      const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+      for (const e of [...enemies]) {
+        if (e.room !== player.room) continue;
+        const dx = e.grp.position.x - player.x, dz = e.grp.position.z - player.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < 5.3 && (dx * fx + dz * fz) > 0) hitEnemy(e, 1);
+      }
+      if (boss.alive) {
+        const dx = bossGrp.position.x - player.x, dz = bossGrp.position.z - player.z;
+        if (dx * dx + dz * dz < 7.3 && (dx * fx + dz * fz) > 0) hitBoss(1);
+      }
+    }
+  }
+  // ---- switches ----
+  if (player.room === 1 && !puzzleSolved) {
+    for (const s of switches) {
+      if (!s.pressed && dist2(player.x, player.z, s.x, s.z) < 0.8) {
+        s.pressed = true; s.glow.visible = true; sfxPickup();
+        burst(s.x, 0.4, s.z, 10, 0xffaa33);
+      }
+    }
+    if (switches.every(s => s.pressed)) { puzzleSolved = true; openDoor(1); }
+  }
+  // ---- pickups ----
+  for (const p of pickups) {
+    if (p.taken || p.room !== player.room) continue;
+    p.mesh.rotation.y += dt * 2;
+    p.mesh.position.y = p.baseY + Math.sin(t * 2.5 + p.mesh.position.x) * 0.12;
+    if (dist2(player.x, player.z, p.mesh.position.x, p.mesh.position.z) < 1.4) {
+      p.taken = true; p.mesh.visible = false; sfxPickup();
+      if (p.kind === 'key') {
+        player.keys++;
+        showMsg('Brass key found! Locked doors shimmer — walk into one to open it.');
+      } else {
+        player.crystals++;
+        burst(p.mesh.position.x, 1, p.mesh.position.z, 12, 0xff7722);
+      }
+      drawHud(); drawVisor();
+    }
+  }
+  // ---- locked doors: walk in with a key ----
+  for (let i = 1; i < 4; i++) {
+    const d = doors[i];
+    if (!d.open && player.keys > 0 && Math.abs(player.z - d.z) < 1.2 && Math.abs(player.x) < 1.4) {
+      if (i === 1 && !puzzleSolved) continue; // puzzle door opens only by switches
+      player.keys--; openDoor(i); drawHud(); drawVisor();
+    }
+  }
+  // ---- enemies ----
+  for (const e of [...enemies]) {
+    if (e.room !== player.room) continue;
+    e.atkCd = Math.max(0, e.atkCd - dt);
+    const dx = player.x - e.grp.position.x, dz = player.z - e.grp.position.z;
+    const d = Math.hypot(dx, dz) || 0.001;
+    if (d > 1.1) {
+      e.grp.position.x += (dx / d) * e.speed * dt;
+      e.grp.position.z += (dz / d) * e.speed * dt;
+    }
+    e.grp.rotation.y = Math.atan2(dx, dz);
+    if (e.kind === 'bat') {
+      const flap = Math.sin(t * 18 + e.bob) * 0.7;
+      e.wl.rotation.z = flap; e.wr.rotation.z = -flap;
+      e.grp.position.y = Math.sin(t * 3 + e.bob) * 0.15;
+    } else if (e.kind === 'blob') {
+      e.grp.scale.y = 0.7 + Math.sin(t * 4 + e.bob) * 0.08;
+    }
+    if (d < 1.4 && e.atkCd <= 0 && !player.dead) { e.atkCd = 1.1; damagePlayer(e.dmg); }
+  }
+  // ---- boss ----
+  if (boss.alive) {
+    boss.atkCd = Math.max(0, boss.atkCd - dt);
+    const dx = player.x - bossGrp.position.x, dz = player.z - bossGrp.position.z;
+    const d = Math.hypot(dx, dz) || 0.001;
+    bossGrp.rotation.y = Math.atan2(dx, dz);
+    bossCore.material.emissiveIntensity = 2.2 + Math.sin(t * 3) * 0.8;
+    if (boss.slamT >= 0) {
+      boss.slamT += dt;
+      bossArmL.rotation.x = -1.2 * Math.min(1, boss.slamT / 0.5);
+      bossArmR.rotation.x = -1.2 * Math.min(1, boss.slamT / 0.5);
+      if (boss.slamT >= 0.6) {
+        boss.slamT = -1; bossArmL.rotation.x = 0; bossArmR.rotation.x = 0;
+        burst(bossGrp.position.x, 0.3, bossGrp.position.z, 30, 0xff4422);
+        sfxHit();
+        if (d < 4.0) damagePlayer(2);
+      }
+    } else if (d > 2.2) {
+      bossGrp.position.x += (dx / d) * 1.5 * dt;
+      bossGrp.position.z += (dz / d) * 1.5 * dt;
+    } else if (boss.atkCd <= 0) {
+      boss.atkCd = 1.6;
+      if (Math.random() < 0.5) { boss.slamT = 0; sfxRoar(); }
+      else damagePlayer(1);
+    }
+  }
+  // ---- timers, camera, torch ----
+  if (player.hurtCd > 0) player.hurtCd -= dt;
+  if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) msgEl.style.display = 'none'; }
+  camera.position.set(player.x, 1.6, player.z);
+  camera.rotation.set(0, player.yaw, 0, 'YXZ');
+  torch.position.set(player.x, 2.2, player.z);
+  torch.intensity = 26 + Math.sin(t * 9) * 4 + Math.sin(t * 23) * 2;
+  updateParticles(dt);
+  updateSwordMount();
+  drawVisor();
+}
+
+// ============================== ENTER VR flow ==============================
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+const panel = document.getElementById('panel');
+const hud = document.getElementById('hud');
+let xrSupported = false;
+function setStatus(m) { statusEl.textContent = m; }
+function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
+function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+vrBtn.addEventListener('click', async () => {
+  startAudio();
+  if (!xrSupported) { hidePanel(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    hidePanel();
+    session.addEventListener('end', () => { showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      hidePanel();
+      session.addEventListener('end', () => { showPanel(); vrBtn.disabled = false; });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+    }
+  }
+});
+
+// ============================== main loop ==============================
+const clock = new THREE.Clock();
+let elapsed = 0;
+drawHud(); drawVisor();
+showMsg('Welcome to the Sunken Halls. Walk north — the delve begins.');
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
+  update(dt, elapsed);
+  renderer.render(scene, camera);
+});
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
