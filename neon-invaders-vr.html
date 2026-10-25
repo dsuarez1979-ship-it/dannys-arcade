@@ -1730,6 +1730,31 @@ function tick() {
   updateShockwaves(dt);
   renderer.render(scene, camera);
 }
+// ============================== mothership shader warm-up ==============================
+// WHY THIS EXISTS: the mothership is the only object whose materials first render
+// mid-game (14-22s in, when motherTimer fires). Its first visible frame forced
+// first-time shader compilation + geometry/texture upload inside a stereo VR
+// frame, which stalled the view hard enough to read as a freeze — audio kept
+// going, and quitting back to the menu (same page, shaders already cached) made
+// the saucer appear fine on re-entry. So we pay that cost ONCE here, before the
+// first animation frame: show the saucer dead-center in front of the menu
+// camera, compile + render it for real, then hide it and restore its spawn
+// position. NOTE: whether three r160's renderer.compile() skips invisible
+// objects is not something this code bets on — the real renderer.render() below
+// is the guarantee, since a rendered object must have its programs compiled and
+// its buffers/textures uploaded. After this block, the mothership's first
+// in-game appearance costs ZERO new shader compiles. (Burst points, shockwave
+// sprites, and the announcement panel are already exercised by wave-1 kills and
+// wave-start announcements, so they need no warm-up.)
+{
+  const warmSavedPos = mother.position.clone();
+  mother.position.set(0, 4, -14); // dead-center in front of the menu camera
+  mother.visible = true;
+  renderer.compile(scene, camera);
+  renderer.render(scene, camera);
+  mother.visible = false;
+  mother.position.copy(warmSavedPos);
+}
 renderer.setAnimationLoop(tick);
 
 window.addEventListener('resize', () => {
