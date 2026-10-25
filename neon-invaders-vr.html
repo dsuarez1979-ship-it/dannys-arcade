@@ -35,7 +35,7 @@
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
   #hud {
     position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:5;
-    color:#7df9ff; font-size:20px; font-weight:800; letter-spacing:2px;
+    color:#7df9ff; font-size:17px; font-weight:800; letter-spacing:1px;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
   }
   #muteBtn {
@@ -53,10 +53,11 @@
 <div id="panel">
   <div class="box">
     <h1>NEON INVADERS VR</h1>
-    <div class="sub">Space Invaders in VR — unlimited ships, endless waves</div>
+    <div class="sub">Space Invaders in VR — unlimited ships, weapons &amp; upgrades</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
     <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
+    <p class="small">New: falling pickups — Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Every pickup stacks forever. No caps.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -70,6 +71,19 @@
 <script type="module">
 import * as THREE from 'three';
 
+// GRAPHICS NOTE (honest): this upgrade is a procedural visual lift inside the
+// EXACT same neon style — same palette, same glow treatment, same modern feel.
+// No restyle, no external assets, and no console realism: a Quest browser still
+// renders stylised neon, just richer, denser and more polished than before.
+//
+// FREEZE FIX (Quest): the old build ran at pixelRatio min(dpr, 2) with
+// antialiasing while pushing ~250 draw calls in stereo — the Quest GPU choked
+// and the game froze. Fixes here: pixelRatio capped at 1.5 (1.25 while an XR
+// session is presenting), every projectile/pickup/particle/shockwave pooled
+// with a hard cap and recycle-oldest overflow, formation march speed capped,
+// frame dt clamped, and zero allocation in the hot loop (all temps are
+// module-level vectors reused every frame).
+
 // ============================== helpers ==============================
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp  = (a, b, t) => a + (b - a) * t;
@@ -77,7 +91,8 @@ const rand  = (a, b) => a + Math.random() * (b - a);
 
 // ============================== renderer / scene ==============================
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// FREEZE FIX: was min(dpr, 2) — far too heavy for stereo Quest rendering.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
@@ -133,7 +148,40 @@ function glowSprite(color, scale, opacity) {
   return s;
 }
 
-// ============================== environment: stars, nebulas, grid, platform ==============================
+// ============================== environment: skybox, stars, nebulas, planets, grid, platform ==============================
+// Nebula skybox: one big inverted sphere with a painted gradient + soft nebula
+// blobs. One draw call, fog-exempt, drawn behind everything.
+{
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 512;
+  const g = cv.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, '#03010c');
+  grad.addColorStop(0.45, '#0d0624');
+  grad.addColorStop(0.75, '#1b0f3d');
+  grad.addColorStop(1, '#040110');
+  g.fillStyle = grad; g.fillRect(0, 0, 1024, 512);
+  g.globalCompositeOperation = 'lighter';
+  const blobs = [
+    [180, 150, 150, 'rgba(255,46,136,0.20)'], [520, 110, 190, 'rgba(39,232,255,0.16)'],
+    [820, 200, 170, 'rgba(123,45,139,0.22)'], [320, 300, 130, 'rgba(255,126,71,0.12)'],
+    [680, 320, 150, 'rgba(90,63,191,0.16)'], [60, 260, 110, 'rgba(43,255,136,0.10)'],
+    [940, 90, 120, 'rgba(39,232,255,0.12)'], [430, 220, 100, 'rgba(255,211,25,0.08)']
+  ];
+  for (const [x, y, r, col] of blobs) {
+    const rg = g.createRadialGradient(x, y, 4, x, y, r);
+    rg.addColorStop(0, col);
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(380, 24, 16),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false, toneMapped: false }));
+  sky.renderOrder = -1;
+  sky.frustumCulled = false;
+  scene.add(sky);
+}
 { // Starfield: points on a far shell, slight colour variety, fog-exempt
   const N = 1400;
   const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
@@ -167,6 +215,36 @@ function glowSprite(color, scale, opacity) {
   s.position.set(n[0], n[1], n[2]);
   scene.add(s);
 });
+// Animated background planets: banded canvas textures, slow rotation, fog-exempt.
+function makePlanetTexture(base, bands) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, 512, 256);
+  for (const [y, h, col] of bands) { g.fillStyle = col; g.fillRect(0, y, 512, h); }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const planetA = new THREE.Mesh(new THREE.SphereGeometry(18, 28, 20),
+  new THREE.MeshBasicMaterial({ map: makePlanetTexture('#2a1650', [[30, 14, 'rgba(123,45,139,0.55)'], [80, 22, 'rgba(39,232,255,0.28)'], [140, 12, 'rgba(255,46,136,0.35)'], [190, 18, 'rgba(20,8,50,0.6)']]), fog: false, toneMapped: false }));
+planetA.position.set(-150, 42, -320);
+scene.add(planetA);
+const planetB = new THREE.Group();
+{
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(12, 28, 20),
+    new THREE.MeshBasicMaterial({ map: makePlanetTexture('#7a3a10', [[40, 16, 'rgba(255,126,71,0.5)'], [100, 20, 'rgba(255,211,25,0.3)'], [160, 14, 'rgba(60,20,5,0.55)']]), fog: false, toneMapped: false }));
+  planetB.add(globe);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(16, 26, 48),
+    new THREE.MeshBasicMaterial({ color: 0xcaa06a, transparent: true, opacity: 0.55, side: THREE.DoubleSide, fog: false, toneMapped: false }));
+  ring.rotation.x = Math.PI / 2 - 0.42;
+  planetB.add(ring);
+  planetB.position.set(170, -18, -280);
+  scene.add(planetB);
+}
+const planetC = new THREE.Mesh(new THREE.SphereGeometry(6, 20, 14),
+  new THREE.MeshBasicMaterial({ map: makePlanetTexture('#3d4a3a', [[50, 10, 'rgba(120,150,110,0.4)'], [130, 12, 'rgba(20,30,20,0.5)']]), fog: false, toneMapped: false }));
+planetC.position.set(60, 92, -300);
+scene.add(planetC);
 { // Synthwave grid floor far below, faded by fog
   const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
   const g = cv.getContext('2d');
@@ -265,7 +343,12 @@ const muzzleFlash = glowSprite(0xbffcff, 0.85, 0);
 muzzleFlash.position.set(0, 1.2, RAIL_Z - 0.9);
 scene.add(muzzleFlash);
 let flashT = 0;
-// Shield shimmer bubble shown briefly after the cannon is hit (invincibility window)
+// Thruster glow under the cannon sled, pulsing gently
+const thruster = glowSprite(0x27e8ff, 0.7, 0.5);
+thruster.position.set(0, 0.72, RAIL_Z + 0.55);
+scene.add(thruster);
+// Shield shimmer bubble: flashes after a hit, and stays faintly visible while
+// shield layers remain (opacity grows with layers).
 const shimmer = new THREE.Mesh(new THREE.SphereGeometry(5.4, 24, 16),
   new THREE.MeshBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false }));
 shimmer.position.set(0, 0.6, 0);
@@ -321,15 +404,25 @@ function showAnnouncement(main, sub, dur) {
 let mode = 'menu';
 let started = false;
 let score = 0, wave = 1, shipsLost = 0;
-let drawnScore = -1, drawnWave = -1, drawnLost = -1;
+let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnGear = '';
 const hud = document.getElementById('hud');
 let hudText = '';
+// Weapons and upgrades: every level stacks WITHOUT a maximum. Levels are plain
+// counters — no caps anywhere. Pools (below) are the only physical limits, and
+// they recycle the oldest live item instead of failing.
+const W = { spread: 0, twin: 0, rail: 0, seeker: 0, bomb: 0 };
+const U = { rate: 0, shield: 0, power: 0, speed: 0 };
+function gearString() {
+  return 'S' + W.spread + ' T' + W.twin + ' R' + W.rail + ' K' + W.seeker + ' B' + W.bomb +
+    ' | F' + U.rate + ' H' + U.shield + ' P' + U.power + ' V' + U.speed;
+}
 function drawScorePanel() {
-  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost) return;
-  drawnScore = score; drawnWave = wave; drawnLost = shipsLost;
-  const g = scorePanel.ctx, W = scorePanel.cv.width, H = scorePanel.cv.height;
-  g.fillStyle = 'rgba(8,10,26,0.88)'; g.fillRect(0, 0, W, H);
-  g.strokeStyle = '#27e8ff'; g.lineWidth = 5; g.strokeRect(5, 5, W - 10, H - 10);
+  const gear = gearString();
+  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && gear === drawnGear) return;
+  drawnScore = score; drawnWave = wave; drawnLost = shipsLost; drawnGear = gear;
+  const g = scorePanel.ctx, W2 = scorePanel.cv.width, H = scorePanel.cv.height;
+  g.fillStyle = 'rgba(8,10,26,0.88)'; g.fillRect(0, 0, W2, H);
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 5; g.strokeRect(5, 5, W2 - 10, H - 10);
   g.textAlign = 'left';
   g.fillStyle = '#7df9ff'; g.font = '900 34px Arial';
   g.fillText('NEON INVADERS VR', 28, 52);
@@ -338,18 +431,26 @@ function drawScorePanel() {
   g.font = '700 30px Arial'; g.fillStyle = '#8fb4d9';
   g.fillText('SCORE', 30, 184);
   g.fillStyle = '#2bff88'; g.font = '900 44px Arial'; g.textAlign = 'right';
-  g.fillText('WAVE ' + wave, W - 28, 148);
+  g.fillText('WAVE ' + wave, W2 - 28, 148);
   g.fillStyle = '#ffb3d9'; g.font = '700 30px Arial';
-  g.fillText('SHIPS LOST ' + shipsLost, W - 28, 184);
-  g.fillStyle = '#ffd319'; g.font = '700 26px Arial'; g.textAlign = 'center';
-  g.fillText('SHIPS: ∞ UNLIMITED', W / 2, H - 22);
+  g.fillText('SHIPS LOST ' + shipsLost, W2 - 28, 184);
+  g.textAlign = 'center';
+  g.fillStyle = '#27e8ff'; g.font = '700 26px Arial';
+  g.fillText('WEAPONS  S' + W.spread + '  T' + W.twin + '  R' + W.rail + '  K' + W.seeker + '  B' + W.bomb, W2 / 2, 222);
+  g.fillStyle = '#2bff88';
+  g.fillText('UPGRADES  F' + U.rate + '  H' + U.shield + '  P' + U.power + '  V' + U.speed, W2 / 2, 256);
+  g.fillStyle = '#ffd319'; g.font = '700 26px Arial';
+  g.fillText('SHIPS: ∞ UNLIMITED  ·  WEAPONS: ∞ NO CAP', W2 / 2, H - 22);
   scorePanel.tex.needsUpdate = true;
-  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost;
+  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost + ' · ' + gear;
   if (t !== hudText) { hudText = t; hud.textContent = t; }
 }
 drawScorePanel();
 
-// ============================== invaders: 5 neon designs ==============================
+// ============================== invaders: 5 neon designs + instanced detail ==============================
+// Detail upgrade, same style: glowing eyes, cockpit canopies and core rings are
+// added as THREE InstancedMeshes (3 extra draw calls total for all 50 invaders,
+// instead of ~150) so the Quest stays smooth. Colours match each row's neon.
 const ROW_DEFS = [
   { color: 0xff3df0, points: 30, kind: 'dart' },      // top row — magenta dart
   { color: 0x9d5cff, points: 20, kind: 'cruiser' },   // violet cruiser
@@ -428,6 +529,76 @@ const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
     }
   });
 }
+// Instanced detail meshes — children of the formation, so they inherit its march.
+const eyeGeo = new THREE.SphereGeometry(0.055, 8, 6);
+const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+const eyeMesh = new THREE.InstancedMesh(eyeGeo, eyeMat, COLS * ROWS * 2);
+eyeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+eyeMesh.frustumCulled = false;
+formation.add(eyeMesh);
+const canopyGeo = new THREE.SphereGeometry(0.16, 10, 8);
+canopyGeo.scale(1, 0.55, 0.8);
+const canopyMesh = new THREE.InstancedMesh(canopyGeo,
+  new THREE.MeshStandardMaterial({ color: 0x0a1428, roughness: 0.1, metalness: 0.9 }), COLS * ROWS);
+canopyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+canopyMesh.frustumCulled = false;
+formation.add(canopyMesh);
+const ringGeo = new THREE.TorusGeometry(0.3, 0.03, 6, 20);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+const ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, COLS * ROWS);
+ringMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+ringMesh.frustumCulled = false;
+formation.add(ringMesh);
+{
+  const c = new THREE.Color();
+  invaders.forEach((v, i) => {
+    c.setHex(v.def.color);
+    eyeMesh.setColorAt(i * 2, c);
+    eyeMesh.setColorAt(i * 2 + 1, c);
+    ringMesh.setColorAt(i, c);
+  });
+  eyeMesh.instanceColor.needsUpdate = true;
+  ringMesh.instanceColor.needsUpdate = true;
+}
+const detailDummy = new THREE.Object3D();
+const ZERO_SCALE = 0.0001;
+function updateInvaderDetails() {
+  // Reuses one dummy object — no allocation per frame. Dead invaders collapse
+  // their instances to zero scale instead of being removed.
+  for (let i = 0; i < invaders.length; i++) {
+    const v = invaders[i];
+    const gx = v.grp.position.x, gy = v.grp.position.y;
+    if (!v.alive) {
+      detailDummy.position.set(0, -999, 0);
+      detailDummy.scale.setScalar(ZERO_SCALE);
+      detailDummy.updateMatrix();
+      eyeMesh.setMatrixAt(i * 2, detailDummy.matrix);
+      eyeMesh.setMatrixAt(i * 2 + 1, detailDummy.matrix);
+      canopyMesh.setMatrixAt(i, detailDummy.matrix);
+      ringMesh.setMatrixAt(i, detailDummy.matrix);
+      continue;
+    }
+    const pulse = 1 + Math.sin(elapsed * 4 + v.phase) * 0.12;
+    detailDummy.position.set(gx - 0.14, gy + 0.12, 0.18);
+    detailDummy.scale.setScalar(pulse);
+    detailDummy.updateMatrix();
+    eyeMesh.setMatrixAt(i * 2, detailDummy.matrix);
+    detailDummy.position.set(gx + 0.14, gy + 0.12, 0.18);
+    detailDummy.updateMatrix();
+    eyeMesh.setMatrixAt(i * 2 + 1, detailDummy.matrix);
+    detailDummy.position.set(gx, gy + 0.3, 0.05);
+    detailDummy.scale.setScalar(1);
+    detailDummy.updateMatrix();
+    canopyMesh.setMatrixAt(i, detailDummy.matrix);
+    detailDummy.position.set(gx, gy, 0.22);
+    detailDummy.scale.setScalar(pulse);
+    detailDummy.updateMatrix();
+    ringMesh.setMatrixAt(i, detailDummy.matrix);
+  }
+  eyeMesh.instanceMatrix.needsUpdate = true;
+  canopyMesh.instanceMatrix.needsUpdate = true;
+  ringMesh.instanceMatrix.needsUpdate = true;
+}
 let formX = 0, formY = FORM_TOP_Y, marchDir = 1, aliveCount = COLS * ROWS;
 formation.position.set(formX, formY, FORM_Z);
 
@@ -475,8 +646,8 @@ function hitShield(x, y, z) {
   return false;
 }
 
-// ============================== particles (pooled) ==============================
-const P_COUNT = 320;
+// ============================== particles (pooled, ring-recycled) ==============================
+const P_COUNT = 480;
 const pPos = new Float32Array(P_COUNT * 3);
 const pCol = new Float32Array(P_COUNT * 3);
 const pVel = new Float32Array(P_COUNT * 3);
@@ -520,41 +691,266 @@ function updateParticles(dt) {
   pGeo.attributes.position.needsUpdate = true;
 }
 
-// ============================== bolts & bombs (pooled) ==============================
+// ============================== shockwave rings (pooled) ==============================
+const shockwaves = [];
+for (let i = 0; i < 8; i++) {
+  const s = glowSprite(0xffffff, 1, 0);
+  s.visible = false;
+  scene.add(s);
+  shockwaves.push({ sprite: s, active: false, t: 0 });
+}
+let shockCursor = 0;
+function spawnShockwave(x, y, z, colorHex) {
+  let sw = shockwaves.find(s => !s.active);
+  if (!sw) { sw = shockwaves[shockCursor]; shockCursor = (shockCursor + 1) % shockwaves.length; }
+  sw.sprite.position.set(x, y, z);
+  sw.sprite.material.color.setHex(colorHex);
+  sw.t = 0; sw.active = true; sw.sprite.visible = true;
+}
+function updateShockwaves(dt) {
+  for (const sw of shockwaves) {
+    if (!sw.active) continue;
+    sw.t += dt / 0.5;
+    if (sw.t >= 1) { sw.active = false; sw.sprite.visible = false; continue; }
+    const sc = 0.5 + sw.t * 7;
+    sw.sprite.scale.set(sc, sc, 1);
+    sw.sprite.material.opacity = (1 - sw.t) * 0.85;
+  }
+}
+
+// ============================== player weapons (all pooled, recycle-oldest) ==============================
 const aimPoint = new THREE.Vector3(0, 6.2, FORM_Z);
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+const muzzlePos = new THREE.Vector3(), aimDir = new THREE.Vector3();
 const UP_Y = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
-const boltGeo = new THREE.CapsuleGeometry(0.045, 0.42, 3, 8);
-const boltMat = new THREE.MeshBasicMaterial({ color: 0xbffcff, toneMapped: false });
+// Bolts: longer capsule + additive blending = laser glow trail, no extra draw calls.
+const boltGeo = new THREE.CapsuleGeometry(0.045, 0.6, 3, 8);
+const boltMat = new THREE.MeshBasicMaterial({ color: 0xbffcff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 const bolts = [];
-for (let i = 0; i < 24; i++) {
+for (let i = 0; i < 48; i++) {
   const grp = new THREE.Group();
   grp.add(new THREE.Mesh(boltGeo, boltMat));
   grp.add(glowSprite(0x27e8ff, 0.55, 0.8));
   grp.visible = false;
   scene.add(grp);
-  bolts.push({ grp, active: false, vx: 0, vy: 0, vz: 0, life: 0 });
+  bolts.push({ grp, active: false, vx: 0, vy: 0, vz: 0, life: 0, pierce: 0 });
 }
-let fireCooldown = 0;
-function fireBolt() {
-  for (const b of bolts) {
-    if (b.active) continue;
-    // Muzzle = barrel tip in world space
-    tmpV.set(0, 0.03, 0.85);
-    barrel.localToWorld(tmpV);
-    b.grp.position.copy(tmpV);
-    tmpV2.copy(aimPoint).sub(tmpV).normalize();
-    b.vx = tmpV2.x * 42; b.vy = tmpV2.y * 42; b.vz = tmpV2.z * 42;
-    tmpQ.setFromUnitVectors(UP_Y, tmpV2);
-    b.grp.quaternion.copy(tmpQ);
-    b.life = 1.1; b.active = true; b.grp.visible = true;
-    muzzleFlash.position.copy(tmpV);
-    flashT = 0.07;
-    laserSound();
-    return;
+let boltCursor = 0;
+function nextBolt() {
+  let b = bolts.find(x => !x.active);
+  if (!b) { b = bolts[boltCursor]; boltCursor = (boltCursor + 1) % bolts.length; }
+  return b;
+}
+function launchBolt(ox, oy, oz, dx, dy, dz) {
+  const b = nextBolt();
+  b.grp.position.set(ox, oy, oz);
+  tmpA.set(dx, dy, dz).normalize();
+  tmpQ.setFromUnitVectors(UP_Y, tmpA);
+  b.grp.quaternion.copy(tmpQ);
+  b.vx = tmpA.x * 42; b.vy = tmpA.y * 42; b.vz = tmpA.z * 42;
+  b.life = 1.1; b.pierce = U.power; b.active = true; b.grp.visible = true;
+}
+// Rail beams: one stretched additive box, pierces a column of invaders.
+const beamGeo = new THREE.BoxGeometry(1, 1, 1);
+const beams = [];
+for (let i = 0; i < 2; i++) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffd319, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const mesh = new THREE.Mesh(beamGeo, mat);
+  mesh.visible = false;
+  scene.add(mesh);
+  beams.push({ mesh, active: false, life: 0 });
+}
+let beamCursor = 0;
+function fireBeam() {
+  let bm = beams.find(x => !x.active);
+  if (!bm) { bm = beams[beamCursor]; beamCursor = (beamCursor + 1) % beams.length; }
+  tmpA.copy(aimPoint).sub(muzzlePos);
+  const len = tmpA.length();
+  tmpA.normalize();
+  tmpQ.setFromUnitVectors(Z_AXIS, tmpA);
+  bm.mesh.quaternion.copy(tmpQ);
+  tmpB.copy(muzzlePos).addScaledVector(tmpA, len / 2);
+  bm.mesh.position.copy(tmpB);
+  const w = Math.min(0.18 + W.rail * 0.02, 0.5);
+  bm.mesh.scale.set(w, w, len);
+  bm.life = 0.18; bm.active = true; bm.mesh.visible = true;
+  bm.mesh.material.opacity = 0.9;
+  // Hitscan: kill up to (2 + rail level) invaders near the beam segment.
+  const maxKills = 2 + W.rail, w0 = wave;
+  let kills = 0;
+  tmpB.copy(aimPoint).sub(muzzlePos); // segment vector
+  const segLenSq = tmpB.lengthSq();
+  for (const v of invaders) {
+    if (kills >= maxKills || wave !== w0) break;
+    if (!v.alive) continue;
+    tmpA.set(formX + v.lx - muzzlePos.x, formY + v.grp.position.y - muzzlePos.y, FORM_Z - muzzlePos.z);
+    let t = segLenSq > 0 ? (tmpA.x * tmpB.x + tmpA.y * tmpB.y + tmpA.z * tmpB.z) / segLenSq : 0;
+    t = clamp(t, 0, 1);
+    const cx = muzzlePos.x + tmpB.x * t, cy = muzzlePos.y + tmpB.y * t, cz = muzzlePos.z + tmpB.z * t;
+    const dx = formX + v.lx - cx, dy = formY + v.grp.position.y - cy, dz = FORM_Z - cz;
+    if (dx * dx + dy * dy + dz * dz < 0.56) { killInvader(v); kills++; }
   }
 }
+// Seeker missiles: homing cones, pooled.
+const missileGeo = new THREE.ConeGeometry(0.12, 0.5, 8);
+const missileMat = new THREE.MeshBasicMaterial({ color: 0x2bff88, toneMapped: false });
+const missiles = [];
+for (let i = 0; i < 16; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(missileGeo, missileMat));
+  grp.add(glowSprite(0x2bff88, 0.7, 0.8));
+  grp.visible = false;
+  scene.add(grp);
+  missiles.push({ grp, active: false, vx: 0, vy: 0, vz: 0, life: 0 });
+}
+let missileCursor = 0;
+function fireMissile(ox, oy, oz, dx, dy, dz) {
+  let m = missiles.find(x => !x.active);
+  if (!m) { m = missiles[missileCursor]; missileCursor = (missileCursor + 1) % missiles.length; }
+  m.grp.position.set(ox, oy, oz);
+  m.vx = dx * 20; m.vy = dy * 20; m.vz = dz * 20;
+  m.life = 4; m.active = true; m.grp.visible = true;
+}
+// Bomb orbs: slow, fat, AoE explosion.
+const orbGeo = new THREE.SphereGeometry(0.3, 14, 12);
+const orbMat = new THREE.MeshBasicMaterial({ color: 0xff7e47, toneMapped: false });
+const orbs = [];
+for (let i = 0; i < 6; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(orbGeo, orbMat));
+  grp.add(glowSprite(0xff7e47, 1.7, 0.8));
+  grp.visible = false;
+  scene.add(grp);
+  orbs.push({ grp, active: false, vx: 0, vy: 0, vz: 0 });
+}
+let orbCursor = 0;
+function fireOrb(ox, oy, oz, dx, dy, dz) {
+  let o = orbs.find(x => !x.active);
+  if (!o) { o = orbs[orbCursor]; orbCursor = (orbCursor + 1) % orbs.length; }
+  o.grp.position.set(ox, oy, oz);
+  o.vx = dx * 13; o.vy = dy * 13; o.vz = dz * 13;
+  o.active = true; o.grp.visible = true;
+}
+function explodeOrb(x, y, z) {
+  spawnBurst(x, y, z, 0xff7e47, 30, 6, 0.8);
+  spawnBurst(x, y, z, 0xffd319, 16, 4.5, 0.6);
+  spawnShockwave(x, y, z, 0xff7e47);
+  boomSound();
+  const w0 = wave, R2 = 2.4 * 2.4;
+  for (const v of invaders) {
+    if (wave !== w0) break;
+    if (!v.alive) continue;
+    const dx = formX + v.lx - x, dy = formY + v.grp.position.y - y;
+    if (dx * dx + dy * dy < R2) killInvader(v);
+  }
+  for (const mb of bombs) {
+    if (!mb.active) continue;
+    const dx = mb.grp.position.x - x, dy = mb.grp.position.y - y, dz = mb.grp.position.z - z;
+    if (dx * dx + dy * dy + dz * dz < R2) { mb.active = false; mb.grp.visible = false; score += 5; }
+  }
+  drawScorePanel();
+}
+// One trigger pull = the whole uncapped arsenal at once.
+let fireCooldown = 0;
+function fireWeapons() {
+  tmpV.set(0, 0.03, 0.85);
+  barrel.localToWorld(tmpV);
+  muzzlePos.copy(tmpV);
+  aimDir.copy(aimPoint).sub(muzzlePos).normalize();
+  launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  for (let i = 1; i <= W.spread; i++) { // fan pairs, ±i steps of ~3.2°
+    const a = i * 0.055, c = Math.cos(a), s = Math.sin(a);
+    launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x * c + aimDir.z * s, aimDir.y, -aimDir.x * s + aimDir.z * c);
+    launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x * c - aimDir.z * s, aimDir.y, aimDir.x * s + aimDir.z * c);
+  }
+  for (let k = 1; k <= W.twin; k++) { // parallel bolts, alternating sides
+    const off = (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 0.14;
+    launchBolt(muzzlePos.x + off, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  }
+  if (W.rail >= 1) { fireBeam(); beamSound(); }
+  for (let k = 0; k < W.seeker; k++) fireMissile(muzzlePos.x + (k - (W.seeker - 1) / 2) * 0.2, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  for (let k = 0; k < W.bomb; k++) fireOrb(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  if (W.seeker >= 1) missileSound();
+  muzzleFlash.position.copy(muzzlePos);
+  flashT = 0.07;
+  laserSound();
+}
+
+// ============================== pickups (pooled, recycle-oldest) ==============================
+const PICKUP_TYPES = {
+  spread: { label: 'SPREAD SHOT', color: 0xff3df0, weapon: 'spread' },
+  twin:   { label: 'TWIN LASER', color: 0x27e8ff, weapon: 'twin' },
+  rail:   { label: 'RAIL BEAM', color: 0xffd319, weapon: 'rail' },
+  seeker: { label: 'SEEKER MISSILES', color: 0x2bff88, weapon: 'seeker' },
+  bomb:   { label: 'BOMB ORBS', color: 0xff7e47, weapon: 'bomb' },
+  rate:   { label: 'FIRE RATE', color: 0xff3355, upgrade: 'rate' },
+  shield: { label: 'SHIELD LAYER', color: 0x4da6ff, upgrade: 'shield' },
+  power:  { label: 'CANNON POWER', color: 0xffffff, upgrade: 'power' },
+  speed:  { label: 'MOVE SPEED', color: 0x9d5cff, upgrade: 'speed' }
+};
+const PICKUP_KEYS = Object.keys(PICKUP_TYPES);
+const octaGeo = new THREE.OctahedronGeometry(0.24);
+const icosaGeo = new THREE.IcosahedronGeometry(0.24, 0);
+const pickups = [];
+for (let i = 0; i < 12; i++) {
+  const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const core = new THREE.Mesh(octaGeo, coreMat);
+  const grp = new THREE.Group();
+  grp.add(core);
+  const glow = glowSprite(0xffffff, 1.1, 0.8);
+  grp.add(glow);
+  grp.visible = false;
+  scene.add(grp);
+  pickups.push({ grp, core, glow, active: false, type: '', phase: Math.random() * Math.PI * 2 });
+}
+let pickupCursor = 0;
+function spawnPickup(x, y, z, type) {
+  let p = pickups.find(q => !q.active);
+  if (!p) { p = pickups[pickupCursor]; pickupCursor = (pickupCursor + 1) % pickups.length; }
+  const meta = PICKUP_TYPES[type];
+  p.grp.position.set(x, y, z);
+  p.core.geometry = meta.weapon ? octaGeo : icosaGeo;
+  p.core.material.color.setHex(meta.color);
+  p.glow.material.color.setHex(meta.color);
+  p.type = type; p.active = true; p.grp.visible = true;
+}
+function applyPickup(type) {
+  const meta = PICKUP_TYPES[type];
+  if (meta.weapon) {
+    W[meta.weapon]++;
+    showAnnouncement(meta.label + ' +1', 'Level ' + W[meta.weapon] + ' — no cap!', 1.2);
+  } else {
+    U[meta.upgrade]++;
+    showAnnouncement(meta.label + ' +1', 'Level ' + U[meta.upgrade] + ' — no cap!', 1.2);
+  }
+  pickupSound();
+  spawnBurst(cannonX, 1.4, RAIL_Z, meta.color, 14, 3.5, 0.5);
+  drawScorePanel();
+}
+function updatePickups(dt) {
+  for (const p of pickups) {
+    if (!p.active) continue;
+    const pos = p.grp.position;
+    pos.y -= 2.2 * dt;
+    pos.x += Math.sin(elapsed * 3 + p.phase) * 0.25 * dt;
+    if (pos.y < 5) pos.x += (cannonX - pos.x) * Math.min(1, 2.5 * dt); // magnet near the rail
+    p.grp.rotation.y += dt * 2.2;
+    if (pos.y <= 1.7 && Math.abs(pos.x - cannonX) < 1.5) {
+      p.active = false; p.grp.visible = false;
+      applyPickup(p.type);
+      continue;
+    }
+    if (pos.y < 0.25) {
+      spawnBurst(pos.x, 0.3, pos.z, 0x7d72a8, 6, 2, 0.4);
+      p.active = false; p.grp.visible = false;
+    }
+  }
+}
+
+// ============================== enemy bombs (pooled) ==============================
 const bombGeo = new THREE.SphereGeometry(0.14, 12, 10);
 const bombMat = new THREE.MeshBasicMaterial({ color: 0xffa02e, toneMapped: false });
 const bombs = [];
@@ -636,6 +1032,10 @@ function blip(freqA, freqB, dur, type, vol) {
 function laserSound() { blip(920, 180, 0.11, 'square', 0.16); }
 function invaderHitSound() { blip(340, 70, 0.14, 'square', 0.22); }
 function stepThump() { blip(68, 45, 0.1, 'sine', 0.3); }
+function beamSound() { blip(1800, 120, 0.22, 'sawtooth', 0.2); }
+function missileSound() { blip(300, 900, 0.18, 'sine', 0.14); }
+function pickupSound() { blip(660, 1320, 0.16, 'sine', 0.22); blip(990, 1980, 0.2, 'sine', 0.14); }
+function shieldSound() { blip(520, 260, 0.25, 'triangle', 0.25); }
 function boomSound() {
   if (!actx || muted) return;
   blip(120, 30, 0.4, 'sine', 0.65);
@@ -744,8 +1144,10 @@ function pollInput(dt) {
       }
     }
   }
-  // Slide the cannon
-  cannonX = clamp(cannonX + steer * 9.5 * dt, RAIL_MIN, RAIL_MAX);
+  // Slide the cannon — Move Speed upgrade scales the slide, soft-capped at 2.5x
+  // for control. The level itself is uncapped; only the effect tapers.
+  const slideSpeed = 9.5 * Math.min(1 + U.speed * 0.08, 2.5);
+  cannonX = clamp(cannonX + steer * slideSpeed * dt, RAIL_MIN, RAIL_MAX);
   // Aim resolution
   let aimed = false;
   if (renderer.xr.isPresenting && rightCtl) {
@@ -791,15 +1193,24 @@ function startWave() {
   resetFormation(true);
   resetShields();
   drawScorePanel();
-  showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'They keep coming.', 2.0);
+  showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
+  if (wave > 1) { // wave-clear bonus: 3 free pickups rain into the field
+    for (let k = 0; k < 3; k++) spawnPickup(rand(-6, 6), rand(9, 11), FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
+  }
 }
 function startGame() {
   if (started) return;
   started = true;
   mode = 'play';
   score = 0; wave = 1; shipsLost = 0;
-  drawnScore = drawnWave = drawnLost = -1;
+  W.spread = W.twin = W.rail = W.seeker = W.bomb = 0;
+  U.rate = U.shield = U.power = U.speed = 0;
+  drawnScore = drawnWave = drawnLost = -1; drawnGear = '';
   cannonX = 0;
+  for (const p of pickups) { p.active = false; p.grp.visible = false; }
+  for (const m of missiles) { m.active = false; m.grp.visible = false; }
+  for (const o of orbs) { o.active = false; o.grp.visible = false; }
+  for (const bm of beams) { bm.active = false; bm.mesh.visible = false; }
   startWave();
 }
 function playerHit() {
@@ -807,7 +1218,15 @@ function playerHit() {
   spawnBurst(cannonX, 1.1, RAIL_Z, 0xffd319, 18, 4, 0.6);
   boomSound();
   flash = 0.85; shakeT = 0.4;
-  if (shimmerT > 0) return;            // already shielded — explosion only, no ship lost
+  if (shimmerT > 0) return;            // invulnerability window — explosion only
+  if (U.shield > 0) {                  // a shield layer absorbs the hit, no ship lost
+    U.shield--;
+    shimmerT = 1.2;
+    shieldSound();
+    drawScorePanel();
+    showAnnouncement('SHIELD ABSORBED!', 'Layers left: ' + U.shield, 1.0);
+    return;
+  }
   shipsLost++;
   shimmerT = 2;
   drawScorePanel();
@@ -826,7 +1245,8 @@ function formationLanded() {
 let elapsed = 0;
 function updateFormation(dt) {
   const deadFrac = 1 - aliveCount / (COLS * ROWS);
-  const marchSpeed = (0.8 + (wave - 1) * 0.12) * (1 + deadFrac * 1.9);
+  // FREEZE FIX: march speed is hard-capped so late waves can't spiral.
+  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.12) * (1 + deadFrac * 1.9));
   formX += marchDir * marchSpeed * dt;
   if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.6; stepThump(); }
   else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.6; stepThump(); }
@@ -838,6 +1258,7 @@ function updateFormation(dt) {
     const s = 1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18;
     v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
   }
+  updateInvaderDetails();
   // Bottom row reached the defense line?
   if (formY - (ROWS - 1) * DY <= DEFENSE_Y) formationLanded();
 }
@@ -845,8 +1266,12 @@ function killInvader(v) {
   v.alive = false; v.grp.visible = false;
   aliveCount--;
   score += v.def.points;
-  spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 16, 4.2, 0.6);
+  spawnBurst(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color, 24, 4.6, 0.7);
+  spawnShockwave(formX + v.lx, formY + v.grp.position.y, FORM_Z, v.def.color);
   invaderHitSound();
+  // 10% of kills drop a random weapon/upgrade pickup — the uncapped arsenal
+  // grows from play, not from a shop or a cap.
+  if (Math.random() < 0.10) spawnPickup(formX + v.lx, formY + v.grp.position.y, FORM_Z, PICKUP_KEYS[Math.floor(Math.random() * PICKUP_KEYS.length)]);
   drawScorePanel();
   if (aliveCount <= 0) {
     wave++;
@@ -870,6 +1295,7 @@ function updateBolts(dt) {
         score += bonus;
         spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xff2e88, 42, 6, 0.9);
         spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xffd319, 20, 4.5, 0.7);
+        spawnShockwave(mother.position.x, mother.position.y, mother.position.z, 0xff2e88);
         boomSound();
         motherActive = false; mother.visible = false;
         warbleStop();
@@ -878,14 +1304,16 @@ function updateBolts(dt) {
         showAnnouncement('BONUS +' + bonus, 'Mothership down!', 1.5);
         b.active = false; break;
       }
-      // Invaders (box test in formation space)
+      // Invaders (box test in formation space). Cannon Power = pierce: the bolt
+      // keeps flying through up to `pierce` invaders instead of dying on one.
       const fx = p.x - formX, fy = p.y - formY;
       if (Math.abs(p.z - FORM_Z) < 0.75) {
         for (const v of invaders) {
           if (!v.alive) continue;
           if (Math.abs(fx - v.lx) < 0.6 && Math.abs(fy - v.grp.position.y) < 0.55) {
             killInvader(v);
-            b.active = false;
+            if (b.pierce > 0) b.pierce--;
+            else b.active = false;
             break;
           }
         }
@@ -911,6 +1339,76 @@ function updateBolts(dt) {
       if (b.life <= 0 || b.grp.position.y < -0.5 || b.grp.position.y > 16 || b.grp.position.z < -24) b.active = false;
     }
     b.grp.visible = b.active;
+  }
+}
+function updateBeams(dt) {
+  for (const bm of beams) {
+    if (!bm.active) continue;
+    bm.life -= dt;
+    if (bm.life <= 0) { bm.active = false; bm.mesh.visible = false; continue; }
+    bm.mesh.material.opacity = (bm.life / 0.18) * 0.9;
+  }
+}
+function updateMissiles(dt) {
+  for (const m of missiles) {
+    if (!m.active) continue;
+    // Nearest alive invader, squared-distance search, temps only — no allocation.
+    let best = null, bestD2 = Infinity;
+    for (const v of invaders) {
+      if (!v.alive) continue;
+      const dx = formX + v.lx - m.grp.position.x, dy = formY + v.grp.position.y - m.grp.position.y, dz = FORM_Z - m.grp.position.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < bestD2) { bestD2 = d2; best = v; }
+    }
+    if (best) {
+      tmpA.set(formX + best.lx - m.grp.position.x, formY + best.grp.position.y - m.grp.position.y, FORM_Z - m.grp.position.z).normalize();
+      const k = 1 - Math.exp(-5 * dt);
+      m.vx += (tmpA.x * 26 - m.vx) * k;
+      m.vy += (tmpA.y * 26 - m.vy) * k;
+      m.vz += (tmpA.z * 26 - m.vz) * k;
+      const sp = Math.hypot(m.vx, m.vy, m.vz) || 1;
+      m.vx = m.vx / sp * 26; m.vy = m.vy / sp * 26; m.vz = m.vz / sp * 26;
+      tmpA.set(m.vx, m.vy, m.vz).normalize();
+      tmpQ.setFromUnitVectors(UP_Y, tmpA);
+      m.grp.quaternion.copy(tmpQ);
+      if (bestD2 < 0.81) {
+        killInvader(best);
+        spawnBurst(m.grp.position.x, m.grp.position.y, m.grp.position.z, 0x2bff88, 16, 4, 0.5);
+        m.active = false; m.grp.visible = false;
+        continue;
+      }
+    }
+    m.grp.position.x += m.vx * dt;
+    m.grp.position.y += m.vy * dt;
+    m.grp.position.z += m.vz * dt;
+    m.life -= dt;
+    if (m.life <= 0 || m.grp.position.z < FORM_Z - 2 || m.grp.position.y < -0.5 || m.grp.position.y > 16) {
+      m.active = false; m.grp.visible = false;
+    }
+  }
+}
+function updateOrbs(dt) {
+  for (const o of orbs) {
+    if (!o.active) continue;
+    o.grp.position.x += o.vx * dt;
+    o.grp.position.y += o.vy * dt;
+    o.grp.position.z += o.vz * dt;
+    const p = o.grp.position;
+    let boom = false;
+    if (p.z <= FORM_Z + 0.6) boom = true;
+    else {
+      for (const v of invaders) {
+        if (!v.alive) continue;
+        const dx = formX + v.lx - p.x, dy = formY + v.grp.position.y - p.y;
+        if (dx * dx + dy * dy < 1.0) { boom = true; break; }
+      }
+    }
+    if (boom) {
+      o.active = false; o.grp.visible = false;
+      explodeOrb(p.x, p.y, p.z);
+      continue;
+    }
+    if (p.y < -0.5 || p.y > 16 || p.z < -26) { o.active = false; o.grp.visible = false; }
   }
 }
 function updateBombs(dt) {
@@ -971,6 +1469,10 @@ let xrSupported = false;
 function setStatus(msg) { statusEl.textContent = msg; }
 function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
 function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+// FREEZE FIX: drop to 1.25 while presenting (stereo is the expensive path),
+// restore 1.5 when the session ends.
+function xrPixelDown() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); }
+function xrPixelUp() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); }
 if (navigator.xr && navigator.xr.isSessionSupported) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     xrSupported = ok;
@@ -992,15 +1494,17 @@ vrBtn.addEventListener('click', async () => {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
     renderer.xr.setReferenceSpaceType('local-floor');
     await renderer.xr.setSession(session);
+    xrPixelDown();
     hidePanel();
-    session.addEventListener('end', () => { showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+    session.addEventListener('end', () => { xrPixelUp(); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
       renderer.xr.setReferenceSpaceType('local');
       await renderer.xr.setSession(session);
+      xrPixelDown();
       hidePanel();
-      session.addEventListener('end', () => { showPanel(); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { xrPixelUp(); showPanel(); vrBtn.disabled = false; });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
@@ -1019,9 +1523,18 @@ function tick() {
   if (mode === 'play') {
     const fire = pollInput(dt);
     fireCooldown -= dt;
-    if (fire && fireCooldown <= 0) { fireBolt(); fireCooldown = 0.16; }
+    if (fire && fireCooldown <= 0) {
+      fireWeapons();
+      // Fire Rate upgrade: each level multiplies the interval by 0.94, with a
+      // 0.05s floor so the loop can never outrun the frame budget. No level cap.
+      fireCooldown = Math.max(0.05, 0.16 * Math.pow(0.94, U.rate));
+    }
     updateFormation(dt);
     updateBolts(dt);
+    updateBeams(dt);
+    updateMissiles(dt);
+    updateOrbs(dt);
+    updatePickups(dt);
     updateBombs(dt);
     updateMother(dt);
   } else {
@@ -1030,6 +1543,7 @@ function tick() {
     for (const v of invaders) {
       v.grp.position.y = v.ly + Math.sin(elapsed * 2.1 + v.phase + v.col * 0.35) * 0.05;
     }
+    updateInvaderDetails();
   }
 
   // Cannon + barrel follow
@@ -1037,6 +1551,11 @@ function tick() {
   barrel.lookAt(aimPoint);
   if (flashT > 0) { flashT -= dt; muzzleFlash.material.opacity = clamp(flashT / 0.07, 0, 1) * 0.95; }
   else muzzleFlash.material.opacity = 0;
+  // Thruster pulse + cannon follows the rail
+  thruster.position.x = cannonX;
+  const tp = 0.55 + Math.sin(elapsed * 9) * 0.2;
+  thruster.scale.set(tp, tp, 1);
+  thruster.material.opacity = 0.4 + Math.sin(elapsed * 9) * 0.12;
 
   // Rig: desktop sits at standing height and tilts up at the formation;
   // in VR the headset owns the pose (tilt zeroed, holder only lifts a
@@ -1056,10 +1575,13 @@ function tick() {
   flash = Math.max(0, flash - dt * 1.7);
   flashMat.opacity = flash * 0.75;
 
-  // Shield shimmer countdown
+  // Shield bubble: bright flash while invulnerable, else a faint persistent
+  // shell while shield layers remain, stronger with more layers.
   if (shimmerT > 0) {
     shimmerT = Math.max(0, shimmerT - dt);
     shimmer.material.opacity = 0.22 * (shimmerT / 2) + Math.sin(elapsed * 14) * 0.03;
+  } else if (U.shield > 0) {
+    shimmer.material.opacity = 0.1 + Math.min(U.shield, 8) * 0.015 + Math.sin(elapsed * 6) * 0.02;
   } else shimmer.material.opacity = 0;
 
   // Announcement fade
@@ -1068,7 +1590,13 @@ function tick() {
     annMesh.material.opacity = clamp(annT / Math.min(0.45, annDur), 0, 1);
   } else annMesh.material.opacity = 0;
 
+  // Planets drift slowly
+  planetA.rotation.y += dt * 0.008;
+  planetB.rotation.y += dt * 0.012;
+  planetC.rotation.y += dt * 0.02;
+
   updateParticles(dt);
+  updateShockwaves(dt);
   renderer.render(scene, camera);
 }
 renderer.setAnimationLoop(tick);

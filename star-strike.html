@@ -10,13 +10,13 @@
   canvas { display:block; }
   #panel {
     position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-    background:radial-gradient(ellipse at 50% 20%, #1b2a6b 0%, #050514 55%, #000 100%);
+    background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
     z-index:10; text-align:center; color:#fff;
   }
-  #panel .box { max-width:600px; padding:24px 20px; }
+  #panel .box { max-width:640px; padding:24px 20px; }
   #panel h1 {
     font-size:60px; letter-spacing:8px; margin:0 0 4px 0; font-weight:900; font-style:italic;
-    background:linear-gradient(180deg,#7df9ff 15%,#4da6ff 55%,#ff9a3c 100%);
+    background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(77,166,255,.35);
   }
@@ -25,8 +25,8 @@
   #panel p.small { font-size:13px; color:#a8c4e0; }
   #vrBtn {
     margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
-    color:#04101f; background:linear-gradient(180deg,#7df9ff,#4da6ff); border:none; border-radius:12px;
-    padding:16px 42px; box-shadow:0 6px 30px rgba(77,166,255,.55);
+    color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
@@ -37,12 +37,12 @@
   }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
-    background:rgba(5,10,30,.7); color:#bfe3ff; border:1px solid #4da6ff; border-radius:8px;
+    background:rgba(10,16,38,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
     padding:8px 12px; font-size:13px; letter-spacing:1px;
   }
   #backLink {
-    position:fixed; top:12px; left:12px; z-index:20; color:#bfe3ff; font-size:13px;
-    text-decoration:none; background:rgba(5,10,30,.7); border:1px solid #4da6ff;
+    position:fixed; top:12px; left:12px; z-index:20; color:#bfeaff; font-size:13px;
+    text-decoration:none; background:rgba(10,16,38,.72); border:1px solid #27e8ff;
     border-radius:8px; padding:8px 12px;
   }
 </style>
@@ -55,13 +55,13 @@
 <div id="panel">
   <div class="box">
     <h1>STAR STRIKE</h1>
-    <div class="sub">An original VR space shooter — unlimited retries</div>
+    <div class="sub">An original VR space shooter — unlimited retries, unlimited weapons, unlimited upgrades</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p>You are rookie pilot <b>Jax Vega</b> in the interceptor <b>Kestrel</b>, holding the line against the Void drone swarm.</p>
-    <p><b>Left thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible)</p>
-    <p>Pointing your right controller also steers the ship. Grab <b>triple-laser</b>, <b>shield</b> and <b>hull</b> pickups. Survive to Wave 5 and the Ravager carrier shows up.</p>
-    <p class="small">Getting hit costs hull — at zero hull you explode and instantly respawn with your score intact. There is no game over, ever.</p>
-    <p class="small">No headset handy? Desktop preview works too — mouse steers, click / Space fires, Shift barrel-rolls, M mutes.</p>
+    <p><b>Left thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible) &nbsp;·&nbsp; <b>A</b> = Nova Bomb</p>
+    <p>Grab weapon pickups — <b>Triple Laser, Seeker Missiles, Plasma Cannon, Rail Beam, Nova Bomb</b> — and upgrade pickups — <b>Hull Plating, Shield Cells, Engine Speed, Weapon Power</b>. Every pickup stacks with <b>no maximum</b>. Each cleared wave also grants a bonus upgrade.</p>
+    <p class="small">Getting hit costs hull — at zero hull you explode and instantly respawn with your score, weapons and upgrades intact. There is no game over, ever.</p>
+    <p class="small">No headset handy? Desktop preview works too — mouse steers, click / Space fires, Shift barrel-rolls, N = Nova Bomb, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
   </div>
@@ -76,6 +76,13 @@ import * as THREE from 'three';
 
 // STAR STRIKE VR — an original game. All ships, pilots, names and sounds here
 // were invented for this game. No licensed characters, music or worlds appear.
+//
+// GRAPHICS NOTE (honest): every visual here is procedural — canvas gradients,
+// extruded shapes, emissive materials, pooled particles. It is a visual lift
+// within what a Quest browser can render at frame rate, not console realism.
+// The look follows the Neon Invaders VR house style Danny loves: near-black
+// violet space, high-contrast neon palette, additive glow sprites everywhere,
+// dark hulls with neon emissive accents, tone-mapping-exempt neon cores.
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -92,7 +99,8 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x02010a, 0.0035);
+scene.background = new THREE.Color(0x040110);
+scene.fog = new THREE.Fog(0x040110, 60, 260);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
 const rig = new THREE.Group();
 rig.position.set(0, 1.6, 6);
@@ -103,25 +111,59 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(30, 60, 40);
 scene.add(sun);
 
-// Starfield shell (static points) + drifting dust
-function makeStars(count, radius, size, color) {
-  const pos = new Float32Array(count * 3);
+// ---- Nebula skybox: procedural canvas gradient wrapped on a huge sphere ----
+function skyboxTexture() {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, '#040110'); g.addColorStop(0.45, '#0a0620');
+  g.addColorStop(0.7, '#1b0f3d'); g.addColorStop(1, '#040110');
+  x.fillStyle = g; x.fillRect(0, 0, 1024, 512);
+  const blobs = [
+    ['#ff2e88', 180, 200, 150], ['#1fb6d9', 520, 150, 170], ['#7b2d8b', 800, 260, 130],
+    ['#ff7e47', 320, 320, 120], ['#27e8ff', 920, 120, 110], ['#2bff88', 60, 120, 100],
+  ];
+  for (const [col, bx, by, r] of blobs) {
+    const rg = x.createRadialGradient(bx, by, 4, bx, by, r);
+    rg.addColorStop(0, col); rg.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = rg; x.beginPath(); x.arc(bx, by, r, 0, Math.PI * 2); x.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const skybox = new THREE.Mesh(
+  new THREE.SphereGeometry(400, 32, 16),
+  new THREE.MeshBasicMaterial({ map: skyboxTexture(), side: THREE.BackSide, fog: false, depthWrite: false })
+);
+scene.add(skybox);
+
+// Starfield shells: vertex-colored points (white / cyan / pink / light blue),
+// fog-exempt and tone-mapping-exempt so the neon stars stay bright.
+function makeStars(count, radius, size) {
+  const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
+  const palette = [new THREE.Color(0xffffff), new THREE.Color(0xbfeaff), new THREE.Color(0xffd9ec), new THREE.Color(0x9fd8ff)];
+  const c = new THREE.Color();
   for (let i = 0; i < count; i++) {
     const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1)), r = radius;
     pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
     pos[i * 3 + 1] = r * Math.cos(ph);
     pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+    c.copy(palette[i % palette.length]).multiplyScalar(rand(0.35, 1));
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: false, transparent: true, opacity: 0.9, depthWrite: false });
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const m = new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false, fog: false, toneMapped: false });
   const p = new THREE.Points(g, m);
+  p.frustumCulled = false;
   scene.add(p);
   return p;
 }
-makeStars(2200, 420, 1.6, 0xffffff);
-makeStars(900, 420, 2.6, 0x9fd8ff);
-makeStars(300, 420, 3.4, 0xffd9a0);
+makeStars(2200, 380, 1.6);
+makeStars(900, 380, 2.6);
+makeStars(300, 380, 3.4);
 
 // Nebula sprites (canvas radial gradients)
 function nebulaSprite(hex, size) {
@@ -131,29 +173,81 @@ function nebulaSprite(hex, size) {
   grd.addColorStop(0, hex); grd.addColorStop(1, 'rgba(0,0,0,0)');
   x.fillStyle = grd; x.fillRect(0, 0, 256, 256);
   const tex = new THREE.CanvasTexture(c);
-  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.5, depthWrite: false }));
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.5, depthWrite: false, toneMapped: false, fog: false }));
   spr.scale.set(size, size, 1);
   return spr;
 }
-const neb1 = nebulaSprite('#2a4d8f', 260); neb1.position.set(-120, 40, -300); scene.add(neb1);
-const neb2 = nebulaSprite('#6b2a8f', 220); neb2.position.set(140, -30, -320); scene.add(neb2);
-const neb3 = nebulaSprite('#8f3a2a', 180); neb3.position.set(20, 90, -340); scene.add(neb3);
+const neb1 = nebulaSprite('#ff2e88', 260); neb1.material.opacity = 0.13; neb1.position.set(-120, 40, -300); scene.add(neb1);
+const neb2 = nebulaSprite('#1fb6d9', 220); neb2.material.opacity = 0.12; neb2.position.set(140, -30, -320); scene.add(neb2);
+const neb3 = nebulaSprite('#7b2d8b', 180); neb3.material.opacity = 0.14; neb3.position.set(20, 90, -340); scene.add(neb3);
+const neb4 = nebulaSprite('#ff7e47', 200); neb4.material.opacity = 0.08; neb4.position.set(-180, -60, -310); scene.add(neb4);
+const neb5 = nebulaSprite('#27e8ff', 190); neb5.material.opacity = 0.10; neb5.position.set(180, 70, -330); scene.add(neb5);
+
+// Shared radial glow texture, Neon Invaders VR style: white core fading out,
+// tinted by each sprite's material color. Every fake glow in the game uses it.
+function glowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 2, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const glowTex = glowTexture();
+// Neon Invaders VR glow helper: white-core sprite, tinted by color, additive,
+// tone-mapping- and fog-exempt so neon stays pure and bright at any distance.
+function glowSprite(color, scale, opacity) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+  s.scale.set(scale, scale, 1);
+  return s;
+}
 
 // ============================== shared materials / geometries ==============================
+// Neon Invaders VR house style: dark hulls (0x1c2742 / 0x11162a) + neon
+// emissive accents + pure-neon MeshBasicMaterial cores (toneMapped: false).
+// Bodies use the NIVR formula: base color = neon x 0.35, emissive = neon.
 const MAT = {
-  hull: new THREE.MeshStandardMaterial({ color: 0xb8c4d4, metalness: 0.85, roughness: 0.35 }),
-  hullDark: new THREE.MeshStandardMaterial({ color: 0x3a4556, metalness: 0.8, roughness: 0.45 }),
-  canopy: new THREE.MeshStandardMaterial({ color: 0x35c8ff, metalness: 0.2, roughness: 0.1, emissive: 0x0a3a55 }),
+  hull: new THREE.MeshStandardMaterial({ color: 0x1c2742, metalness: 0.8, roughness: 0.35 }),
+  hullDark: new THREE.MeshStandardMaterial({ color: 0x11162a, metalness: 0.5, roughness: 0.6 }),
+  hullStripe: new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false }),
+  canopy: new THREE.MeshStandardMaterial({ color: 0x35c8ff, metalness: 0.2, roughness: 0.1, emissive: 0x0a3a55, emissiveIntensity: 1.5 }),
   engine: new THREE.MeshStandardMaterial({ color: 0x35c8ff, emissive: 0x2aa8ff, emissiveIntensity: 2.2 }),
-  enemyBody: new THREE.MeshStandardMaterial({ color: 0x5a2a2a, metalness: 0.7, roughness: 0.4 }),
-  enemyCore: new THREE.MeshStandardMaterial({ color: 0xff3355, emissive: 0xff2244, emissiveIntensity: 2.5 }),
-  shard: new THREE.MeshStandardMaterial({ color: 0x2a4a5a, metalness: 0.7, roughness: 0.35, emissive: 0x0a2a3a }),
-  rock: new THREE.MeshStandardMaterial({ color: 0x6a5a4a, roughness: 0.95, flatShading: true }),
-  boltP: new THREE.MeshBasicMaterial({ color: 0x7df9ff }),
-  boltE: new THREE.MeshBasicMaterial({ color: 0xff5566 }),
-  gold: new THREE.MeshStandardMaterial({ color: 0xffc845, emissive: 0x885500, emissiveIntensity: 1.2 }),
+  engineHot: new THREE.MeshStandardMaterial({ color: 0xffcc55, emissive: 0xff8800, emissiveIntensity: 2.6 }),
+  enemyBody: new THREE.MeshStandardMaterial({ color: 0x591554, emissive: 0xff3df0, emissiveIntensity: 0.55, metalness: 0.3, roughness: 0.4 }),
+  enemyCore: new THREE.MeshBasicMaterial({ color: 0xff3df0, toneMapped: false }),
+  enemyRing: new THREE.MeshStandardMaterial({ color: 0x1a0f2e, metalness: 0.85, roughness: 0.35, emissive: 0xff3df0, emissiveIntensity: 0.4 }),
+  shard: new THREE.MeshStandardMaterial({ color: 0x0e5159, emissive: 0x27e8ff, emissiveIntensity: 0.55, metalness: 0.3, roughness: 0.35 }),
+  shardFin: new THREE.MeshStandardMaterial({ color: 0x0e5159, metalness: 0.8, roughness: 0.3, emissive: 0x27e8ff, emissiveIntensity: 0.8 }),
+  rock: new THREE.MeshStandardMaterial({ color: 0x141a2e, roughness: 0.9, flatShading: true, emissive: 0x27e8ff, emissiveIntensity: 0.12 }),
+  rockDark: new THREE.MeshStandardMaterial({ color: 0x0e1220, roughness: 1.0, flatShading: true, emissive: 0x7b2d8b, emissiveIntensity: 0.12 }),
+  boltP: new THREE.MeshBasicMaterial({ color: 0xbffcff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
+  boltE: new THREE.MeshBasicMaterial({ color: 0xff5566, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
+  plasma: new THREE.MeshBasicMaterial({ color: 0xff55ff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
+  rail: new THREE.MeshBasicMaterial({ color: 0xaefcff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9, toneMapped: false, fog: false }),
+  gold: new THREE.MeshBasicMaterial({ color: 0xffc845, toneMapped: false }),
   green: new THREE.MeshStandardMaterial({ color: 0x33ff88, emissive: 0x0a8833, emissiveIntensity: 1.6 }),
-  bossHull: new THREE.MeshStandardMaterial({ color: 0x4a2a5a, metalness: 0.8, roughness: 0.4 }),
+  bossHull: new THREE.MeshStandardMaterial({ color: 0x372059, emissive: 0x9d5cff, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.4 }),
+  bossStripe: new THREE.MeshBasicMaterial({ color: 0xff2e88, toneMapped: false }),
+  navRed: new THREE.MeshBasicMaterial({ color: 0xff2222, toneMapped: false }),
+  navGreen: new THREE.MeshBasicMaterial({ color: 0x22ff66, toneMapped: false }),
+};
+const PICK_MAT = {
+  triple: new THREE.MeshBasicMaterial({ color: 0xffc845, toneMapped: false }),
+  seeker: new THREE.MeshBasicMaterial({ color: 0xff8833, toneMapped: false }),
+  plasma: new THREE.MeshBasicMaterial({ color: 0xff55ff, toneMapped: false }),
+  rail: new THREE.MeshBasicMaterial({ color: 0xaefcff, toneMapped: false }),
+  nova: new THREE.MeshBasicMaterial({ color: 0xff2244, toneMapped: false }),
+  plate: new THREE.MeshBasicMaterial({ color: 0x8fb8ff, toneMapped: false }),
+  cell: new THREE.MeshBasicMaterial({ color: 0x33ff88, toneMapped: false }),
+  engine: new THREE.MeshBasicMaterial({ color: 0xffff55, toneMapped: false }),
+  power: new THREE.MeshBasicMaterial({ color: 0xcc55ff, toneMapped: false }),
+  hull: new THREE.MeshBasicMaterial({ color: 0x7df9ff, toneMapped: false }),
+  shield: new THREE.MeshBasicMaterial({ color: 0x33ffcc, toneMapped: false }),
 };
 const GEO = {
   cone: new THREE.ConeGeometry(0.32, 1.4, 8),
@@ -161,69 +255,132 @@ const GEO = {
   sphere: new THREE.SphereGeometry(0.5, 10, 8),
   oct: new THREE.OctahedronGeometry(0.9),
   tetra: new THREE.TetrahedronGeometry(1.0),
-  rock: new THREE.IcosahedronGeometry(1.0, 0),
+  rock: new THREE.IcosahedronGeometry(1.0, 1),
   bolt: new THREE.SphereGeometry(0.14, 8, 6),
+  plasmaBall: new THREE.SphereGeometry(0.34, 10, 8),
+  ring: new THREE.TorusGeometry(1, 0.08, 8, 32),
 };
 
-// ============================== player ship (original "Kestrel" design) ==============================
+// ============================== player ship: detailed Kestrel (original design) ==============================
 const ship = new THREE.Group();
+let navL, navR;
+const engineGlows = [];
 {
-  const fus = new THREE.Mesh(GEO.cone, MAT.hull);
-  fus.rotation.x = -Math.PI / 2; ship.add(fus);
+  // Nose spike + fuselage
+  const nose = new THREE.Mesh(GEO.cone, MAT.hull);
+  nose.rotation.x = -Math.PI / 2; nose.position.z = -0.4; ship.add(nose);
   const body = new THREE.Mesh(GEO.box, MAT.hull);
   body.scale.set(0.55, 0.35, 1.1); body.position.z = 0.55; ship.add(body);
+  const spine = new THREE.Mesh(GEO.box, MAT.hullDark);
+  spine.scale.set(0.2, 0.12, 1.0); spine.position.set(0, 0.22, 0.5); ship.add(spine);
+  const stripe = new THREE.Mesh(GEO.box, MAT.hullStripe);
+  stripe.scale.set(0.57, 0.06, 0.9); stripe.position.set(0, 0.0, 0.55); ship.add(stripe);
+  // Cockpit canopy with frame
   const canopy = new THREE.Mesh(GEO.sphere, MAT.canopy);
   canopy.scale.set(0.28, 0.22, 0.5); canopy.position.set(0, 0.24, 0.35); ship.add(canopy);
+  const frame = new THREE.Mesh(GEO.box, MAT.hullDark);
+  frame.scale.set(0.6, 0.06, 0.3); frame.position.set(0, 0.24, 0.75); ship.add(frame);
   for (const s of [-1, 1]) {
+    // Swept wing + flap + tip light + engine pod
     const wing = new THREE.Mesh(GEO.box, MAT.hullDark);
     wing.scale.set(1.25, 0.08, 0.7); wing.position.set(s * 0.85, -0.05, 0.75); ship.add(wing);
+    const flap = new THREE.Mesh(GEO.box, MAT.hull);
+    flap.scale.set(0.5, 0.06, 0.3); flap.position.set(s * 1.25, -0.02, 1.05); ship.add(flap);
     const tip = new THREE.Mesh(GEO.box, MAT.engine);
     tip.scale.set(0.12, 0.12, 0.5); tip.position.set(s * 1.45, -0.05, 0.75); ship.add(tip);
-    const eng = new THREE.Mesh(GEO.sphere, MAT.engine);
-    eng.scale.set(0.22, 0.22, 0.5); eng.position.set(s * 0.35, -0.05, 1.15); ship.add(eng);
+    const nav = new THREE.Mesh(GEO.sphere, s < 0 ? MAT.navRed : MAT.navGreen);
+    nav.scale.setScalar(0.28); nav.position.set(s * 1.5, -0.02, 0.55); ship.add(nav);
+    if (s < 0) navL = nav; else navR = nav;
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.7, 10), MAT.hullDark);
+    pod.rotation.x = Math.PI / 2; pod.position.set(s * 0.35, -0.05, 1.15); ship.add(pod);
+    const eng = new THREE.Mesh(GEO.sphere, MAT.engineHot);
+    eng.scale.set(0.22, 0.22, 0.3); eng.position.set(s * 0.35, -0.05, 1.5); ship.add(eng);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x66ccff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+    glow.scale.set(0.9, 0.9, 1); glow.position.set(s * 0.35, -0.05, 1.75); ship.add(glow);
+    engineGlows.push(glow);
   }
 }
 ship.position.set(0, 0, 0);
 scene.add(ship);
 
+// Engine trails: two preallocated line ribbons trailing the engine pods
+const TRAIL_N = 20;
+function makeTrail(color) {
+  const pos = new Float32Array(TRAIL_N * 3);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, toneMapped: false }));
+  line.frustumCulled = false;
+  scene.add(line);
+  return { line, pos };
+}
+const trails = [makeTrail(0x66ccff), makeTrail(0x66ccff)];
+const _trailTmp = new THREE.Vector3();
+function updateTrails() {
+  for (let k = 0; k < 2; k++) {
+    const s = k === 0 ? -1 : 1;
+    _trailTmp.set(ship.position.x + s * 0.35, ship.position.y - 0.05, ship.position.z + 1.6);
+    const pos = trails[k].pos;
+    for (let i = TRAIL_N - 1; i > 0; i--) {
+      pos[i * 3] = pos[(i - 1) * 3]; pos[i * 3 + 1] = pos[(i - 1) * 3 + 1]; pos[i * 3 + 2] = pos[(i - 1) * 3 + 2];
+    }
+    pos[0] = _trailTmp.x; pos[1] = _trailTmp.y; pos[2] = _trailTmp.z;
+    trails[k].line.geometry.attributes.position.needsUpdate = true;
+  }
+}
+
+// Muzzle flash sprite (brief, at the nose on every volley)
+const muzzle = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xaefcff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+muzzle.scale.set(1.4, 1.4, 1);
+scene.add(muzzle);
+let muzzleT = 0;
+
 // ============================== HUD (3D visor panel + DOM fallback) ==============================
 const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 640; hudCanvas.height = 170;
+hudCanvas.width = 640; hudCanvas.height = 300;
 const hctx = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
 const hudPanel = new THREE.Mesh(
-  new THREE.PlaneGeometry(2.1, 0.56),
+  new THREE.PlaneGeometry(2.3, 1.08),
   new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false })
 );
 hudPanel.renderOrder = 999;
-hudPanel.position.set(0, -0.62, -1.5);
+hudPanel.position.set(0, -0.72, -1.5);
 camera.add(hudPanel);
 const hudEl = document.getElementById('hud');
 let hudDirty = true;
 function drawHUD(state) {
   if (!hudDirty) return;
   hudDirty = false;
-  hctx.clearRect(0, 0, 640, 170);
-  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 640, 170);
-  hctx.strokeStyle = '#4da6ff'; hctx.lineWidth = 3; hctx.strokeRect(4, 4, 632, 162);
-  hctx.font = 'bold 34px Arial'; hctx.fillStyle = '#7df9ff';
-  hctx.fillText('SCORE ' + state.score, 22, 48);
-  hctx.fillStyle = '#ffd319'; hctx.fillText('WAVE ' + state.wave, 330, 48);
-  hctx.fillStyle = '#ff5566'; hctx.fillText('HULL', 22, 102);
-  hctx.fillStyle = '#123'; hctx.fillRect(110, 76, 300, 30);
-  hctx.fillStyle = state.hull > 30 ? '#33ff88' : '#ff5566';
-  hctx.fillRect(110, 76, 300 * Math.max(0, state.hull) / 100, 30);
-  hctx.fillStyle = '#bfe3ff'; hctx.font = 'bold 26px Arial';
-  hctx.fillText('RETRIES ' + state.retries, 440, 100);
+  hctx.clearRect(0, 0, 640, 300);
+  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 640, 300);
+  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 3; hctx.strokeRect(4, 4, 632, 292);
+  hctx.font = 'bold 32px Arial'; hctx.fillStyle = '#7df9ff';
+  hctx.fillText('SCORE ' + state.score, 22, 46);
+  hctx.fillStyle = '#ffd319'; hctx.fillText('WAVE ' + state.wave, 330, 46);
+  hctx.fillStyle = '#ff5566'; hctx.font = 'bold 26px Arial'; hctx.fillText('HULL', 22, 96);
+  hctx.fillStyle = '#123'; hctx.fillRect(110, 72, 300, 26);
+  hctx.fillStyle = state.hull > state.maxHull * 0.3 ? '#33ff88' : '#ff5566';
+  hctx.fillRect(110, 72, 300 * Math.max(0, state.hull) / state.maxHull, 26);
+  hctx.fillStyle = '#bfe3ff';
+  hctx.fillText(Math.max(0, Math.round(state.hull)) + '/' + state.maxHull, 420, 96);
+  hctx.fillStyle = '#33ffcc'; hctx.fillText('SHIELD ' + Math.max(0, Math.round(state.shield)), 22, 134);
+  hctx.fillStyle = '#bfe3ff'; hctx.fillText('RETRIES ' + state.retries, 330, 134);
+  // Weapons row — every stack level shown, no caps anywhere
+  const w = state.wpn, u = state.upg;
+  hctx.font = 'bold 22px Arial'; hctx.fillStyle = '#7df9ff';
+  hctx.fillText('WEAPONS  TRP x' + w.triple + '  SKR x' + w.seeker + '  PLS x' + w.plasma + '  RAIL x' + w.rail + '  NOVA x' + w.nova, 22, 172);
+  hctx.fillStyle = '#ffd319';
+  hctx.fillText('UPGRADES  PLATE x' + u.plate + '  CELL x' + u.cell + '  ENG x' + u.engine + '  PWR x' + u.power, 22, 204);
   if (state.bossHp > 0) {
-    hctx.fillStyle = '#ff3355'; hctx.fillText('RAVAGER', 22, 148);
-    hctx.fillStyle = '#123'; hctx.fillRect(150, 126, 400, 18);
-    hctx.fillStyle = '#ff3355'; hctx.fillRect(150, 126, 400 * state.bossHp / state.bossMax, 18);
+    hctx.fillStyle = '#ff3355'; hctx.font = 'bold 26px Arial'; hctx.fillText('RAVAGER', 22, 248);
+    hctx.fillStyle = '#123'; hctx.fillRect(150, 228, 400, 18);
+    hctx.fillStyle = '#ff3355'; hctx.fillRect(150, 228, 400 * state.bossHp / state.bossMax, 18);
   } else if (state.msg) {
-    hctx.fillStyle = '#ffd319'; hctx.font = 'bold 30px Arial'; hctx.fillText(state.msg, 22, 148);
+    hctx.fillStyle = '#ffd319'; hctx.font = 'bold 26px Arial'; hctx.fillText(state.msg, 22, 248);
   }
   hudTex.needsUpdate = true;
-  hudEl.textContent = 'SCORE ' + state.score + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '  ·  WAVE ' + state.wave;
+  hudEl.textContent = 'SCORE ' + state.score + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull + '  ·  WAVE ' + state.wave;
 }
 
 // ============================== audio (original synth) ==============================
@@ -251,6 +408,8 @@ const sfxHit = () => blip(160, 40, 0.3, 'sine', 0.5);
 const sfxBoom = () => blip(90, 28, 0.6, 'sine', 0.6);
 const sfxPickup = () => { blip(520, 1040, 0.15, 'sine', 0.2); setTimeout(() => blip(1040, 1560, 0.15, 'sine', 0.2), 90); };
 const sfxRoll = () => blip(300, 900, 0.35, 'triangle', 0.2);
+const sfxNova = () => { blip(1200, 60, 0.9, 'sawtooth', 0.5); blip(60, 30, 0.9, 'sine', 0.6); };
+const sfxRail = () => blip(2400, 180, 0.25, 'sawtooth', 0.3);
 const muteBtn = document.getElementById('muteBtn');
 function setMuted(m) {
   muted = m;
@@ -266,6 +425,7 @@ window.addEventListener('keydown', e => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
   if (e.code === 'KeyM') setMuted(!muted);
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') tryRoll();
+  if (e.code === 'KeyN') tryNova();
   startAudio();
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
@@ -280,8 +440,8 @@ window.addEventListener('mouseup', () => { mouse.down = false; });
 const DEAD = 0.14;
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3();
 function pollXR() {
-  // Returns: steerX, steerY (thumbstick), fire, roll, aimX, aimY (right-controller ray on z=0 plane)
-  const out = { sx: 0, sy: 0, fire: false, roll: false, aim: null };
+  // Returns: steerX, steerY (thumbstick), fire, roll, nova, aimX, aimY (right-controller ray on z=0 plane)
+  const out = { sx: 0, sy: 0, fire: false, roll: false, nova: false, aim: null };
   if (!renderer.xr.isPresenting) return out;
   const session = renderer.xr.getSession();
   if (!session) return out;
@@ -300,6 +460,8 @@ function pollXR() {
     const squeeze = (gp.buttons && gp.buttons[1]) ? (gp.buttons[1].value || 0) : 0;
     const bBtn = (gp.buttons && gp.buttons[5]) ? (gp.buttons[5].pressed || false) : false;
     if (squeeze > 0.5 || bBtn) out.roll = true;
+    const aBtn = (gp.buttons && gp.buttons[4]) ? (gp.buttons[4].pressed || false) : false;
+    if (aBtn) out.nova = true;
     if (src.handedness === 'right') {
       const ctrl = renderer.xr.getController(1);
       if (ctrl) {
@@ -319,102 +481,211 @@ function pollXR() {
 
 // ============================== game state ==============================
 const S = {
-  mode: 'menu', score: 0, hull: 100, shield: 0, wave: 1,
+  mode: 'menu', score: 0, hull: 100, maxHull: 100, shield: 0, wave: 1,
   retries: 0, bossHp: 0, bossMax: 0, msg: 'WAVE 1 INCOMING',
-  fireCd: 0, rollT: 0, rollCd: 0, tripleT: 0, msgT: 0, spawnQueue: 0, spawnT: 0, shake: 0,
+  fireCd: 0, rollT: 0, rollCd: 0, msgT: 0, spawnQueue: 0, spawnT: 0, shake: 0,
+  seekerCd: 0, railCd: 0, railVis: 0,
+  // Unlimited stacks — no maximum on any weapon or upgrade, ever.
+  wpn: { triple: 0, seeker: 0, plasma: 0, rail: 0, nova: 0 },
+  upg: { plate: 0, cell: 0, engine: 0, power: 0 },
 };
+const boltDmg = () => 1 + S.upg.power;
+const speedMul = () => 1 + S.upg.engine * 0.15;
 const PX = { min: -7, max: 7 }, PY = { min: -2.5, max: 3.5 };
-let px = 0, py = 0, pvx = 0, pvy = 0, prevRoll = false;
+let px = 0, py = 0, pvx = 0, pvy = 0, prevRoll = false, prevNova = false;
 
-// ============================== pools: bolts, enemies, asteroids, pickups, particles ==============================
-function makeBolt(mat) {
+// ============================== pools: bolts, plasma, missiles, enemies, asteroids, pickups, particles ==============================
+function makeBolt(mat, scaleZ) {
   const m = new THREE.Mesh(GEO.bolt, mat);
-  m.scale.set(1, 1, 4); m.visible = false; scene.add(m); return m;
+  m.scale.set(1, 1, scaleZ || 4); m.visible = false; scene.add(m); return m;
 }
-const pBolts = [], eBolts = [];
-for (let i = 0; i < 64; i++) pBolts.push({ m: makeBolt(MAT.boltP), on: false, vx: 0, vy: 0, vz: 0 });
-for (let i = 0; i < 48; i++) eBolts.push({ m: makeBolt(MAT.boltE), on: false, vx: 0, vy: 0, vz: 0 });
-function fireBolt(list, x, y, z, vx, vy, vz) {
+const pBolts = [], eBolts = [], pPlasma = [];
+for (let i = 0; i < 96; i++) pBolts.push({ m: makeBolt(MAT.boltP), on: false, vx: 0, vy: 0, vz: 0, dmg: 1 });
+for (let i = 0; i < 48; i++) eBolts.push({ m: makeBolt(MAT.boltE), on: false, vx: 0, vy: 0, vz: 0, dmg: 1 });
+for (let i = 0; i < 24; i++) {
+  const m = new THREE.Mesh(GEO.plasmaBall, MAT.plasma);
+  m.visible = false; scene.add(m);
+  pPlasma.push({ m, on: false, vx: 0, vy: 0, vz: 0, dmg: 3 });
+}
+function fireBolt(list, x, y, z, vx, vy, vz, dmg) {
   for (const b of list) {
     if (b.on) continue;
     b.on = true; b.m.visible = true;
-    b.m.position.set(x, y, z); b.vx = vx; b.vy = vy; b.vz = vz;
+    b.m.position.set(x, y, z); b.vx = vx; b.vy = vy; b.vz = vz; b.dmg = dmg;
     return;
   }
 }
+// Seeker missiles: homing cones that chase the nearest live target
+const MISSILES = [];
+for (let i = 0; i < 32; i++) {
+  const m = new THREE.Mesh(GEO.cone, MAT.gold);
+  m.rotation.x = -Math.PI / 2; m.visible = false; scene.add(m);
+  MISSILES.push({ m, on: false, vx: 0, vy: 0, vz: 0, life: 0, target: null });
+}
+function fireMissile(x, y) {
+  for (const ms of MISSILES) {
+    if (ms.on) continue;
+    ms.on = true; ms.m.visible = true; ms.life = 4;
+    ms.m.position.set(x, y, -1); ms.vx = 0; ms.vy = 0; ms.vz = -40; ms.target = null;
+    return;
+  }
+}
+function nearestTarget(x, y, z) {
+  // Returns the live enemy object, the string 'boss', or null — so missiles
+  // can retarget when their quarry dies instead of chasing a corpse's spot.
+  let best = null, bd = 1e9;
+  for (const e of ENEMIES) {
+    if (!e.on) continue;
+    const d = (e.g.position.x - x) ** 2 + (e.g.position.y - y) ** 2 + (e.g.position.z - z) ** 2;
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (S.bossHp > 0) {
+    const d = (boss.position.x - x) ** 2 + (boss.position.y - y) ** 2 + (-52 - z) ** 2;
+    if (d < bd) best = 'boss';
+  }
+  return best;
+}
 
+// Detailed enemies (original designs)
 const ENEMIES = [];
 function makeDrone() {
   const g = new THREE.Group();
   const body = new THREE.Mesh(GEO.oct, MAT.enemyBody); g.add(body);
+  const ring = new THREE.Mesh(GEO.ring, MAT.enemyRing);
+  ring.scale.setScalar(1.1); g.add(ring);
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Mesh(GEO.box, MAT.enemyRing);
+    arm.scale.set(0.9, 0.16, 0.16); arm.position.set(s * 0.9, 0, 0); g.add(arm);
+    const gun = new THREE.Mesh(GEO.sphere, MAT.enemyCore);
+    gun.scale.setScalar(0.3); gun.position.set(s * 1.3, 0, -0.4); g.add(gun);
+  }
   const core = new THREE.Mesh(GEO.sphere, MAT.enemyCore);
   core.scale.setScalar(0.55); g.add(core);
+  const halo = glowSprite(0xff3df0, 1.85, 0.34); halo.position.z = -0.1; g.add(halo);
   g.visible = false; scene.add(g);
   return { g, on: false, kind: 'drone', hp: 1, t: 0, baseX: 0, baseY: 0, fireT: rand(1, 2.5), score: 100 };
 }
 function makeShard() {
   const g = new THREE.Group();
   const body = new THREE.Mesh(GEO.tetra, MAT.shard); g.add(body);
-  const core = new THREE.Mesh(GEO.sphere, MAT.enemyCore);
+  for (const s of [-1, 1]) {
+    const fin = new THREE.Mesh(GEO.box, MAT.shardFin);
+    fin.scale.set(0.12, 1.1, 0.7); fin.position.set(s * 0.7, 0, 0.2); fin.rotation.z = s * 0.5; g.add(fin);
+  }
+  const core = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false }));
   core.scale.setScalar(0.4); g.add(core);
+  const halo = glowSprite(0x27e8ff, 1.6, 0.3); halo.position.z = -0.1; g.add(halo);
   g.visible = false; scene.add(g);
   return { g, on: false, kind: 'shard', hp: 2, t: 0, baseX: 0, baseY: 0, fireT: rand(1.5, 3), score: 200 };
 }
 for (let i = 0; i < 16; i++) ENEMIES.push(makeDrone());
 for (let i = 0; i < 10; i++) ENEMIES.push(makeShard());
 
+// Asteroids with jittered-vertex surface detail (each rock unique)
+function jitteredRockGeo() {
+  const g = new THREE.IcosahedronGeometry(1.0, 1);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const s = rand(0.75, 1.25);
+    pos.setXYZ(i, pos.getX(i) * s, pos.getY(i) * s, pos.getZ(i) * s);
+  }
+  g.computeVertexNormals();
+  return g;
+}
 const ROCKS = [];
 for (let i = 0; i < 14; i++) {
-  const m = new THREE.Mesh(GEO.rock, MAT.rock);
+  const m = new THREE.Mesh(jitteredRockGeo(), i % 2 === 0 ? MAT.rock : MAT.rockDark);
   const s = rand(0.5, 1.6);
   m.scale.set(s, s * rand(0.7, 1.2), s);
   m.visible = false; scene.add(m);
   ROCKS.push({ m, on: false, vx: 0, vy: 0, vz: 0, rx: rand(0, 3), ry: rand(0, 3) });
 }
 
+// Pickups: one pool entry per kind (x2) — every kind stacks without limit
+const PICKUP_KINDS = ['triple', 'seeker', 'plasma', 'rail', 'nova', 'plate', 'cell', 'engine', 'power', 'hull', 'shield'];
 const PICKUPS = [];
-function makePickup(kind) {
-  const mat = kind === 'triple' ? MAT.gold : kind === 'shield' ? MAT.green : MAT.boltP;
-  const m = new THREE.Mesh(GEO.oct, mat);
-  m.scale.setScalar(0.55); m.visible = false; scene.add(m);
-  return { m, on: false, kind, t: 0 };
+for (const kind of PICKUP_KINDS) {
+  for (let i = 0; i < 2; i++) {
+    const m = new THREE.Mesh(GEO.oct, PICK_MAT[kind]);
+    m.scale.setScalar(0.55); m.visible = false;
+    const halo = glowSprite(PICK_MAT[kind].color.getHex(), 1.6, 0.5);
+    m.add(halo);
+    scene.add(m);
+    PICKUPS.push({ m, on: false, kind, t: 0 });
+  }
 }
-for (let i = 0; i < 4; i++) PICKUPS.push(makePickup('triple'));
-for (let i = 0; i < 3; i++) PICKUPS.push(makePickup('shield'));
-for (let i = 0; i < 3; i++) PICKUPS.push(makePickup('hull'));
 
 const PARTS = 320;
 const pPos = new Float32Array(PARTS * 3);
+const pCol = new Float32Array(PARTS * 3);
 const pVel = new Float32Array(PARTS * 3);
 const pLife = new Float32Array(PARTS);
+for (let i = 0; i < PARTS; i++) pPos[i * 3 + 1] = -999; // parked offscreen until used
 let pCursor = 0;
 const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
-const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0xffcc55, size: 0.22, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3).setUsage(THREE.DynamicDrawUsage));
+const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ map: glowTex, size: 0.3, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
 points.frustumCulled = false;
 scene.add(points);
-function burst(x, y, z, n, spread) {
+const _burstCol = new THREE.Color();
+function burst(x, y, z, n, spread, hex) {
+  _burstCol.setHex(hex === undefined ? 0xffcc55 : hex);
   for (let i = 0; i < n; i++) {
     const k = pCursor; pCursor = (pCursor + 1) % PARTS;
     pPos[k * 3] = x; pPos[k * 3 + 1] = y; pPos[k * 3 + 2] = z;
     pVel[k * 3] = rand(-spread, spread); pVel[k * 3 + 1] = rand(-spread, spread); pVel[k * 3 + 2] = rand(-spread, spread);
+    pCol[k * 3] = _burstCol.r; pCol[k * 3 + 1] = _burstCol.g; pCol[k * 3 + 2] = _burstCol.b;
     pLife[k] = rand(0.4, 1.0);
+  }
+  pGeo.attributes.color.needsUpdate = true;
+}
+// Shockwave rings for big explosions (boss death, player death, nova)
+const SHOCKS = [];
+for (let i = 0; i < 6; i++) {
+  const m = new THREE.Mesh(GEO.ring, new THREE.MeshBasicMaterial({ color: 0xffcc55, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+  m.visible = false; scene.add(m);
+  SHOCKS.push({ m, on: false, t: 0 });
+}
+function shockwave(x, y, z, scale) {
+  for (const s of SHOCKS) {
+    if (s.on) continue;
+    s.on = true; s.t = 0; s.m.visible = true;
+    s.m.position.set(x, y, z); s.m.scale.setScalar(scale);
+    return;
   }
 }
 
-// Boss: the Ravager carrier (original design — wide hull, twin prongs, turret cores)
+// Rail beam visual: long glowing bar fired from the ship
+const railBeam = new THREE.Mesh(GEO.box, MAT.rail);
+railBeam.scale.set(0.5, 0.5, 90); railBeam.visible = false;
+scene.add(railBeam);
+
+// Boss: detailed Ravager carrier (original design — wide hull, twin prongs, turrets, hangar bays, engine glows)
 const boss = new THREE.Group();
 {
   const main = new THREE.Mesh(GEO.box, MAT.bossHull);
   main.scale.set(14, 3, 6); boss.add(main);
+  const stripe = new THREE.Mesh(GEO.box, MAT.bossStripe);
+  stripe.scale.set(14.2, 0.4, 6.2); stripe.position.y = 0.8; boss.add(stripe);
   for (const s of [-1, 1]) {
     const prong = new THREE.Mesh(GEO.box, MAT.bossHull);
     prong.scale.set(2.5, 1.5, 10); prong.position.set(s * 6, 0, -4); boss.add(prong);
     const turret = new THREE.Mesh(GEO.sphere, MAT.enemyCore);
     turret.scale.setScalar(1.1); turret.position.set(s * 4.5, 2, -1); boss.add(turret);
+    const tHalo = glowSprite(0xff3df0, 2.4, 0.4); tHalo.position.set(s * 4.5, 2, -1); boss.add(tHalo);
+    const bay = new THREE.Mesh(GEO.box, MAT.hullDark);
+    bay.scale.set(2, 1.2, 4); bay.position.set(s * 6, -1.2, -2); boss.add(bay);
+    const mast = new THREE.Mesh(GEO.box, MAT.enemyRing);
+    mast.scale.set(0.2, 3, 0.2); mast.position.set(s * 6, 2.5, -7); boss.add(mast);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff5566, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+    glow.scale.set(2.4, 2.4, 1); glow.position.set(s * 6, 0, 3.4); boss.add(glow);
   }
   const core = new THREE.Mesh(GEO.sphere, MAT.enemyCore);
   core.scale.setScalar(1.8); core.position.set(0, 0, 3.2); boss.add(core);
+  const cHalo = glowSprite(0xff3df0, 4.5, 0.4); cHalo.position.set(0, 0, 3.2); boss.add(cHalo);
+  const dome = new THREE.Mesh(GEO.sphere, MAT.bossHull);
+  dome.scale.set(2.2, 1.2, 2.2); dome.position.set(0, 1.8, 0); boss.add(dome);
 }
 boss.visible = false; boss.position.set(0, 1, -60); scene.add(boss);
 let bossFireT = 0, bossT = 0;
@@ -470,6 +741,28 @@ function queueSpawn() {
   }
   if (Math.random() < 0.3) spawnRock();
 }
+// Wave-clear bonus: one random upgrade level, stacked without limit
+function grantWaveBonus() {
+  const ups = ['plate', 'cell', 'engine', 'power'];
+  const pick = ups[Math.floor(rand(0, ups.length))];
+  applyUpgrade(pick);
+  const names = { plate: 'HULL PLATING', cell: 'SHIELD CELLS', engine: 'ENGINE SPEED', power: 'WEAPON POWER' };
+  S.msg = 'WAVE BONUS: ' + names[pick] + ' +1 (NO LIMIT)';
+  S.msgT = 3;
+}
+function applyUpgrade(kind) {
+  if (kind === 'plate') { S.upg.plate++; S.maxHull += 25; S.hull += 25; }
+  else if (kind === 'cell') { S.upg.cell++; S.shield += 50; }
+  else if (kind === 'engine') { S.upg.engine++; }
+  else if (kind === 'power') { S.upg.power++; }
+}
+function applyWeapon(kind) {
+  if (kind === 'triple') S.wpn.triple++;
+  else if (kind === 'seeker') S.wpn.seeker++;
+  else if (kind === 'plasma') S.wpn.plasma++;
+  else if (kind === 'rail') S.wpn.rail++;
+  else if (kind === 'nova') S.wpn.nova++;
+}
 
 // ============================== damage / respawn (unlimited retries) ==============================
 function damagePlayer(amount) {
@@ -479,16 +772,17 @@ function damagePlayer(amount) {
     if (S.shield < 0) { S.hull += S.shield; S.shield = 0; }
   } else S.hull -= amount;
   S.shake = 0.5; sfxHit(); hudDirty = true;
-  burst(px, py, 0, 24, 6);
+  burst(px, py, 0, 24, 6, 0xff5533);
   if (S.hull <= 0) {
-    // Unlimited retries: explode, respawn instantly, score kept, wave restarts.
+    // Unlimited retries: explode, respawn instantly, score + weapons + upgrades kept, wave restarts.
     S.retries++;
-    burst(px, py, 0, 80, 14); sfxBoom();
-    S.hull = 100; S.shield = 0; S.tripleT = 0;
+    burst(px, py, 0, 80, 14, 0xff5533); shockwave(px, py, 0, 2); sfxBoom();
+    S.hull = S.maxHull; S.shield = 0;
     px = 0; py = 0; pvx = 0; pvy = 0;
     for (const e of ENEMIES) { e.on = false; e.g.visible = false; }
     for (const r of ROCKS) { r.on = false; r.m.visible = false; }
     for (const b of eBolts) { b.on = false; b.m.visible = false; }
+    for (const ms of MISSILES) { ms.on = false; ms.m.visible = false; }
     if (S.bossHp > 0) { S.bossHp = S.bossMax; }
     else startWave(S.wave);
     S.msg = 'SHIP DOWN — BACK IN THE FIGHT'; S.msgT = 2.5;
@@ -498,6 +792,61 @@ function damagePlayer(amount) {
 function tryRoll() {
   if (S.mode !== 'play' || S.rollT > 0 || S.rollCd > 0) return;
   S.rollT = 0.55; S.rollCd = 1.4; sfxRoll();
+}
+function tryNova() {
+  if (S.mode !== 'play' || S.wpn.nova <= 0) return;
+  S.wpn.nova--;
+  sfxNova();
+  shockwave(px, py, -10, 8);
+  burst(px, py, -10, 100, 18, 0xff3df0);
+  for (const e of ENEMIES) {
+    if (!e.on) continue;
+    e.hp -= 20 + S.upg.power * 5;
+    if (e.hp <= 0) {
+      e.on = false; e.g.visible = false;
+      S.score += e.score;
+      burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+    }
+  }
+  for (const r of ROCKS) {
+    if (!r.on) continue;
+    r.on = false; r.m.visible = false;
+    S.score += 50;
+    burst(r.m.position.x, r.m.position.y, r.m.position.z, 26, 7);
+  }
+  if (S.bossHp > 0) {
+    S.bossHp -= 50 + S.upg.power * 5;
+    if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave = 6; startWave(6); }
+  }
+  S.msg = 'NOVA BOMB! ' + S.wpn.nova + ' LEFT';
+  S.msgT = 2; hudDirty = true;
+}
+function fireRail() {
+  // Piercing beam down the ship's line: damages everything near x = px
+  S.railCd = 4;
+  S.railVis = 0.18;
+  railBeam.position.set(px, py, -45);
+  railBeam.visible = true;
+  sfxRail();
+  const dmg = 10 + S.upg.power * 2;
+  for (const e of ENEMIES) {
+    if (!e.on) continue;
+    if (Math.abs(e.g.position.x - px) < 1.6 && Math.abs(e.g.position.y - py) < 1.6) {
+      e.hp -= dmg;
+      burst(e.g.position.x, e.g.position.y, e.g.position.z, 16, 5);
+      if (e.hp <= 0) {
+        e.on = false; e.g.visible = false;
+        S.score += e.score;
+        burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+        if (Math.random() < 0.22) spawnPickup(PICKUP_KINDS[Math.floor(rand(0, PICKUP_KINDS.length))], e.g.position.x, e.g.position.y);
+      }
+    }
+  }
+  if (S.bossHp > 0 && Math.abs(boss.position.x - px) < 8) {
+    S.bossHp -= dmg;
+    if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave = 6; startWave(6); }
+  }
+  hudDirty = true;
 }
 
 // ============================== ENTER VR flow (proven pattern) ==============================
@@ -523,8 +872,10 @@ if (navigator.xr && navigator.xr.isSessionSupported) {
 }
 function beginGame() {
   if (S.mode === 'play') return;
-  S.mode = 'play'; S.score = 0; S.hull = 100; S.shield = 0; S.wave = 1;
-  S.retries = 0; S.bossHp = 0; S.tripleT = 0;
+  S.mode = 'play'; S.score = 0; S.hull = 100; S.maxHull = 100; S.shield = 0; S.wave = 1;
+  S.retries = 0; S.bossHp = 0;
+  S.wpn = { triple: 0, seeker: 0, plasma: 0, rail: 0, nova: 0 };
+  S.upg = { plate: 0, cell: 0, engine: 0, power: 0 };
   startWave(1);
   hudDirty = true;
 }
@@ -563,15 +914,16 @@ function tick() {
   const xr = pollXR();
 
   if (S.mode === 'play') {
-    // --- steering ---
+    // --- steering (engine upgrades multiply speed, no cap) ---
+    const sm = speedMul();
     let tx = px, ty = py;
     let kx = 0, ky = 0;
     if (keys['ArrowLeft'] || keys['KeyA']) kx -= 1;
     if (keys['ArrowRight'] || keys['KeyD']) kx += 1;
     if (keys['ArrowUp'] || keys['KeyW']) ky += 1;
     if (keys['ArrowDown'] || keys['KeyS']) ky -= 1;
-    if (Math.abs(xr.sx) > 0 || Math.abs(xr.sy) > 0) { tx = px + xr.sx * 22 * dt; ty = py + xr.sy * 14 * dt; }
-    else if (kx !== 0 || ky !== 0) { tx = px + kx * 20 * dt; ty = py + ky * 13 * dt; }
+    if (Math.abs(xr.sx) > 0 || Math.abs(xr.sy) > 0) { tx = px + xr.sx * 22 * sm * dt; ty = py + xr.sy * 14 * sm * dt; }
+    else if (kx !== 0 || ky !== 0) { tx = px + kx * 20 * sm * dt; ty = py + ky * 13 * sm * dt; }
     else if (xr.aim) { tx = lerp(px, xr.aim.x, 1 - Math.pow(0.001, dt)); ty = lerp(py, xr.aim.y, 1 - Math.pow(0.001, dt)); }
     else if (!renderer.xr.isPresenting) { tx = lerp(px, mouse.x * 7, 1 - Math.pow(0.001, dt)); ty = lerp(py, mouse.y * 3 + 0.5, 1 - Math.pow(0.001, dt)); }
     pvx = (tx - px) / Math.max(dt, 0.001); pvy = (ty - py) / Math.max(dt, 0.001);
@@ -580,27 +932,43 @@ function tick() {
     ship.rotation.z = clamp(-pvx * 0.02, -0.6, 0.6);
     ship.rotation.x = clamp(pvy * 0.015, -0.3, 0.3);
 
-    // --- barrel roll ---
+    // --- barrel roll + nova (edge-detected) ---
     if (xr.roll && !prevRoll) tryRoll();
     prevRoll = xr.roll;
+    if (xr.nova && !prevNova) tryNova();
+    prevNova = xr.nova;
     if (S.rollT > 0) { S.rollT -= dt; ship.rotation.z += dt * 11; }
     if (S.rollCd > 0) S.rollCd -= dt;
 
-    // --- firing ---
+    // --- firing: base bolt + uncapped triple spread + plasma + seekers + rail ---
     S.fireCd -= dt;
     const firing = xr.fire || keys['Space'] || mouse.down;
     if (firing && S.fireCd <= 0) {
-      S.fireCd = S.tripleT > 0 ? 0.16 : 0.22;
-      if (S.tripleT > 0) {
-        fireBolt(pBolts, px - 0.5, py, -1, -2, 0, -70);
-        fireBolt(pBolts, px, py, -1, 0, 0, -70);
-        fireBolt(pBolts, px + 0.5, py, -1, 2, 0, -70);
-      } else {
-        fireBolt(pBolts, px, py, -1, 0, 0, -70);
+      S.fireCd = 0.22;
+      const n = 1 + S.wpn.triple * 2; // no cap: every Triple pickup adds 2 more bolts
+      for (let i = 0; i < n; i++) {
+        const off = i - (n - 1) / 2;
+        fireBolt(pBolts, px + off * 0.5, py, -1, off * 3, 0, -70, boltDmg());
+      }
+      for (let i = 0; i < S.wpn.plasma; i++) {
+        fireBolt(pPlasma, px + (i - (S.wpn.plasma - 1) / 2) * 0.8, py - 0.2, -1, 0, 0, -45, 3 + S.upg.power);
       }
       sfxLaser();
+      muzzle.position.set(px, py, -1.2); muzzleT = 0.06;
+      muzzle.material.opacity = 0.9;
     }
-    if (S.tripleT > 0) S.tripleT -= dt;
+    S.seekerCd -= dt;
+    if (S.wpn.seeker > 0 && S.seekerCd <= 0) {
+      S.seekerCd = 0.9;
+      for (let i = 0; i < S.wpn.seeker; i++) fireMissile(px + (i - (S.wpn.seeker - 1) / 2) * 0.6, py);
+    }
+    S.railCd -= dt;
+    if (S.wpn.rail > 0 && S.railCd <= 0) fireRail();
+    if (S.railVis > 0) {
+      S.railVis -= dt;
+      railBeam.position.x = px; railBeam.position.y = py;
+      if (S.railVis <= 0) railBeam.visible = false;
+    }
 
     // --- wave spawning ---
     if (S.spawnQueue > 0) {
@@ -631,27 +999,34 @@ function tick() {
         e.fireT = rand(1.6, 3.2);
         const dx = px - e.g.position.x, dy = py - e.g.position.y;
         const d = Math.max(1, Math.hypot(dx, dy));
-        fireBolt(eBolts, e.g.position.x, e.g.position.y, e.g.position.z + 1, dx / d * 8, dy / d * 8, 26);
+        fireBolt(eBolts, e.g.position.x, e.g.position.y, e.g.position.z + 1, dx / d * 8, dy / d * 8, 26, 1);
       }
       if (e.g.position.z > 8) { e.on = false; e.g.visible = false; continue; }
-      // player bolts vs enemy
-      for (const b of pBolts) {
-        if (!b.on) continue;
-        const dx = b.m.position.x - e.g.position.x, dy = b.m.position.y - e.g.position.y, dz = b.m.position.z - e.g.position.z;
-        if (Math.abs(dx) < 1.2 && Math.abs(dy) < 1.2 && Math.abs(dz) < 1.6) {
-          b.on = false; b.m.visible = false;
-          e.hp--;
-          burst(e.g.position.x, e.g.position.y, e.g.position.z, 10, 4);
-          if (e.hp <= 0) {
-            e.on = false; e.g.visible = false;
-            S.score += e.score; sfxBoom();
-            burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
-            if (Math.random() < 0.18) spawnPickup(['triple', 'shield', 'hull'][Math.floor(rand(0, 3))], e.g.position.x, e.g.position.y);
-            hudDirty = true;
+      // player bolts + plasma vs enemy
+      const hitLists = [pBolts, pPlasma];
+      for (const list of hitLists) {
+        let consumed = false;
+        for (const b of list) {
+          if (!b.on) continue;
+          const dx = b.m.position.x - e.g.position.x, dy = b.m.position.y - e.g.position.y, dz = b.m.position.z - e.g.position.z;
+          if (Math.abs(dx) < 1.2 && Math.abs(dy) < 1.2 && Math.abs(dz) < 1.6) {
+            b.on = false; b.m.visible = false;
+            e.hp -= b.dmg;
+            burst(e.g.position.x, e.g.position.y, e.g.position.z, 10, 4);
+            if (e.hp <= 0) {
+              e.on = false; e.g.visible = false;
+              S.score += e.score; sfxBoom();
+              burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+              if (Math.random() < 0.22) spawnPickup(PICKUP_KINDS[Math.floor(rand(0, PICKUP_KINDS.length))], e.g.position.x, e.g.position.y);
+              hudDirty = true;
+            }
+            consumed = true;
+            break;
           }
-          break;
         }
+        if (consumed) break;
       }
+      if (!e.on) continue;
       // enemy touches player plane
       if (e.g.position.z > -1.5) {
         const dx = e.g.position.x - px, dy = e.g.position.y - py;
@@ -663,25 +1038,77 @@ function tick() {
       }
     }
 
+    // --- seeker missiles: home on nearest live target ---
+    for (const ms of MISSILES) {
+      if (!ms.on) continue;
+      ms.life -= dt;
+      if (ms.life <= 0) { ms.on = false; ms.m.visible = false; continue; }
+      if (!ms.target) ms.target = nearestTarget(ms.m.position.x, ms.m.position.y, ms.m.position.z);
+      if (ms.target === 'boss' && S.bossHp <= 0) ms.target = nearestTarget(ms.m.position.x, ms.m.position.y, ms.m.position.z);
+      if (ms.target && ms.target !== 'boss' && !ms.target.on) ms.target = nearestTarget(ms.m.position.x, ms.m.position.y, ms.m.position.z);
+      let tx2 = 0, ty2 = 0, tz2 = -90;
+      if (ms.target === 'boss') { tx2 = boss.position.x; ty2 = boss.position.y; tz2 = -52; }
+      else if (ms.target) { tx2 = ms.target.g.position.x; ty2 = ms.target.g.position.y; tz2 = ms.target.g.position.z; }
+      const dx = tx2 - ms.m.position.x, dy = ty2 - ms.m.position.y, dz = tz2 - ms.m.position.z;
+      const d = Math.max(1, Math.hypot(dx, dy, dz));
+      const turn = 26;
+      ms.vx += (dx / d * 60 - ms.vx) * Math.min(1, turn * dt * 0.2);
+      ms.vy += (dy / d * 60 - ms.vy) * Math.min(1, turn * dt * 0.2);
+      ms.vz += (dz / d * 60 - ms.vz) * Math.min(1, turn * dt * 0.2);
+      ms.m.position.x += ms.vx * dt; ms.m.position.y += ms.vy * dt; ms.m.position.z += ms.vz * dt;
+      ms.m.lookAt(ms.m.position.x + ms.vx, ms.m.position.y + ms.vy, ms.m.position.z + ms.vz);
+      // missile hits enemy / boss / rock
+      let spent = false;
+      for (const e of ENEMIES) {
+        if (!e.on) continue;
+        if (Math.abs(ms.m.position.x - e.g.position.x) < 1.3 && Math.abs(ms.m.position.y - e.g.position.y) < 1.3 && Math.abs(ms.m.position.z - e.g.position.z) < 1.6) {
+          e.hp -= 2 + S.upg.power;
+          burst(e.g.position.x, e.g.position.y, e.g.position.z, 14, 5);
+          if (e.hp <= 0) {
+            e.on = false; e.g.visible = false;
+            S.score += e.score; sfxBoom();
+            burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+            if (Math.random() < 0.22) spawnPickup(PICKUP_KINDS[Math.floor(rand(0, PICKUP_KINDS.length))], e.g.position.x, e.g.position.y);
+          }
+          spent = true; hudDirty = true;
+          break;
+        }
+      }
+      if (!spent && S.bossHp > 0 && Math.abs(ms.m.position.x - boss.position.x) < 7.5 && Math.abs(ms.m.position.y - boss.position.y) < 2.5 && Math.abs(ms.m.position.z - (-52)) < 5) {
+        S.bossHp -= 2 + S.upg.power;
+        burst(ms.m.position.x, ms.m.position.y, ms.m.position.z, 10, 4);
+        spent = true; hudDirty = true;
+        if (S.bossHp <= 0) { S.bossHp = 0; boss.visible = false; S.score += 5000; sfxBoom(); burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10); S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3; S.wave = 6; startWave(6); }
+      }
+      if (spent) { ms.on = false; ms.m.visible = false; continue; }
+      if (ms.m.position.z < -95 || ms.m.position.z > 8) { ms.on = false; ms.m.visible = false; }
+    }
+
     // --- asteroids ---
     for (const r of ROCKS) {
       if (!r.on) continue;
       r.m.position.x += r.vx * dt; r.m.position.y += r.vy * dt; r.m.position.z += r.vz * dt;
       r.m.rotation.x += r.rx * dt; r.m.rotation.y += r.ry * dt;
       if (r.m.position.z > 8) { r.on = false; r.m.visible = false; continue; }
-      for (const b of pBolts) {
-        if (!b.on) continue;
-        const dx = b.m.position.x - r.m.position.x, dy = b.m.position.y - r.m.position.y, dz = b.m.position.z - r.m.position.z;
-        const rad = 1.1 * r.m.scale.x;
-        if (Math.abs(dx) < rad && Math.abs(dy) < rad && Math.abs(dz) < rad + 1) {
-          b.on = false; b.m.visible = false;
-          r.on = false; r.m.visible = false;
-          S.score += 50; sfxBoom();
-          burst(r.m.position.x, r.m.position.y, r.m.position.z, 26, 7);
-          hudDirty = true;
-          break;
+      let broken = false;
+      for (const list of [pBolts, pPlasma]) {
+        for (const b of list) {
+          if (!b.on) continue;
+          const dx = b.m.position.x - r.m.position.x, dy = b.m.position.y - r.m.position.y, dz = b.m.position.z - r.m.position.z;
+          const rad = 1.1 * r.m.scale.x;
+          if (Math.abs(dx) < rad && Math.abs(dy) < rad && Math.abs(dz) < rad + 1) {
+            b.on = false; b.m.visible = false;
+            r.on = false; r.m.visible = false;
+            S.score += 50; sfxBoom();
+            burst(r.m.position.x, r.m.position.y, r.m.position.z, 26, 7);
+            hudDirty = true;
+            broken = true;
+            break;
+          }
         }
+        if (broken) break;
       }
+      if (broken) continue;
       if (r.m.position.z > -1.5) {
         const dx = r.m.position.x - px, dy = r.m.position.y - py;
         if (Math.hypot(dx, dy) < 1.2 + r.m.scale.x * 0.6) {
@@ -692,7 +1119,7 @@ function tick() {
       }
     }
 
-    // --- pickups ---
+    // --- pickups: every kind stacks without limit ---
     for (const p of PICKUPS) {
       if (!p.on) continue;
       p.t += dt;
@@ -704,9 +1131,19 @@ function tick() {
         const dx = p.m.position.x - px, dy = p.m.position.y - py;
         if (Math.hypot(dx, dy) < 1.3) {
           p.on = false; p.m.visible = false;
-          if (p.kind === 'triple') { S.tripleT = 12; S.msg = 'TRIPLE LASER!'; }
-          else if (p.kind === 'shield') { S.shield = 50; S.msg = 'SHIELD UP!'; }
-          else { S.hull = Math.min(100, S.hull + 40); S.msg = 'HULL +40'; }
+          const names = {
+            triple: 'TRIPLE LASER', seeker: 'SEEKER MISSILES', plasma: 'PLASMA CANNON',
+            rail: 'RAIL BEAM', nova: 'NOVA BOMB', plate: 'HULL PLATING', cell: 'SHIELD CELLS',
+            engine: 'ENGINE SPEED', power: 'WEAPON POWER', hull: 'HULL REPAIR', shield: 'SHIELD BOOST',
+          };
+          if (['triple', 'seeker', 'plasma', 'rail', 'nova'].includes(p.kind)) {
+            applyWeapon(p.kind);
+            S.msg = names[p.kind] + ' +1 — NO LIMIT (x' + S.wpn[p.kind] + ')';
+          } else if (['plate', 'cell', 'engine', 'power'].includes(p.kind)) {
+            applyUpgrade(p.kind);
+            S.msg = names[p.kind] + ' +1 — NO LIMIT (x' + S.upg[p.kind] + ')';
+          } else if (p.kind === 'hull') { S.hull = Math.min(S.maxHull, S.hull + 40); S.msg = 'HULL +40'; }
+          else { S.shield += 50; S.msg = 'SHIELD +50'; }
           S.msgT = 2; sfxPickup(); hudDirty = true;
         }
       }
@@ -724,35 +1161,39 @@ function tick() {
         for (const s of [-4.5, 4.5]) {
           const dx = px - (boss.position.x + s), dy = py - boss.position.y;
           const d = Math.max(1, Math.hypot(dx, dy));
-          fireBolt(eBolts, boss.position.x + s, boss.position.y, -52, dx / d * 6, dy / d * 6, 24);
+          fireBolt(eBolts, boss.position.x + s, boss.position.y, -52, dx / d * 6, dy / d * 6, 24, 1);
         }
       }
-      for (const b of pBolts) {
-        if (!b.on) continue;
-        const dx = b.m.position.x - boss.position.x, dy = b.m.position.y - boss.position.y, dz = b.m.position.z - (-52);
-        if (Math.abs(dx) < 7.5 && Math.abs(dy) < 2.5 && Math.abs(dz) < 5) {
-          b.on = false; b.m.visible = false;
-          S.bossHp -= 4;
-          burst(b.m.position.x, b.m.position.y, b.m.position.z, 6, 4);
-          hudDirty = true;
-          if (S.bossHp <= 0) {
-            S.bossHp = 0; boss.visible = false;
-            S.score += 5000; sfxBoom();
-            burst(0, 1, -52, 120, 16);
-            S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3;
-            S.wave = 6; startWave(6);
+      for (const list of [pBolts, pPlasma]) {
+        for (const b of list) {
+          if (!b.on) continue;
+          const dx = b.m.position.x - boss.position.x, dy = b.m.position.y - boss.position.y, dz = b.m.position.z - (-52);
+          if (Math.abs(dx) < 7.5 && Math.abs(dy) < 2.5 && Math.abs(dz) < 5) {
+            b.on = false; b.m.visible = false;
+            S.bossHp -= b.dmg;
+            burst(b.m.position.x, b.m.position.y, b.m.position.z, 6, 4);
             hudDirty = true;
+            if (S.bossHp <= 0) {
+              S.bossHp = 0; boss.visible = false;
+              S.score += 5000; sfxBoom();
+              burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10);
+              S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3;
+              S.wave = 6; startWave(6);
+              hudDirty = true;
+            }
+            break;
           }
-          break;
         }
       }
     }
 
-    // --- player bolts move ---
-    for (const b of pBolts) {
-      if (!b.on) continue;
-      b.m.position.x += b.vx * dt; b.m.position.y += b.vy * dt; b.m.position.z += b.vz * dt;
-      if (b.m.position.z < -95) { b.on = false; b.m.visible = false; }
+    // --- player bolts + plasma move ---
+    for (const list of [pBolts, pPlasma]) {
+      for (const b of list) {
+        if (!b.on) continue;
+        b.m.position.x += b.vx * dt; b.m.position.y += b.vy * dt; b.m.position.z += b.vz * dt;
+        if (b.m.position.z < -95) { b.on = false; b.m.visible = false; }
+      }
     }
     // --- enemy bolts move + hit player ---
     for (const b of eBolts) {
@@ -768,9 +1209,10 @@ function tick() {
       }
     }
 
-    // --- wave clear check ---
+    // --- wave clear check (grants a bonus upgrade, stacked without limit) ---
     if (!anyEnemy && S.spawnQueue <= 0 && S.bossHp <= 0 && S.mode === 'play') {
       S.wave++;
+      grantWaveBonus();
       startWave(S.wave);
     }
 
@@ -778,11 +1220,35 @@ function tick() {
     for (let i = 0; i < PARTS; i++) {
       if (pLife[i] <= 0) continue;
       pLife[i] -= dt;
+      if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; continue; } // hide dead sparks
       pPos[i * 3] += pVel[i * 3] * dt;
       pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
       pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
     }
     pGeo.attributes.position.needsUpdate = true;
+
+    // --- shockwaves ---
+    for (const s of SHOCKS) {
+      if (!s.on) continue;
+      s.t += dt;
+      const k = s.t / 0.8;
+      if (k >= 1) { s.on = false; s.m.visible = false; continue; }
+      s.m.scale.setScalar(s.m.scale.x * (1 + dt * 3));
+      s.m.material.opacity = 0.9 * (1 - k);
+    }
+
+    // --- engine glow flicker, nav light blink, trails, muzzle flash ---
+    const flick = 0.75 + Math.sin(time * 31) * 0.25;
+    for (const g of engineGlows) g.scale.set(0.9 * flick, 0.9 * flick, 1);
+    const blink = (time % 1.4) < 0.9;
+    navL.material = blink ? MAT.navRed : MAT.hullDark;
+    navR.material = blink ? MAT.navGreen : MAT.hullDark;
+    updateTrails();
+    if (muzzleT > 0) {
+      muzzleT -= dt;
+      muzzle.material.opacity = Math.max(0, muzzleT / 0.06) * 0.9;
+      if (muzzleT <= 0) muzzle.material.opacity = 0;
+    }
 
     // --- camera shake + message timer ---
     if (S.shake > 0) {
@@ -794,10 +1260,13 @@ function tick() {
   } else {
     ship.position.set(Math.sin(time * 0.5) * 1.5, Math.sin(time * 0.8) * 0.4, 0);
     ship.rotation.z = Math.sin(time * 0.5) * 0.15;
+    const flick = 0.75 + Math.sin(time * 31) * 0.25;
+    for (const g of engineGlows) g.scale.set(0.9 * flick, 0.9 * flick, 1);
   }
 
-  // Gentle starfield drift for speed sensation
+  // Gentle nebula drift for speed sensation
   neb1.position.z += dt * 0.4; if (neb1.position.z > -60) neb1.position.z = -340;
+  neb4.position.z += dt * 0.3; if (neb4.position.z > -60) neb4.position.z = -310;
   renderer.render(scene, camera);
 }
 renderer.setAnimationLoop(tick);

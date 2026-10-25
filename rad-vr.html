@@ -10,13 +10,13 @@
   canvas { display:block; }
   #panel {
     position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-    background:linear-gradient(180deg,#1b1035 0%,#4b1e5e 45%,#a12c5e 75%,#ff7e47 100%);
+    background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
     z-index:10; text-align:center; color:#fff;
   }
   #panel .box { max-width:560px; padding:24px 20px; }
   #panel h1 {
     font-size:64px; letter-spacing:6px; margin:0 0 4px 0; font-weight:900; font-style:italic;
-    background:linear-gradient(180deg,#7df9ff 20%,#ff71ce 60%,#ffd319 100%);
+    background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(255,113,206,.25);
   }
@@ -25,14 +25,14 @@
   #panel p.small { font-size:13px; color:#e8c9e2; }
   #vrBtn {
     margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
-    color:#1b1035; background:linear-gradient(180deg,#ffd319,#ff2975); border:none; border-radius:12px;
-    padding:16px 42px; box-shadow:0 6px 30px rgba(255,41,117,.55);
+    color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
   #hud {
     position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:5;
-    color:#7df9ff; font-size:22px; font-weight:800; letter-spacing:2px;
+    color:#27e8ff; font-size:22px; font-weight:800; letter-spacing:2px;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none;
   }
   #muteBtn {
@@ -55,6 +55,8 @@
     <p><b>Thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> = gas &nbsp;·&nbsp; <b>Left trigger</b> = brake</p>
     <p class="small">Two-way highway: cross the median to face oncoming traffic — wrong-way near misses score double and build a bonus.</p>
     <p class="small">No headset handy? Desktop preview works too — arrow keys / WASD drive, M mutes.</p>
+    <p class="small">NEW: neon road pickups grant <b>unlimited weapons</b> — Turbo Boost, Horn Blast, Oil Slick — and <b>stacking upgrades</b> (Engine, Grip, Armor) with no cap. No lives, no game over, ever.</p>
+    <p class="small">XR: <b>left squeeze</b> cycles weapon · <b>right squeeze</b> fires · Desktop: <b>B</b> boost, <b>H</b> horn, <b>O</b> oil.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
   </div>
@@ -82,10 +84,14 @@ renderer.xr.setReferenceSpaceType('local-floor');
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Real-time shadows: one 1024px cascade around the player. This is a visual
+// lift within a Quest browser's limits, not console realism.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xd84a73, 60, 780);
+scene.fog = new THREE.Fog(0x54224e, 55, 720);
 
 const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 3200);
 
@@ -101,7 +107,14 @@ scene.add(dolly);
 scene.add(new THREE.HemisphereLight(0xffc38a, 0x2a1544, 0.55));
 const sunLight = new THREE.DirectionalLight(0xff9a5c, 1.35);
 sunLight.position.set(-60, 120, -180);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(1024, 1024);
+sunLight.shadow.camera.left = -55; sunLight.shadow.camera.right = 55;
+sunLight.shadow.camera.top = 55; sunLight.shadow.camera.bottom = -55;
+sunLight.shadow.camera.near = 10; sunLight.shadow.camera.far = 320;
+sunLight.shadow.bias = -0.0005;
 scene.add(sunLight);
+scene.add(sunLight.target);
 
 // Image-based lighting: PMREM from a tiny gradient env scene (sunset + hot sun card),
 // so PBR paint/glass/asphalt pick up real dusk reflections.
@@ -174,6 +187,31 @@ scene.add(envGroup);
   sun.position.set(150, 165, -1375);
   envGroup.add(glow); envGroup.add(sun);
 
+  // Dusk stars: small bright points high in the dome (fog-exempt, like the neon look)
+  {
+    const N = 320;
+    const sp = new Float32Array(N * 3), sc = new Float32Array(N * 3);
+    const pal = [new THREE.Color(0xffffff), new THREE.Color(0xbfeaff), new THREE.Color(0xffd9ec)];
+    for (let i = 0; i < N; i++) {
+      const th = Math.random() * Math.PI * 2, ph = Math.acos(1 - Math.random() * 0.72);
+      const r = 1400;
+      sp[i * 3] = r * Math.sin(ph) * Math.cos(th);
+      sp[i * 3 + 1] = r * Math.cos(ph) + 150;
+      sp[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+      const c = pal[i % pal.length];
+      sc[i * 3] = c.r; sc[i * 3 + 1] = c.g; sc[i * 3 + 2] = c.b;
+    }
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    sg.setAttribute('color', new THREE.BufferAttribute(sc, 3));
+    const stars = new THREE.Points(sg, new THREE.PointsMaterial({
+      size: 2.2, sizeAttenuation: false, vertexColors: true, transparent: true,
+      opacity: 0.85, depthWrite: false, fog: false, toneMapped: false
+    }));
+    stars.frustumCulled = false;
+    envGroup.add(stars);
+  }
+
   // Silhouetted mountain ridges
   const mMat = new THREE.MeshBasicMaterial({ color: 0x2a1544, fog: false, toneMapped: false });
   const mMat2 = new THREE.MeshBasicMaterial({ color: 0x3a1c55, fog: false, toneMapped: false });
@@ -208,6 +246,8 @@ function addSegment(curve, y) {
   if (n % 41 === 20) seg.gantry = true;
   // Roadside dressing, deterministic by index: light pylons every 5, palms scattered
   if (n % 5 === 0) { seg.obj = 'pylon'; seg.side = (Math.floor(n / 5) % 2 === 0) ? -1 : 1; }
+  else if (n % 13 === 5) { seg.obj = 'sign'; seg.side = (Math.floor(n / 13) % 2 === 0) ? -1 : 1; }
+  else if (n % 9 === 4) { seg.obj = 'pine'; seg.side = (n % 18 === 4) ? -1 : 1; }
   else if (n % 7 === 3) { seg.obj = 'palm'; seg.side = (n % 14 === 3) ? -1 : 1; }
   else if (n % 11 === 6) { seg.obj = 'palm'; seg.side = (n % 22 === 6) ? 1 : -1; }
   segments.push(seg);
@@ -280,6 +320,13 @@ function makeAsphaltTexture() {
   // Occasional cracks / tar seams across the segment
   g.fillStyle = 'rgba(10,10,14,0.35)';
   for (let i = 0; i < 4; i++) g.fillRect(195, Math.random() * 512, 122, 2);
+  // Dark repair patches + faint neon sheen (dusk light bouncing off the asphalt)
+  g.fillStyle = 'rgba(20,20,28,0.45)';
+  g.fillRect(200, 60, 60, 90); g.fillRect(260, 330, 45, 70);
+  g.fillStyle = 'rgba(39,232,255,0.05)';
+  g.fillRect(195, 120, 122, 10);
+  g.fillStyle = 'rgba(255,61,240,0.05)';
+  g.fillRect(195, 400, 122, 10);
   // Solid paint patch for the dash quads
   g.fillStyle = '#e9e9e4'; g.fillRect(505, 0, 7, 512);
   const tex = new THREE.CanvasTexture(cv);
@@ -316,6 +363,7 @@ const road = new THREE.Mesh(roadGeo, new THREE.MeshStandardMaterial({
   roughness: 0.38, metalness: 0.06, envMapIntensity: 0.9, side: THREE.DoubleSide
 }));
 road.frustumCulled = false;
+road.receiveShadow = true;
 scene.add(road);
 
 // Neon edge guide-lines (Asphalt-style): separate additive ribbon hugging the road edges
@@ -344,7 +392,7 @@ glowGeo.setAttribute('position', new THREE.BufferAttribute(glowPos, 3).setUsage(
 glowGeo.setAttribute('color', new THREE.BufferAttribute(glowColArr, 3));
 glowGeo.setIndex(glowIdx);
 const glowRoad = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-  vertexColors: true, transparent: true, opacity: 0.85,
+  vertexColors: true, transparent: true, opacity: 1.0,
   blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false
 }));
 glowRoad.frustumCulled = false;
@@ -381,6 +429,7 @@ const median = new THREE.Mesh(medGeo, new THREE.MeshStandardMaterial({
   vertexColors: true, roughness: 0.95, metalness: 0.0, envMapIntensity: 0.25, side: THREE.DoubleSide
 }));
 median.frustumCulled = false;
+median.receiveShadow = true;
 scene.add(median);
 const COL_MED_A = new THREE.Color(0x8f8c99), COL_MED_B = new THREE.Color(0x807d8a);
 
@@ -529,9 +578,14 @@ const pylonGeo = mergeParts([
 const pylonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
 const pylons = [];
 const pylonGlows = [];
+// Neon streetlight heads: cyan / magenta / warm alternate down the highway
+const neonPylonMats = [0x27e8ff, 0xff3df0, 0xffb35c].map(c => new THREE.SpriteMaterial({
+  map: glowTex, color: c, transparent: true, opacity: 0.6,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
 for (let i = 0; i < 24; i++) {
-  const p = new THREE.Mesh(pylonGeo, pylonMat); p.visible = false; scene.add(p); pylons.push(p);
-  const s = new THREE.Sprite(warmGlowMat); s.scale.set(2.4, 2.4, 1); s.visible = false; scene.add(s); pylonGlows.push(s);
+  const p = new THREE.Mesh(pylonGeo, pylonMat); p.visible = false; p.castShadow = true; scene.add(p); pylons.push(p);
+  const s = new THREE.Sprite(neonPylonMats[i % 3]); s.scale.set(2.6, 2.6, 1); s.visible = false; scene.add(s); pylonGlows.push(s);
 }
 
 const palmGeo = mergeParts([
@@ -543,7 +597,45 @@ const palmGeo = mergeParts([
 ]);
 const palmMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const palms = [];
-for (let i = 0; i < 20; i++) { const p = new THREE.Mesh(palmGeo, palmMat); p.visible = false; scene.add(p); palms.push(p); }
+for (let i = 0; i < 20; i++) { const p = new THREE.Mesh(palmGeo, palmMat); p.visible = false; p.castShadow = true; scene.add(p); palms.push(p); }
+
+// Pine trees: trunk + three stacked cones, more shape than a palm silhouette
+const pineGeo = mergeParts([
+  { geo: new THREE.CylinderGeometry(0.12, 0.2, 1.4, 6), matrix: m4(0, 0.7, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x3a2340) },
+  { geo: new THREE.ConeGeometry(1.25, 1.9, 8), matrix: m4(0, 2.1, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x14532d) },
+  { geo: new THREE.ConeGeometry(0.95, 1.7, 8), matrix: m4(0, 3.2, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x1a6b3a) },
+  { geo: new THREE.ConeGeometry(0.62, 1.5, 8), matrix: m4(0, 4.2, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x22a05a) }
+]);
+const pineMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const pines = [];
+for (let i = 0; i < 16; i++) { const p = new THREE.Mesh(pineGeo, pineMat); p.visible = false; p.castShadow = true; scene.add(p); pines.push(p); }
+
+// Neon road signs: glowing panel on two posts, pooled
+const signTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#10243e'; g.fillRect(0, 0, 256, 128);
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 5; g.strokeRect(6, 6, 244, 116);
+  g.fillStyle = '#eaf7ff'; g.textAlign = 'center';
+  g.font = '900 34px Arial'; g.fillText('SUNSET BLVD', 128, 56);
+  g.font = '700 26px Arial'; g.fillStyle = '#ffd319'; g.fillText('NEON DR  →', 128, 96);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+})();
+const signs = [];
+for (let i = 0; i < 6; i++) {
+  const grp = new THREE.Group();
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2),
+    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.DoubleSide, toneMapped: false }));
+  panel.position.y = 0.6; grp.add(panel);
+  const postMat2 = new THREE.MeshLambertMaterial({ color: 0x23232e });
+  [-0.9, 0.9].forEach(px => {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.6, 0.09), postMat2);
+    post.position.set(px, -0.2, 0); grp.add(post);
+  });
+  grp.visible = false; scene.add(grp); signs.push(grp);
+}
+
 
 // Median delineator posts (pooled): dark post + bright amber band. No collision —
 // they mark the median clearly at speed so crossing it is a choice, not an accident.
@@ -643,7 +735,7 @@ for (let i = 0; i < 4; i++) {
 }
 
 function updateProps(playerX) {
-  let pi = 0, pa = 0, gi = 0, mi = 0;
+  let pi = 0, pa = 0, gi = 0, mi = 0, si = 0, pn = 0;
   bldgCount[0] = bldgCount[1] = bldgCount[2] = 0;
   for (let s = 0; s < DRAW; s++) {
     const seg = segments[(baseSegment.index + s) % segments.length];
@@ -657,6 +749,15 @@ function updateProps(playerX) {
       p.position.set(px, pose.y, pose.z);
       p.rotation.y = seg.side > 0 ? 0 : Math.PI;
       gl.position.set(px - seg.side * 1.35, pose.y + 5.5, pose.z);
+    } else if (seg.obj === 'sign' && si < signs.length) {
+      const s = signs[si++];
+      s.visible = true;
+      s.position.set(pose.x + seg.side * (ROAD_HALF + RUMBLE_W + 1.4) - playerX, pose.y + 1.6, pose.z);
+    } else if (seg.obj === 'pine' && pn < pines.length) {
+      const pn2 = pines[pn++];
+      pn2.visible = true;
+      pn2.position.set(pose.x + seg.side * (ROAD_HALF + RUMBLE_W + 2.8 + (seg.index % 3)) - playerX, pose.y, pose.z);
+      pn2.rotation.y = (seg.index * 0.9) % Math.PI;
     } else if (seg.obj === 'palm' && pa < palms.length) {
       const p = palms[pa++];
       p.visible = true;
@@ -696,6 +797,8 @@ function updateProps(playerX) {
   }
   for (; pi < pylons.length; pi++) { pylons[pi].visible = false; pylonGlows[pi].visible = false; }
   for (; pa < palms.length; pa++) palms[pa].visible = false;
+  for (; si < signs.length; si++) signs[si].visible = false;
+  for (; pn < pines.length; pn++) pines[pn].visible = false;
   for (; mi < posts.length; mi++) posts[mi].visible = false;
   for (; gi < gantries.length; gi++) gantries[gi].visible = false;
   for (let v = 0; v < 3; v++) {
@@ -835,12 +938,24 @@ for (let i = 0; i < 12; i++) {
   const v = VARIANTS[i % 3];
   const dir = i < 7 ? 1 : -1;                     // 7 same-direction, 5 oncoming
   const g = new THREE.Group();
+  const carPaint = CAR_COLORS[i % CAR_COLORS.length];
   const bodyMat = new THREE.MeshStandardMaterial({
-    color: CAR_COLORS[i % CAR_COLORS.length], metalness: 0.65, roughness: 0.32, envMapIntensity: 1.15
+    color: carPaint, metalness: 0.65, roughness: 0.32, envMapIntensity: 1.15,
+    emissive: carPaint, emissiveIntensity: (i % 3 === 0) ? 0.55 : 0.18
   });
   const blob = new THREE.Mesh(blobGeo, blobMat);
   blob.rotation.x = -Math.PI / 2; blob.scale.set(v.wid / 2 + 0.25, v.len / 2 + 0.35, 1); blob.position.y = 0.03; g.add(blob);
-  const body = new THREE.Mesh(v.body, bodyMat); g.add(body);
+  const body = new THREE.Mesh(v.body, bodyMat); body.castShadow = true; g.add(body);
+  // Neon side strips + underglow (house style: dark body, bright neon edges)
+  const stripMat = new THREE.MeshBasicMaterial({ color: carPaint, toneMapped: false });
+  [-1, 1].forEach(sd => {
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, v.len * 0.68), stripMat);
+    strip.position.set(sd * (v.wid / 2 + 0.02), 0.62, 0);
+    g.add(strip);
+  });
+  const under = new THREE.Mesh(new THREE.PlaneGeometry(v.wid + 0.9, v.len + 0.9),
+    new THREE.MeshBasicMaterial({ color: carPaint, transparent: true, opacity: 0.26, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  under.rotation.x = -Math.PI / 2; under.position.y = 0.045; under.renderOrder = 2; g.add(under);
   const glass = new THREE.Mesh(v.glass, carGlassMat); g.add(glass);
   if (v.spoiler) {
     const spoiler = new THREE.Mesh(carSpoilGeo, bodyMat); spoiler.position.set(0, 1.02, 2.02); g.add(spoiler);
@@ -883,6 +998,19 @@ for (let i = 0; i < 12; i++) {
   const tailBar = new THREE.Mesh(carBarGeo, carTailMat); tailBar.position.set(0, v.tailY, v.len / 2 + 0.03); g.add(tailBar);
   const tailGlow = new THREE.Sprite(tailGlowMat); tailGlow.scale.set(2.6, 0.7, 1); tailGlow.position.set(0, v.tailY, v.len / 2 + 0.25); g.add(tailGlow);
   const frontGlow = new THREE.Sprite(frontGlowMat); frontGlow.scale.set(2.4, 0.7, 1); frontGlow.position.set(0, v.headY, -v.len / 2 - 0.25); g.add(frontGlow);
+  // Mirrors, grille, exhausts — small details that sell the car at a glance
+  [-1, 1].forEach(sd => {
+    const mir = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.12), carDarkMat);
+    mir.position.set(sd * (v.wid / 2 + 0.08), Math.max(v.headY + 0.35, 0.9), -1.0);
+    g.add(mir);
+    const exh = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.22, 8), carDarkMat);
+    exh.rotation.x = Math.PI / 2;
+    exh.position.set(sd * 0.5, 0.18, v.len / 2 + 0.06);
+    g.add(exh);
+  });
+  const grille = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.18, 0.06), carDarkMat);
+  grille.position.set(0, v.headY, -v.len / 2 - 0.02);
+  g.add(grille);
   // Headlight pool on the road ahead of the car (flips with the car, so oncoming
   // cars throw their pools toward the player)
   const pool = new THREE.Mesh(poolGeo, carPoolMat);
@@ -894,7 +1022,7 @@ for (let i = 0; i < 12; i++) {
     z: 150 + i * 190 + (i % 3) * 60,
     offset: dir > 0 ? SAME_LANES[i % 2] : ONC_LANES[i % 2],
     speed: 17 + (i % 5) * 3.5,
-    struck: false, counted: false
+    struck: false, counted: false, wobble: 0
   });
 }
 function respawnCar(car, position) {
@@ -902,7 +1030,7 @@ function respawnCar(car, position) {
   const lanes = car.dir > 0 ? SAME_LANES : ONC_LANES;
   car.offset = lanes[Math.floor(Math.random() * lanes.length)];
   car.speed = 16 + Math.random() * 15;
-  car.struck = false; car.counted = false;
+  car.struck = false; car.counted = false; car.wobble = 0;
 }
 
 // ============================== game state ==============================
@@ -918,6 +1046,153 @@ let dashTick = 0;                        // dash redraw counter (banner flashing
 let shakeT = 0;
 let flash = 0;
 let steerSmooth = 0;
+
+// ============================== weapons + upgrades (UNLIMITED) ==============================
+// No inventory cap, no upgrade cap, no lives, no game over — crashes still only
+// slow you down (see updateTraffic). Pickups respawn so the run never starves.
+const WEAPON_DEFS = [
+  { key: 'boost', name: 'BOOST', color: 0x27e8ff },
+  { key: 'horn',  name: 'HORN',  color: 0xffb02e },
+  { key: 'oil',   name: 'OIL',   color: 0xff3df0 }
+];
+const UPGRADE_DEFS = [
+  { key: 'engine', name: 'ENGINE', color: 0xff7e47 },
+  { key: 'grip',   name: 'GRIP',   color: 0x2bff88 },
+  { key: 'armor',  name: 'ARMOR',  color: 0x9d5cff }
+];
+const weapons = { boost: 0, horn: 0, oil: 0 };
+let selectedWeapon = 0;
+let boostTime = 0;
+const upgrades = { engine: 0, grip: 0, armor: 0 };
+let nextMilestone = 1500;
+let upgradeMsg = '', upgradeMsgT = 0;
+let hornRingT = 0;
+const hornRingMat = new THREE.MeshBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false });
+const hornRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.0, 48), hornRingMat);
+hornRing.position.set(0, 0, -2.5); hornRing.rotation.y = Math.PI;
+camera.add(hornRing);
+
+function blip2(fA, fB, dur, type, vol) {
+  if (!actx || muted) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(fA, actx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(fB, 1), actx.currentTime + dur);
+  g.gain.setValueAtTime(vol, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(g); g.connect(masterGain); o.start(); o.stop(actx.currentTime + dur + 0.02);
+}
+function pickupSound() { blip2(660, 990, 0.12, 'square', 0.18); blip2(990, 1320, 0.1, 'square', 0.12); }
+function hornSound() { blip2(220, 175, 0.32, 'square', 0.3); blip2(330, 262, 0.32, 'square', 0.2); }
+function boostSound() { blip2(120, 480, 0.45, 'sawtooth', 0.22); }
+function oilSound() { blip2(300, 110, 0.2, 'sine', 0.25); }
+
+function makeLabelSprite(text, colorCss) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64;
+  const g = cv.getContext('2d');
+  g.textAlign = 'center'; g.font = '900 38px Arial';
+  g.shadowColor = colorCss; g.shadowBlur = 14; g.fillStyle = colorCss;
+  g.fillText(text, 128, 44);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false, fog: false }));
+  s.scale.set(2.4, 0.6, 1);
+  return s;
+}
+const PICKUP_LANES = [-6.0, -2.4, 2.4, 6.0];
+const pickups = [];
+for (let i = 0; i < 28; i++) {
+  const isWeapon = (i % 5) < 3;
+  const def = isWeapon ? WEAPON_DEFS[i % 3] : UPGRADE_DEFS[i % 3];
+  const grp = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 0),
+    new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 1.4, roughness: 0.3, metalness: 0.2 }));
+  grp.add(core);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: def.color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  halo.scale.set(2.4, 2.4, 1); grp.add(halo);
+  const label = makeLabelSprite(def.name, '#' + def.color.toString(16).padStart(6, '0'));
+  label.position.y = 1.1; grp.add(label);
+  grp.visible = false;
+  scene.add(grp);
+  pickups.push({ grp, core, dist: 140 + i * 250, lane: PICKUP_LANES[i % 4], isWeapon, def, taken: false, respawnAt: 0 });
+}
+function applyPickup(p) {
+  if (p.isWeapon) { weapons[p.def.key]++; upgradeMsg = p.def.name + ' +1 (x' + weapons[p.def.key] + ')'; }
+  else { upgrades[p.def.key]++; upgradeMsg = p.def.name + ' UP! Lv ' + upgrades[p.def.key]; }
+  upgradeMsgT = 3;
+  pickupSound();
+}
+function updatePickups(dt) {
+  const segOff = position % SEG_LEN;
+  for (const p of pickups) {
+    if (p.taken) {
+      if (distance >= p.respawnAt) p.taken = false;
+      else { p.grp.visible = false; continue; }
+    }
+    const relDist = mod(p.dist - position, TRACK_LEN);
+    if (relDist > DRAW * SEG_LEN) { p.grp.visible = false; continue; }
+    const idx = (relDist + segOff) / SEG_LEN;
+    const s0 = Math.min(Math.floor(idx), DRAW - 1), f = clamp(idx - s0, 0, 1);
+    const pA = slotPose[s0], pB = slotPose[s0 + 1];
+    p.grp.visible = true;
+    p.grp.position.set(lerp(pA.x, pB.x, f) + p.lane - playerX,
+      lerp(pA.y, pB.y, f) + 1.0 + Math.sin(Date.now() * 0.003 + p.dist) * 0.15, -relDist);
+    p.core.rotation.y += dt * 2.2;
+    p.core.rotation.x += dt * 0.9;
+    if (relDist < 4.2 && Math.abs(playerX - p.lane) < 1.9) {
+      p.taken = true; p.respawnAt = distance + 800; p.grp.visible = false;
+      applyPickup(p);
+    }
+  }
+}
+// Oil slicks: dark decals at the drop's track spot, visible whenever that stretch
+// comes into forward view again; the immediate effect is on followers (see fireWeapon).
+const slicks = [];
+for (let i = 0; i < 6; i++) {
+  const m = new THREE.Mesh(new THREE.CircleGeometry(1.3, 20),
+    new THREE.MeshBasicMaterial({ color: 0x12081a, transparent: true, opacity: 0.8, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.renderOrder = 2; m.visible = false;
+  scene.add(m);
+  slicks.push({ mesh: m, dist: 0, lane: 0, active: false, until: 0 });
+}
+let slickCursor = 0;
+function updateSlicks() {
+  const segOff = position % SEG_LEN;
+  for (const s of slicks) {
+    if (!s.active) continue;
+    if (distance > s.until) { s.active = false; s.mesh.visible = false; continue; }
+    const relDist = mod(s.dist - position, TRACK_LEN);
+    if (relDist > DRAW * SEG_LEN) { s.mesh.visible = false; continue; }
+    const idx = (relDist + segOff) / SEG_LEN;
+    const s0 = Math.min(Math.floor(idx), DRAW - 1), f = clamp(idx - s0, 0, 1);
+    const pA = slotPose[s0], pB = slotPose[s0 + 1];
+    s.mesh.visible = true;
+    s.mesh.position.set(lerp(pA.x, pB.x, f) + s.lane - playerX, lerp(pA.y, pB.y, f) + 0.06, -relDist);
+  }
+}
+function fireWeapon(sel) {
+  const def = WEAPON_DEFS[sel];
+  if (weapons[def.key] <= 0) { upgradeMsg = def.name + ' EMPTY — grab a pickup!'; upgradeMsgT = 1.5; return; }
+  weapons[def.key]--;
+  if (sel === 0) {
+    boostTime = 3.0; boostSound(); upgradeMsg = 'TURBO BOOST!'; upgradeMsgT = 1.5;
+  } else if (sel === 1) {
+    hornSound(); hornRingT = 0.6;
+    for (const car of cars) {
+      const relZ = mod(car.z - position, TRACK_LEN);
+      if (relZ < 90) respawnCar(car, position);   // traffic ahead scatters
+    }
+    upgradeMsg = 'HORN BLAST! Road cleared ahead'; upgradeMsgT = 1.5;
+  } else {
+    oilSound();
+    const s = slicks[slickCursor]; slickCursor = (slickCursor + 1) % slicks.length;
+    s.dist = mod(position - 6, TRACK_LEN); s.lane = playerX; s.active = true; s.until = distance + 1200;
+    for (const car of cars) {   // followers behind hit the slick: slowed + wobbling
+      if (car.dir <= 0) continue;
+      const relZ = mod(car.z - position, TRACK_LEN);
+      if (relZ > TRACK_LEN / 2 && TRACK_LEN - relZ < 150) { car.speed *= 0.55; car.wobble = 3; }
+    }
+    upgradeMsg = 'OIL SLICK dropped behind you'; upgradeMsgT = 1.5;
+  }
+}
 
 function updateTraffic(dt, positionNow) {
   for (const car of cars) {
@@ -938,6 +1213,8 @@ function updateTraffic(dt, positionNow) {
     car.mesh.visible = true;
     car.mesh.position.set(cx + car.offset - playerX, cy, -relZ);
     car.mesh.rotation.y = -Math.atan((pB.x - pA.x) / SEG_LEN) + (car.dir < 0 ? Math.PI : 0);
+    if (car.wobble > 0) { car.wobble -= dt; car.mesh.rotation.z = Math.sin(Date.now() * 0.02) * 0.09; }
+    else car.mesh.rotation.z = 0;
     car.mesh.rotation.x = (car.dir < 0 ? -1 : 1) * Math.atan((pB.y - pA.y) / SEG_LEN);
     const wrot = car.speed * dt / car.wheelR;
     for (let wi = 0; wi < car.wheels.length; wi++) car.wheels[wi].rotation.x -= wrot;
@@ -946,10 +1223,10 @@ function updateTraffic(dt, positionNow) {
       if (!car.struck) {
         car.struck = true;
         if (car.dir < 0) {           // head-on: near-total stop, bigger jolt
-          speed = Math.min(speed, 4);
+          speed = Math.min(speed, 4 + upgrades.armor * 3);
           shakeT = 0.85; flash = 0.85;
         } else {
-          speed = Math.min(speed, car.speed * 0.45);
+          speed = Math.min(speed, car.speed * 0.45 + upgrades.armor * 2);
           shakeT = 0.55; flash = 0.55;
         }
         thud();
@@ -999,6 +1276,10 @@ camera.add(cockpit);
   const dashTop = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.04, 0.5), trimMat);
   dashTop.position.set(0, -0.30, -0.66); dashTop.rotation.x = -0.30;
   cockpit.add(dashTop);
+  const dashNeon = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.02, 0.02),
+    new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false }));
+  dashNeon.position.set(0, -0.285, -0.90); dashNeon.rotation.x = -0.30;
+  cockpit.add(dashNeon);
   // Sculpted hood: the supercar nose profile extruded across the bonnet width,
   // so from the seat you look over a sloping wedge, not a box slab
   const hoodShape = new THREE.Shape();
@@ -1071,10 +1352,15 @@ function drawDash(mph) {
   g.fillText('DIST  ' + (distance / 1609.34).toFixed(2) + ' MI', 28, 218);
   g.textAlign = 'right';
   g.fillText('NEAR MISS  ' + nearMisses, 484, 218);
-  if (wwBonus > 0) {
-    g.font = '700 24px Arial'; g.fillStyle = '#ffd319'; g.textAlign = 'center';
-    g.fillText('BONUS  ' + Math.floor(wwBonus), 256, 244);
-  }
+  g.font = '700 22px Arial'; g.textAlign = 'center';
+  g.fillStyle = boostTime > 0 ? '#27e8ff' : '#eaf6ff';
+  let line = 'ENG ' + upgrades.engine + ' GRP ' + upgrades.grip + ' ARM ' + upgrades.armor +
+             ' · B ' + weapons.boost + ' H ' + weapons.horn + ' O ' + weapons.oil +
+             ' · ' + WEAPON_DEFS[selectedWeapon].name;
+  if (boostTime > 0) line = 'BOOST! ' + line;
+  if (upgradeMsgT > 0) line += ' ★ ' + upgradeMsg;
+  if (wwBonus > 0) line += ' BONUS ' + Math.floor(wwBonus);
+  g.fillText(line, 256, 244);
   dashTex.needsUpdate = true;
 }
 drawDash(0);
@@ -1139,13 +1425,14 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
 const DEAD = 0.12;
+let prevSqL = false, prevSqR = false;
 function pollXRInput() {
   // Reads the live XR session's input sources directly. Quest controller mapping:
   // thumbstick = axes[2] (X) / axes[3] (Y), trigger = buttons[0], squeeze = buttons[1].
-  let steer = 0, gas = 0, brake = 0;
-  if (!renderer.xr.isPresenting) return { steer, gas, brake };
+  let steer = 0, gas = 0, brake = 0, fire = false, cycle = false;
+  if (!renderer.xr.isPresenting) return { steer, gas, brake, fire, cycle };
   const session = renderer.xr.getSession();
-  if (!session) return { steer, gas, brake };
+  if (!session) return { steer, gas, brake, fire, cycle };
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
@@ -1156,9 +1443,14 @@ function pollXRInput() {
     const trig = (gp.buttons && gp.buttons[0]) ? (gp.buttons[0].value || 0) : 0;
     if (src.handedness === 'left') brake = Math.max(brake, trig);
     else gas = Math.max(gas, trig);   // 'right' and 'none' both drive the gas
+    // Squeeze: left cycles the selected weapon, right fires it (rising edge only)
+    const sq = (gp.buttons && gp.buttons[1]) ? (gp.buttons[1].pressed || gp.buttons[1].value > 0.5) : false;
+    if (src.handedness === 'left') { if (sq && !prevSqL) cycle = true; prevSqL = sq; }
+    else { if (sq && !prevSqR) fire = true; prevSqR = sq; }
   }
-  return { steer, gas, brake };
+  return { steer, gas, brake, fire, cycle };
 }
+let prevKeyB = false, prevKeyH = false, prevKeyO = false;
 function readInputs() {
   const xr = pollXRInput();
   let keySteer = 0;
@@ -1166,10 +1458,18 @@ function readInputs() {
   if (keys['ArrowRight'] || keys['KeyD']) keySteer += 1;
   const keyGas = (keys['ArrowUp'] || keys['KeyW']) ? 1 : 0;
   const keyBrake = (keys['ArrowDown'] || keys['KeyS']) ? 1 : 0;
+  let keyFire = -1;
+  if (keys['KeyB'] && !prevKeyB) keyFire = 0;
+  if (keys['KeyH'] && !prevKeyH) keyFire = 1;
+  if (keys['KeyO'] && !prevKeyO) keyFire = 2;
+  prevKeyB = !!keys['KeyB']; prevKeyH = !!keys['KeyH']; prevKeyO = !!keys['KeyO'];
   return {
     steer: clamp(keySteer + xr.steer, -1, 1),
     gas: Math.max(keyGas, xr.gas),
-    brake: Math.max(keyBrake, xr.brake)
+    brake: Math.max(keyBrake, xr.brake),
+    fire: xr.fire || keyFire >= 0,
+    fireSel: keyFire >= 0 ? keyFire : -1,
+    cycle: xr.cycle
   };
 }
 
@@ -1316,6 +1616,51 @@ function updateStreaks(dt, sp) {
 }
 
 // Headlights: one real spotlight (no shadows) + a soft light pool on the road ahead
+// Headlight beams: visible additive cones at dusk (fake volumetrics, cheap)
+[-1, 1].forEach(sd => {
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(1.35, 9, 20, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false }));
+  beam.rotation.x = -Math.PI / 2 - 0.06;
+  beam.position.set(sd * 0.35, -0.62, -5.0);
+  cockpit.add(beam);
+});
+
+// Wind speed particles: tiny cyan motes streaming past at speed (dolly-attached,
+// so they ride with the player and recycle forward — zero treadmill math)
+const WIND_N = 110;
+const windDat = new Float32Array(WIND_N * 3);
+const windGeoPos = new Float32Array(WIND_N * 3);
+for (let i = 0; i < WIND_N; i++) {
+  windDat[i * 3] = (Math.random() - 0.5) * 32;
+  windDat[i * 3 + 1] = 0.2 + Math.random() * 4.3;
+  windDat[i * 3 + 2] = -70 + Math.random() * 72;
+}
+const windGeo = new THREE.BufferGeometry();
+windGeo.setAttribute('position', new THREE.BufferAttribute(windGeoPos, 3).setUsage(THREE.DynamicDrawUsage));
+const windMat = new THREE.PointsMaterial({
+  map: glowTex, color: 0xbfe8ff, size: 0.13, transparent: true, opacity: 0,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+});
+const windPts = new THREE.Points(windGeo, windMat);
+windPts.frustumCulled = false;
+dolly.add(windPts);
+function updateWind(dt, sp) {
+  windMat.opacity = clamp((sp - 0.35) * 1.2, 0, 0.55);
+  if (windMat.opacity <= 0) return;
+  for (let i = 0; i < WIND_N; i++) {
+    windDat[i * 3 + 2] += speed * 1.25 * dt;
+    if (windDat[i * 3 + 2] > 2) {
+      windDat[i * 3] = (Math.random() - 0.5) * 32;
+      windDat[i * 3 + 1] = 0.2 + Math.random() * 4.3;
+      windDat[i * 3 + 2] = -70;
+    }
+    windGeoPos[i * 3] = windDat[i * 3];
+    windGeoPos[i * 3 + 1] = windDat[i * 3 + 1];
+    windGeoPos[i * 3 + 2] = windDat[i * 3 + 2];
+  }
+  windGeo.attributes.position.needsUpdate = true;
+}
+
 const headlight = new THREE.SpotLight(0xbdd8ff, 90, 46, 0.55, 0.9, 1.2);
 headlight.position.set(0, 1.0, -0.3);
 headlight.target.position.set(0, 0, -20);
@@ -1333,14 +1678,16 @@ let dashTimer = 0, hudMph = -1;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const input = readInputs();
+  if (input.cycle) selectedWeapon = (selectedWeapon + 1) % 3;
+  if (input.fire) fireWeapon(input.fireSel >= 0 ? input.fireSel : selectedWeapon);
   const speedPercent = speed / MAX_SPEED;
 
   // --- steering & lateral motion ---
   steerSmooth = lerp(steerSmooth, input.steer, 1 - Math.pow(0.0015, dt));
   const seg = findSegment(position);
-  const steerRate = 2.6 + 10.5 * speedPercent;                       // m/s lateral at full lock
+  const steerRate = (2.6 + 10.5 * speedPercent) * (1 + upgrades.grip * 0.06);  // m/s lateral at full lock
   playerX += input.steer * steerRate * dt;
-  playerX -= seg.curve * speed * speed * 0.55 * dt;                 // centrifugal push out of bends
+  playerX -= seg.curve * speed * speed * 0.55 * dt / (1 + upgrades.grip * 0.05);  // centrifugal push out of bends
   playerX = clamp(playerX, -17, 17);
 
   // --- speed ---
@@ -1350,13 +1697,27 @@ function tick() {
   if (wrongWay && speed > 12) wwBonus += dt * 30;      // wrong-way bonus ticker
   if (onMedian && speed > 6) speed -= 9 * dt;          // median rumble scrub
   if (input.gas > 0.02) speed += (16 * (1 - speedPercent) + 4) * input.gas * dt;
+  if (boostTime > 0) speed += 26 * dt;
   if (input.brake > 0.02) speed -= 32 * input.brake * dt;
   speed -= (2.2 + 6 * speedPercent * speedPercent) * dt;            // drag / engine braking
   if (offroad) speed -= 15 * dt;                                    // rumble dirt drag
-  speed = clamp(speed, 0, MAX_SPEED);
+  const topSpeed = MAX_SPEED + upgrades.engine * 2 + (boostTime > 0 ? 30 : 0);
+  speed = clamp(speed, 0, topSpeed);
 
   position = mod(position + speed * dt, TRACK_LEN);
   distance += speed * dt;
+  if (boostTime > 0) boostTime -= dt;
+  if (upgradeMsgT > 0) upgradeMsgT -= dt;
+  if (distance >= nextMilestone) {
+    const uk = ['engine', 'grip', 'armor'];
+    let lowest = uk[0];
+    for (const k of uk) if (upgrades[k] < upgrades[lowest]) lowest = k;
+    upgrades[lowest]++;
+    upgradeMsg = UPGRADE_DEFS.find(d => d.key === lowest).name + ' UP! Lv ' + upgrades[lowest];
+    upgradeMsgT = 3;
+    nextMilestone += 1500;
+    pickupSound();
+  }
 
   // --- world rebuild (treadmill: road/props/traffic move around the player) ---
   updateRoad(position, playerX);
@@ -1364,12 +1725,20 @@ function tick() {
   updateTraffic(dt, position);
   updateSparks(dt);
   updateStreaks(dt, speedPercent);
+  updatePickups(dt);
+  updateSlicks();
+  updateWind(dt, speedPercent);
+  if (hornRingT > 0) { hornRingT -= dt; const p = 1 - hornRingT / 0.6; hornRing.scale.setScalar(1 + p * 16); hornRingMat.opacity = 0.7 * (1 - p); }
+  else hornRingMat.opacity = 0;
 
   // --- rig placement ---
   const pSeg = findSegment(position);
   const pNext = segments[(pSeg.index + 1) % segments.length];
   const roadY = lerp(pSeg.y, pNext.y, basePercent);
   dolly.position.y = roadY;
+  sunLight.position.set(-40, roadY + 90, -90);
+  sunLight.target.position.set(0, roadY, 0);
+  sunLight.target.updateMatrixWorld();
   dolly.rotation.y = -steerSmooth * 0.03 - playerX * 0.002;
   dolly.rotation.z = -steerSmooth * 0.012;                          // whisper of lean, horizon stays calm
   envGroup.position.y = roadY;
@@ -1407,7 +1776,7 @@ function tick() {
     dashTimer = 0;
     drawDash(mph);
     const r = Math.round(mph);
-    if (r !== hudMph) { hudMph = r; hud.textContent = r + ' MPH'; }
+    if (r !== hudMph) { hudMph = r; hud.textContent = r + ' MPH · ' + WEAPON_DEFS[selectedWeapon].name; }
   }
   updateAudio(speedPercent, input.gas);
 
