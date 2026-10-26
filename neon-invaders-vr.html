@@ -1091,6 +1091,7 @@ function dropBomb() {
 }
 
 // ============================== mothership ==============================
+const MOTHERSHIP_ENABLED = false; // DIAGNOSTIC (2026-10-25): saucer disabled to test whether it causes Danny's freezes — set true to restore
 const mother = new THREE.Group();
 let motherActive = false, motherDir = 1, motherTimer = rand(14, 22);
 {
@@ -1618,6 +1619,7 @@ function updateMother(dt) {
   if (!motherActive) {
     motherTimer -= dt;
     if (motherTimer <= 0) {
+      if (!MOTHERSHIP_ENABLED) { motherTimer = rand(25, 40); return; } // DIAGNOSTIC: saucer off — timer keeps cycling, nothing spawns
       motherActive = true;
       motherDir = Math.random() < 0.5 ? 1 : -1;
       mother.position.set(motherDir > 0 ? -18 : 18, 11.4, -17);
