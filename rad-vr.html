@@ -1522,14 +1522,14 @@ camera.add(cockpit);
   });
   const mirrorMat = new THREE.MeshStandardMaterial({ color: 0x9fb6c9, metalness: 1.0, roughness: 0.08, envMapIntensity: 1.6 });
   const dash = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.30, 0.34), dashMat);
-  dash.position.set(0, -0.42, -0.60); dash.rotation.x = -0.30;
+  dash.position.set(0, -0.48, -0.60); dash.rotation.x = -0.30;
   cockpit.add(dash);
   const dashTop = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.04, 0.5), trimMat);
-  dashTop.position.set(0, -0.30, -0.66); dashTop.rotation.x = -0.30;
+  dashTop.position.set(0, -0.36, -0.66); dashTop.rotation.x = -0.30;
   cockpit.add(dashTop);
   const ambStripMat = new THREE.MeshBasicMaterial({ color: 0xffe6b8, transparent: true, opacity: 0.35, toneMapped: false });
   const ambStrip = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.015, 0.015), ambStripMat);
-  ambStrip.position.set(0, -0.285, -0.90); ambStrip.rotation.x = -0.30;
+  ambStrip.position.set(0, -0.345, -0.90); ambStrip.rotation.x = -0.30;
   cockpit.add(ambStrip);
   cockpit.userData.ambStrip = ambStrip;
   // Sculpted hood: the supercar nose profile extruded across the bonnet width,
@@ -1557,8 +1557,9 @@ camera.add(cockpit);
   cockpit.add(mirrorStem);
   // Steering wheel: tilt group -> spin group (spin follows steering input)
   const wheelTilt = new THREE.Group();
-  wheelTilt.position.set(0, -0.34, -0.52); wheelTilt.rotation.x = -0.38;
+  wheelTilt.position.set(0, -0.44, -0.48); wheelTilt.rotation.x = -0.38;
   const wheelSpin = new THREE.Group();
+  wheelSpin.scale.setScalar(0.85); // smaller rim so the gauge dials clear it
   const leatherMat = new THREE.MeshStandardMaterial({ color: 0x17171c, roughness: 0.9, metalness: 0.05 });
   const rim = new THREE.Mesh(new THREE.TorusGeometry(0.185, 0.028, 12, 32), leatherMat);
   wheelSpin.add(rim);
@@ -1590,13 +1591,13 @@ camera.add(cockpit);
   const ventMat = new THREE.MeshStandardMaterial({ map: ventTex, roughness: 0.7, metalness: 0.2 });
   [-0.44, 0.44].forEach(vx => {
     const vent = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.10), ventMat);
-    vent.position.set(vx, -0.36, -0.79); vent.rotation.x = -0.30;
+    vent.position.set(vx, -0.42, -0.79); vent.rotation.x = -0.30;
     cockpit.add(vent);
   });
   // Door-side trim hints: soft panels at the far edges of the dash
   [-0.64, 0.64].forEach(tx => {
     const trim = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.22, 0.30), dashMat);
-    trim.position.set(tx, -0.55, -0.45); trim.rotation.y = tx > 0 ? -0.5 : 0.5;
+    trim.position.set(tx, -0.61, -0.45); trim.rotation.y = tx > 0 ? -0.5 : 0.5;
     cockpit.add(trim);
   });
 }
@@ -1614,12 +1615,12 @@ const dashTex = new THREE.CanvasTexture(dashCanvas);
 dashTex.colorSpace = THREE.SRGBColorSpace;
 const dashScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.23),
   new THREE.MeshBasicMaterial({ map: dashTex, toneMapped: false }));
-dashScreen.position.set(0, -0.315, -0.735); dashScreen.rotation.x = -0.30;
+dashScreen.position.set(0, -0.375, -0.735); dashScreen.rotation.x = -0.30;
 cockpit.add(dashScreen);
 // Soft cyan halo behind the dash screen (fake instrument glow)
 const dashGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.31),
   new THREE.MeshBasicMaterial({ color: 0x1fb6d9, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-dashGlow.position.set(0, -0.315, -0.748); dashGlow.rotation.x = -0.30;
+dashGlow.position.set(0, -0.375, -0.748); dashGlow.rotation.x = -0.30;
 cockpit.add(dashGlow);
 
 // Analog gauge cluster: speedometer + tachometer with live needles, small fuel/temp
@@ -1631,9 +1632,9 @@ gaugeCanvas.width = 512; gaugeCanvas.height = 256;
 const gaugeCtx = gaugeCanvas.getContext('2d');
 const gaugeTex = new THREE.CanvasTexture(gaugeCanvas);
 gaugeTex.colorSpace = THREE.SRGBColorSpace;
-const gaugeCluster = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.26),
+const gaugeCluster = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.28),
   new THREE.MeshBasicMaterial({ map: gaugeTex, toneMapped: false }));
-gaugeCluster.position.set(0, -0.14, -0.72); gaugeCluster.rotation.x = -0.30;
+gaugeCluster.position.set(0, -0.20, -0.72); gaugeCluster.rotation.x = -0.30;
 cockpit.add(gaugeCluster);
 function drawGaugeDial(g, cx, cy, r, value, max, label, unit, glow) {
   g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2);
