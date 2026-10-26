@@ -723,11 +723,12 @@ function checkTier() {
 // headset's forward view at the ship's distance — rig z=6, camera FOV 70°:
 // half-width at the ship plane ≈ 6·tan(35°) ≈ 4.2 with a square per-eye
 // aspect, and the ship's half-width is ≈ 1.65 (wingtips + nav lights), so
-// ±2.5 keeps the whole ship in view (outer edge 4.15 → 34.7° < 35° half-FOV)
-// when looking straight ahead, with margin. Bottom −1.5 fixes the tight
-// vertical side (old −2.5 nearly touched the bottom edge); top 3.5 was
-// already comfortably in view and is unchanged.
-const PX = { min: -2.5, max: 2.5 }, PY = { min: -1.5, max: 3.5 };
+// ±2.5 kept the whole ship in view. Danny then asked for it increased "a
+// little bit" (late 2026-10-25): now ±3.0 / −1.75…3.5 — still far inside
+// the old ±7, with the ship body in view at every corner when looking
+// straight ahead. Bottom −1.75 stays clear of the bottom edge; top 3.5
+// was already comfortably in view and is unchanged.
+const PX = { min: -3.0, max: 3.0 }, PY = { min: -1.75, max: 3.5 };
 let px = 0, py = 0, pvx = 0, pvy = 0, prevRoll = false, prevNova = false, prevRecall = false;
 
 // ============================== pools: bolts, plasma, missiles, enemies, asteroids, pickups, particles ==============================
@@ -1262,9 +1263,9 @@ function tick() {
 
   if (S.mode === 'play') {
     // --- steering (engine upgrades multiply speed, no cap) ---
-    // Rates retuned for the shrunk area: same time-to-cross as before
+    // Rates retuned for the bumped area: same time-to-cross as before
     // (thumbstick X 0.63s, Y 0.42s; keyboard X 0.71s, Y 0.45s), so the
-    // smaller area feels precise, not twitchy.
+    // slightly larger area feels the same, not slower or twitchier.
     const sm = speedMul();
     let tx = px, ty = py;
     let kx = 0, ky = 0;
@@ -1272,10 +1273,10 @@ function tick() {
     if (keys['ArrowRight'] || keys['KeyD']) kx += 1;
     if (keys['ArrowUp'] || keys['KeyW']) ky += 1;
     if (keys['ArrowDown'] || keys['KeyS']) ky -= 1;
-    if (Math.abs(xr.sx) > 0 || Math.abs(xr.sy) > 0) { tx = px + xr.sx * 8 * sm * dt; ty = py + xr.sy * 12 * sm * dt; }
-    else if (kx !== 0 || ky !== 0) { tx = px + kx * 7 * sm * dt; ty = py + ky * 11 * sm * dt; }
+    if (Math.abs(xr.sx) > 0 || Math.abs(xr.sy) > 0) { tx = px + xr.sx * 9.6 * sm * dt; ty = py + xr.sy * 12.6 * sm * dt; }
+    else if (kx !== 0 || ky !== 0) { tx = px + kx * 8.4 * sm * dt; ty = py + ky * 11.55 * sm * dt; }
     else if (xr.aim) { tx = lerp(px, xr.aim.x, 1 - Math.pow(0.001, dt)); ty = lerp(py, xr.aim.y, 1 - Math.pow(0.001, dt)); }
-    else if (!renderer.xr.isPresenting) { tx = lerp(px, mouse.x * PX.max, 1 - Math.pow(0.001, dt)); ty = lerp(py, mouse.y * 2.5 + 1.0, 1 - Math.pow(0.001, dt)); }
+    else if (!renderer.xr.isPresenting) { tx = lerp(px, mouse.x * PX.max, 1 - Math.pow(0.001, dt)); ty = lerp(py, mouse.y * 2.625 + 0.875, 1 - Math.pow(0.001, dt)); }
     pvx = (tx - px) / Math.max(dt, 0.001); pvy = (ty - py) / Math.max(dt, 0.001);
     px = clamp(tx, PX.min, PX.max); py = clamp(ty, PY.min, PY.max);
     ship.position.set(px, py, 0);
