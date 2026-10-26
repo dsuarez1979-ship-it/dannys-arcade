@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>MARSH SHOT VR — Danny's Arcade</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #0a0618; height: 100%; font-family: Arial, sans-serif; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .panel { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(5, 2, 18, 0.82); color: #fff; text-align: center; z-index: 10; padding: 20px; }
+  .panel h1 { font-size: 44px; margin: 0 0 6px; color: #ffd319; text-shadow: 0 0 18px #ff2fd6, 0 0 42px #27e8ff; letter-spacing: 2px; }
+  .panel p { max-width: 560px; line-height: 1.5; color: #cfe8ff; margin: 8px 0; font-size: 17px; }
+  .panel .sub { color: #9fd8ff; font-size: 15px; }
+  .btn { margin-top: 16px; padding: 16px 34px; font-size: 22px; font-weight: bold; border: 0; border-radius: 12px; background: #ffd319; color: #1a0b2e; cursor: pointer; box-shadow: 0 0 24px #ff2fd6; }
+  .btn:disabled { opacity: 0.5; }
+  .backlink { margin-top: 18px; font-size: 16px; }
+  .backlink a { color: #27e8ff; }
+  #status { margin-top: 12px; color: #ffd319; font-size: 15px; min-height: 20px; }
+  #hud { position: fixed; top: 10px; left: 10px; z-index: 5; background: rgba(2, 8, 24, 0.72); border: 3px solid #27e8ff; box-shadow: 0 0 18px #ff2fd6; border-radius: 10px; padding: 10px 14px; color: #7df9ff; font-weight: bold; font-size: 17px; line-height: 1.5; pointer-events: none; }
+  #hud b { color: #ffd319; }
+  #banner { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); z-index: 6; display: none; background: rgba(2, 8, 24, 0.8); border: 3px solid #ffd319; box-shadow: 0 0 24px #27e8ff; color: #ffd319; font-weight: bold; font-size: 30px; padding: 12px 26px; border-radius: 12px; pointer-events: none; text-align: center; }
+  #cross { position: fixed; z-index: 4; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 3px solid #27e8ff; border-radius: 50%; box-shadow: 0 0 12px #ff2fd6; pointer-events: none; display: none; }
+  #cross::after { content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; background: #ffd319; border-radius: 50%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">SCORE <b id="hScore">0</b> &nbsp;·&nbsp; ROUND <b id="hRound">1</b><br>BIRDS <b id="hBirds">0/10</b> &nbsp;·&nbsp; ACCURACY <b id="hAcc">—</b><br>STREAK <b id="hStreak">0</b></div>
+<div id="banner"></div>
+<div id="cross"></div>
+<div class="panel" id="panel">
+  <h1>MARSH SHOT VR</h1>
+  <p>Sunset over the marsh. Wild birds cross the sky — take your shot.</p>
+  <p class="sub"><b>VR:</b> aim with your right controller, pull the trigger to shoot.<br>
+  <b>Desktop:</b> move the mouse to aim, click to shoot.<br>
+  Farther and faster birds are worth more points. Rounds of 10 birds — every round gets faster.<br>
+  No lives, no fail state — play as long as you like, rounds keep coming.</p>
+  <button class="btn" id="vrBtn">ENTER VR</button>
+  <div id="status"></div>
+  <p class="backlink"><a href="./">← Danny's Arcade</a></p>
+</div>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ============================== setup ==============================
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.toneMapping = THREE.NoToneMapping;
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x1a0b2e, 0.004);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 600);
+camera.position.set(0, 1.6, 0);
+scene.add(camera);
+
+const DEAD = 0.14;
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3();
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function rand(a, b) { return a + Math.random() * (b - a); }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// Soft radial glow texture (reused for sun glow, bird rims, clouds).
+function glowTexture(inner, outer) {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 4, 64, 64, 64);
+  g.addColorStop(0, inner); g.addColorStop(1, outer);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(cv);
+}
+const softGlowTex = glowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
+
+// ============================== sunset marsh backdrop ==============================
+// Sky dome: vertical gradient, deep purple up top to hot orange at the horizon.
+(function buildSky() {
+  const cv = document.createElement('canvas'); cv.width = 16; cv.height = 512;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0.0, '#12082e'); g.addColorStop(0.45, '#3b1155');
+  g.addColorStop(0.72, '#b83a5e'); g.addColorStop(0.88, '#ff7e47'); g.addColorStop(1.0, '#ffb347');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 16, 512);
+  const tex = new THREE.CanvasTexture(cv);
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(420, 24, 16),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false })
+  );
+  scene.add(sky);
+})();
+// Neon-edged sun: hot core disc + glowing rim ring + halo sprite, low over the water.
+const sunGroup = new THREE.Group();
+sunGroup.position.set(-70, 26, -330);
+{
+  const core = new THREE.Mesh(new THREE.CircleGeometry(16, 40),
+    new THREE.MeshBasicMaterial({ color: 0xffd319, fog: false }));
+  const rim = new THREE.Mesh(new THREE.RingGeometry(16, 19, 40),
+    new THREE.MeshBasicMaterial({ color: 0xff2fd6, fog: false, transparent: true, opacity: 0.9 }));
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softGlowTex, color: 0xff7e47, transparent: true, opacity: 0.55, fog: false, depthWrite: false }));
+  halo.scale.set(110, 110, 1);
+  rim.position.z = 0.1; halo.position.z = -1;
+  sunGroup.add(core, rim, halo);
+}
+scene.add(sunGroup);
+// Water: dark glassy plane + a glowing sun-reflection streak + neon shimmer lines.
+{
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(900, 500),
+    new THREE.MeshBasicMaterial({ color: 0x0a2438, fog: false }));
+  water.rotation.x = -Math.PI / 2; water.position.set(0, 0, -140);
+  scene.add(water);
+  const streakCv = document.createElement('canvas'); streakCv.width = 64; streakCv.height = 256;
+  const sctx = streakCv.getContext('2d');
+  const sg = sctx.createLinearGradient(0, 0, 0, 256);
+  sg.addColorStop(0, 'rgba(255,211,25,0.85)'); sg.addColorStop(1, 'rgba(255,47,214,0)');
+  sctx.fillStyle = sg; sctx.fillRect(0, 0, 64, 256);
+  const streakTex = new THREE.CanvasTexture(streakCv);
+  const streak = new THREE.Mesh(new THREE.PlaneGeometry(26, 300),
+    new THREE.MeshBasicMaterial({ map: streakTex, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  streak.rotation.x = -Math.PI / 2; streak.position.set(-70, 0.15, -180);
+  scene.add(streak);
+  // A few neon shimmer lines drifting on the water (static, cheap).
+  const shimmerMat = new THREE.MeshBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0.35, fog: false });
+  for (let i = 0; i < 14; i++) {
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(rand(8, 30), 0.35), shimmerMat);
+    line.rotation.x = -Math.PI / 2;
+    line.position.set(rand(-120, 120), 0.12, rand(-60, -260));
+    scene.add(line);
+  }
+}
+// Reeds: instanced stalks + seed heads along the near marsh edges. Dark green with neon tips.
+{
+  const stalkGeo = new THREE.CylinderGeometry(0.03, 0.06, 1, 4);
+  const stalkMat = new THREE.MeshBasicMaterial({ color: 0x14351f });
+  const stalks = new THREE.InstancedMesh(stalkGeo, stalkMat, 260);
+  const headGeo = new THREE.ConeGeometry(0.14, 0.7, 5);
+  const headMat = new THREE.MeshBasicMaterial({ color: 0x2f6b3a });
+  const heads = new THREE.InstancedMesh(headGeo, headMat, 90);
+  const tipGeo = new THREE.SphereGeometry(0.07, 6, 5);
+  const tipMat = new THREE.MeshBasicMaterial({ color: 0x39ff88 });
+  const tips = new THREE.InstancedMesh(tipGeo, tipMat, 90);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3();
+  for (let i = 0; i < 260; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = side * rand(6, 70), z = rand(-40, -3), h = rand(1.2, 2.6);
+    e.set(rand(-0.12, 0.12), 0, rand(-0.12, 0.12)); q.setFromEuler(e);
+    m.compose(new THREE.Vector3(x, h / 2, z), q, new THREE.Vector3(1, h, 1));
+    stalks.setMatrixAt(i, m);
+  }
+  for (let i = 0; i < 90; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = side * rand(6, 70), z = rand(-40, -3), h = rand(1.4, 2.6);
+    m.compose(new THREE.Vector3(x, h + 0.3, z), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+    heads.setMatrixAt(i, m);
+    m.compose(new THREE.Vector3(x, h + 0.68, z), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+    tips.setMatrixAt(i, m);
+  }
+  scene.add(stalks, heads, tips);
+}
+// Distant tree silhouettes + slow neon-tinted clouds.
+const clouds = [];
+{
+  const trunkMat = new THREE.MeshBasicMaterial({ color: 0x0d1a12 });
+  const leafMat = new THREE.MeshBasicMaterial({ color: 0x12291c });
+  for (let i = 0; i < 16; i++) {
+    const x = rand(-190, 190), z = rand(-300, -180), h = rand(10, 26);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.9, h * 0.4, 5), trunkMat);
+    trunk.position.set(x, h * 0.2, z);
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(h * 0.28, h * 0.8, 7), leafMat);
+    crown.position.set(x, h * 0.7, z);
+    scene.add(trunk, crown);
+  }
+  const cloudCols = [0xb83a5e, 0x27e8ff, 0xff2fd6, 0xff7e47];
+  for (let i = 0; i < 6; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: softGlowTex, color: pick(cloudCols), transparent: true, opacity: 0.22, fog: false, depthWrite: false }));
+    sp.scale.set(rand(60, 130), rand(14, 26), 1);
+    sp.position.set(rand(-220, 220), rand(40, 110), rand(-340, -240));
+    sp.userData.drift = rand(0.2, 0.6);
+    scene.add(sp); clouds.push(sp);
+  }
+}
+
+// ============================== birds (pooled, realistic shapes, neon rims) ==============================
+// Plumage palettes for generic wild waterfowl — all drawn procedurally, no borrowed art.
+const PLUMAGE = [
+  { body: 0x6b4a2f, head: 0x1f9d55, beak: 0xff9f1a, wing: 0x4a3220, rim: 0x39ff88 }, // green-headed drake
+  { body: 0x8a6b45, head: 0x8a6b45, beak: 0xd9a441, wing: 0x6b4f30, rim: 0xffd319 }, // mottled brown
+  { body: 0xe8e8e8, head: 0xe8e8e8, beak: 0xff9f1a, wing: 0xc9c9c9, rim: 0x27e8ff }, // white bird
+  { body: 0x2a2a33, head: 0x2a2a33, beak: 0xffd319, wing: 0x1c1c22, rim: 0xff2fd6 }, // dark bird
+];
+function basic(c) { return new THREE.MeshBasicMaterial({ color: c }); }
+function makeBird(pal) {
+  const g = new THREE.Group();
+  const bodyMat = basic(pal.body), headMat = basic(pal.head), beakMat = basic(pal.beak),
+        wingMat = basic(pal.wing), rimMat = basic(pal.rim);
+  // Ellipsoid body, swept-back tail, neck + head + beak: a recognizable bird silhouette.
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 10), bodyMat);
+  body.scale.set(1.5, 0.75, 0.7);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, 0.45), wingMat);
+  tail.position.set(-0.85, 0.08, 0); tail.rotation.z = 0.25;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.55, 8), headMat);
+  neck.position.set(0.72, 0.35, 0); neck.rotation.z = -0.5;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), headMat);
+  head.position.set(0.95, 0.62, 0);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.42, 8), beakMat);
+  beak.rotation.z = -Math.PI / 2; beak.position.set(1.28, 0.58, 0);
+  // Wings: broad flat shapes that flap around the body axis, with a neon edge strip.
+  function wing(side) {
+    const w = new THREE.Group();
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.06, 1.1), wingMat);
+    slab.position.set(-0.05, 0, side * 0.55);
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.07, 0.08), rimMat);
+    edge.position.set(-0.05, 0, side * 1.12);
+    w.add(slab, edge);
+    w.position.set(0.05, 0.18, 0);
+    return w;
+  }
+  const wingL = wing(1), wingR = wing(-1);
+  // Subtle neon halo so the bird pops against the sunset sky.
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softGlowTex, color: pal.rim, transparent: true, opacity: 0.28, depthWrite: false }));
+  halo.scale.set(3.2, 2.2, 1);
+  g.add(body, tail, neck, head, beak, wingL, wingR, halo);
+  g.visible = false;
+  scene.add(g);
+  return { g, wingL, wingR, active: false, falling: false, dir: 1, speed: 5, y0: 4, z: -30, bob: 0, fallT: 0, hitR: 1.0 };
+}
+const birds = [];
+for (let i = 0; i < 12; i++) birds.push(makeBird(pick(PLUMAGE)));
+function spawnBird() {
+  const b = birds.find(x => !x.active);
+  if (!b) return;
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  b.dir = dir;
+  b.speed = rand(3.5, 6.5) * (1 + (S.round - 1) * 0.12);
+  b.y0 = rand(2.6, 6.5);
+  b.z = rand(-45, -25);
+  b.bob = rand(0, Math.PI * 2);
+  b.falling = false; b.fallT = 0;
+  b.g.position.set(dir === 1 ? -60 : 60, b.y0, b.z);
+  b.g.rotation.y = dir === 1 ? 0 : Math.PI;
+  b.g.visible = true;
+  b.active = true;
+  flutterSound();
+}
+function updateBirds(dt, t) {
+  for (const b of birds) {
+    if (!b.active) continue;
+    if (b.falling) {
+      b.fallT += dt;
+      b.g.position.y -= (4 + b.fallT * 9) * dt;
+      b.g.rotation.z += dt * 6;
+      if (b.g.position.y <= 0.25 || b.fallT > 1.4) { b.active = false; b.g.visible = false; }
+      continue;
+    }
+    const flap = Math.sin(t * 14 + b.bob) * 0.85;
+    b.wingL.rotation.x = flap; b.wingR.rotation.x = -flap;
+    b.g.position.x += b.dir * b.speed * dt;
+    b.g.position.y = b.y0 + Math.sin(t * 2 + b.bob) * 0.35;
+    if ((b.dir === 1 && b.g.position.x > 62) || (b.dir === -1 && b.g.position.x < -62)) {
+      // Escaped: streak breaks, but nothing else is lost — rounds keep coming.
+      b.active = false; b.g.visible = false;
+      S.streak = 0; S.resolved++; hudDirty = true;
+    }
+  }
+}
+// ============================== feather puffs + shot tracers (pooled) ==============================
+function makePuff() {
+  const group = new THREE.Group();
+  const parts = [];
+  for (let i = 0; i < 12; i++) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.16), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+    m.visible = false; group.add(m); parts.push(m);
+  }
+  group.visible = false; scene.add(group);
+  return { group, parts, t: 99, vel: [] };
+}
+const puffs = [];
+for (let i = 0; i < 8; i++) puffs.push(makePuff());
+function burst(pos, color) {
+  const p = puffs.find(x => x.t > 1.2) || puffs[0];
+  p.t = 0; p.group.visible = true; p.group.position.copy(pos);
+  p.vel = [];
+  for (const m of p.parts) {
+    m.visible = true; m.position.set(0, 0, 0);
+    m.material.color.set(color); m.material.opacity = 1;
+    m.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3));
+    p.vel.push(new THREE.Vector3(rand(-2, 2), rand(1, 3.5), rand(-2, 2)));
+  }
+}
+function updatePuffs(dt) {
+  for (const p of puffs) {
+    if (p.t > 1.2) { p.group.visible = false; continue; }
+    p.t += dt;
+    for (let i = 0; i < p.parts.length; i++) {
+      const m = p.parts[i], v = p.vel[i];
+      m.position.addScaledVector(v, dt); v.y -= 4 * dt;
+      m.material.opacity = Math.max(0, 1 - p.t / 1.2);
+    }
+  }
+}
+function makeTracer() {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffd319, transparent: true, opacity: 0 }));
+  line.visible = false; line.frustumCulled = false; scene.add(line);
+  return { line, t: 99 };
+}
+const tracers = [];
+for (let i = 0; i < 4; i++) tracers.push(makeTracer());
+function tracer(from, to) {
+  const tr = tracers.find(x => x.t > 0.2) || tracers[0];
+  tr.t = 0; tr.line.visible = true;
+  const pos = tr.line.geometry.attributes.position;
+  pos.setXYZ(0, from.x, from.y, from.z); pos.setXYZ(1, to.x, to.y, to.z);
+  pos.needsUpdate = true; tr.line.material.opacity = 0.9;
+}
+function updateTracers(dt) {
+  for (const tr of tracers) {
+    if (tr.t > 0.2) { tr.line.visible = false; continue; }
+    tr.t += dt; tr.line.material.opacity = Math.max(0, 0.9 * (1 - tr.t / 0.2));
+  }
+}
+// VR laser sight: faint cyan line from the right controller, helps aiming.
+const sightGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -30)]);
+const sight = new THREE.Line(sightGeo, new THREE.LineBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0.35 }));
+sight.visible = false; sight.frustumCulled = false; scene.add(sight);
+
+// ============================== synthesized audio (no samples) ==============================
+let AC = null, noiseBuf = null;
+function startAudio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    noiseBuf = AC.createBuffer(1, AC.sampleRate * 0.3, AC.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  } catch (err) { AC = null; }
+}
+function tone(freq, dur, vol, type) {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type || 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + dur);
+  o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + dur);
+}
+function gunshotSound() {
+  if (!AC) return;
+  const src = AC.createBufferSource(); src.buffer = noiseBuf;
+  const f = AC.createBiquadFilter(); f.type = 'lowpass';
+  f.frequency.setValueAtTime(3000, AC.currentTime);
+  f.frequency.exponentialRampToValueAtTime(200, AC.currentTime + 0.18);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0.5, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + 0.2);
+  src.connect(f); f.connect(g); g.connect(AC.destination); src.start(); src.stop(AC.currentTime + 0.2);
+  tone(140, 0.12, 0.25, 'sine');
+}
+function flutterSound() {
+  if (!AC) return;
+  const src = AC.createBufferSource(); src.buffer = noiseBuf;
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0.06, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + 0.35);
+  src.connect(f); f.connect(g); g.connect(AC.destination); src.start(); src.stop(AC.currentTime + 0.35);
+}
+function chimeSound() { tone(880, 0.18, 0.22); setTimeout(() => tone(1320, 0.25, 0.22), 70); }
+function fanfareSound() { tone(523, 0.15, 0.2); setTimeout(() => tone(659, 0.15, 0.2), 120); setTimeout(() => tone(784, 0.3, 0.22), 240); }
+
+// ============================== game state + HUD ==============================
+const S = { mode: 'menu', score: 0, round: 1, spawned: 0, resolved: 0, hits: 0, shots: 0, streak: 0, spawnT: 0.8 };
+let hudDirty = true;
+const hudEls = {
+  score: document.getElementById('hScore'), round: document.getElementById('hRound'),
+  birds: document.getElementById('hBirds'), acc: document.getElementById('hAcc'), streak: document.getElementById('hStreak')
+};
+// In-VR scoreboard: small neon-edged canvas plane, top-left of the view.
+const hudCanvas = document.createElement('canvas'); hudCanvas.width = 512; hudCanvas.height = 224;
+const hctx = hudCanvas.getContext('2d');
+const hudTex = new THREE.CanvasTexture(hudCanvas);
+const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.46),
+  new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false }));
+hudMesh.renderOrder = 1000; hudMesh.position.set(-0.82, 0.55, -1.5); hudMesh.visible = false;
+camera.add(hudMesh);
+const bannerEl = document.getElementById('banner');
+let bannerTimer = null;
+function showBanner(text, dur) {
+  bannerEl.textContent = text; bannerEl.style.display = 'block';
+  if (bannerTimer) clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => { bannerEl.style.display = 'none'; }, (dur || 2.2) * 1000);
+}
+function updateHUD() {
+  if (!hudDirty) return;
+  hudDirty = false;
+  hudEls.score.textContent = S.score;
+  hudEls.round.textContent = S.round;
+  hudEls.birds.textContent = Math.min(S.resolved, 10) + '/10';
+  hudEls.acc.textContent = S.shots ? Math.round(S.hits / S.shots * 100) + '%' : '—';
+  hudEls.streak.textContent = S.streak;
+  hctx.clearRect(0, 0, 512, 224);
+  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 512, 224);
+  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 4; hctx.strokeRect(4, 4, 504, 216);
+  hctx.font = 'bold 34px Arial'; hctx.fillStyle = '#ffd319';
+  hctx.fillText('SCORE ' + S.score, 20, 52);
+  hctx.fillStyle = '#7df9ff'; hctx.font = 'bold 28px Arial';
+  hctx.fillText('ROUND ' + S.round + '  ·  BIRDS ' + Math.min(S.resolved, 10) + '/10', 20, 100);
+  hctx.fillText('ACCURACY ' + (S.shots ? Math.round(S.hits / S.shots * 100) + '%' : '—') + '  ·  STREAK ' + S.streak, 20, 148);
+  hctx.fillStyle = '#ff2fd6'; hctx.font = 'bold 24px Arial';
+  hctx.fillText('FARTHER + FASTER = MORE POINTS', 20, 196);
+  hudTex.needsUpdate = true;
+}
+// ============================== shooting ==============================
+const raycaster = new THREE.Raycaster();
+const mouseNDC = new THREE.Vector2(0, 0);
+const crossEl = document.getElementById('cross');
+const shotO = new THREE.Vector3(), shotD = new THREE.Vector3();
+let prevTrig = false;
+function shootFrom(origin, dir) {
+  // Copy first: origin/dir may alias the shared temp vectors used below.
+  shotO.copy(origin); shotD.copy(dir);
+  S.shots++; hudDirty = true;
+  gunshotSound();
+  raycaster.set(shotO, shotD);
+  raycaster.far = 200;
+  let best = null, bestDist = 1e9;
+  for (const b of birds) {
+    if (!b.active || b.falling) continue;
+    _v.copy(b.g.position);
+    const dist = raycaster.ray.distanceToPoint(_v);
+    if (dist < b.hitR) {
+      const along = _v2.copy(b.g.position).sub(shotO).dot(shotD);
+      if (along > 0 && along < bestDist) { bestDist = along; best = b; }
+    }
+  }
+  if (best) {
+    _v.copy(best.g.position).addScaledVector(shotD, bestDist);
+    tracer(shotO, _v);
+    best.falling = true; best.fallT = 0;
+    const distPts = Math.round(bestDist * 4), speedPts = Math.round(best.speed * 10);
+    const streakPts = Math.min(S.streak, 5) * 10;
+    const pts = 100 + distPts + speedPts + streakPts;
+    S.score += pts; S.hits++; S.streak++; S.resolved++; hudDirty = true;
+    burst(best.g.position, 0xfff2cc);
+    chimeSound();
+    showBanner('+' + pts + '  ·  STREAK ' + S.streak, 1.4);
+  } else {
+    _v.copy(shotO).addScaledVector(shotD, 80);
+    tracer(shotO, _v);
+  }
+}
+function pollXR() {
+  if (!renderer.xr.isPresenting) return;
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  let trig = false;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    if (src.handedness === 'right') {
+      const t = (gp.buttons && gp.buttons[0]) ? (gp.buttons[0].value || 0) : 0;
+      if (t > 0.5) trig = true;
+      const ctrl = renderer.xr.getController(1);
+      if (ctrl) {
+        ctrl.updateMatrixWorld();
+        ctrl.getWorldPosition(_v); ctrl.getWorldQuaternion(_q);
+        _dir.set(0, 0, -1).applyQuaternion(_q);
+        sight.visible = true;
+        const pos = sight.geometry.attributes.position;
+        pos.setXYZ(0, _v.x, _v.y, _v.z);
+        pos.setXYZ(1, _v.x + _dir.x * 30, _v.y + _dir.y * 30, _v.z + _dir.z * 30);
+        pos.needsUpdate = true;
+        if (trig && !prevTrig) shootFrom(_v, _dir);
+      }
+    }
+  }
+  prevTrig = trig;
+}
+window.addEventListener('pointermove', (e) => {
+  mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  crossEl.style.display = 'block';
+  crossEl.style.left = e.clientX + 'px'; crossEl.style.top = e.clientY + 'px';
+});
+window.addEventListener('pointerdown', (e) => {
+  if (S.mode !== 'play' || renderer.xr.isPresenting) return;
+  if (e.target.closest && e.target.closest('.panel')) return;
+  raycaster.setFromCamera(mouseNDC, camera);
+  camera.getWorldPosition(_v);
+  shootFrom(_v, raycaster.ray.direction);
+});
+// ============================== rounds + main loop ==============================
+function startGame() {
+  S.mode = 'play'; S.score = 0; S.round = 1; S.spawned = 0; S.resolved = 0;
+  S.hits = 0; S.shots = 0; S.streak = 0; S.spawnT = 0.6;
+  for (const b of birds) { b.active = false; b.g.visible = false; }
+  hudDirty = true; hudMesh.visible = true;
+  showBanner('ROUND 1 — 10 BIRDS', 2.2);
+}
+const clock = new THREE.Clock();
+let elapsed = 0;
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
+  for (const c of clouds) c.position.x += c.userData.drift * dt;
+  if (S.mode === 'play') {
+    pollXR();
+    // Spawn pacing: up to 4 birds at once, a new one every ~1.2–2.2s.
+    S.spawnT -= dt;
+    const activeCount = birds.reduce((n, b) => n + (b.active ? 1 : 0), 0);
+    if (S.spawnT <= 0 && S.spawned < 10 && activeCount < 4) {
+      spawnBird(); S.spawned++;
+      if (Math.random() < 0.25 && S.spawned < 10) {
+        // A pair now and then: second bird trails the first.
+        setTimeout(() => { if (S.mode === 'play' && S.spawned < 10) { spawnBird(); S.spawned++; } }, 400);
+      }
+      S.spawnT = rand(1.2, 2.2);
+    }
+    updateBirds(dt, elapsed);
+    // Round ends when all 10 are hit or flown off — next round, faster, forever.
+    if (S.spawned >= 10 && S.resolved >= 10) {
+      S.round++; S.spawned = 0; S.resolved = 0; S.spawnT = 1.0; hudDirty = true;
+      fanfareSound();
+      showBanner('ROUND ' + S.round + ' — FASTER!', 2.2);
+    }
+  }
+  updatePuffs(dt);
+  updateTracers(dt);
+  updateHUD();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(tick);
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+// ============================== VR session ==============================
+const panel = document.getElementById('panel');
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+function setStatus(t) { statusEl.textContent = t; }
+function hidePanel() { panel.style.display = 'none'; }
+function showPanel() { panel.style.display = 'flex'; }
+function xrPixelDown() { renderer.setPixelRatio(1.25); }
+function xrPixelUp() { renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); }
+let xrSupported = false;
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then((ok) => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+vrBtn.addEventListener('click', async () => {
+  startAudio();
+  startGame();
+  if (!xrSupported) { hidePanel(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    xrPixelDown();
+    hidePanel();
+    session.addEventListener('end', () => { xrPixelUp(); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      xrPixelDown();
+      hidePanel();
+      session.addEventListener('end', () => { xrPixelUp(); showPanel(); vrBtn.disabled = false; });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+    }
+  }
+});
+</script>
+</body>
+</html>
