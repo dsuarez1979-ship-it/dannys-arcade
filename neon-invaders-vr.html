@@ -1121,7 +1121,7 @@ function dropBomb() {
 }
 
 // ============================== mothership ==============================
-const MOTHERSHIP_ENABLED = true; // Restored 2026-10-25: Danny's saucer-off test confirmed the saucer caused the freezes, so it was rebuilt with cheap unlit materials (see below) instead of being left off
+const MOTHERSHIP_ENABLED = false; // REMOVED 2026-10-25 (night): the cheap-material rebuild STILL froze in VR, so the saucer itself — not just its materials — is the problem. Fully off: never spawns, never renders, never warbles. Code block kept intact; flip this one line back to true to restore it.
 const mother = new THREE.Group();
 let motherActive = false, motherDir = 1, motherTimer = rand(14, 22);
 {
@@ -1342,7 +1342,7 @@ function resetFormation(fullRestore) {
 function startWave() {
   surgeWave = (wave % 5 === 0);
   resetFormation(true);
-  diverTimer = rand(8, 12); // grace before the first dive of the wave — dives must be unmistakable
+  diverTimer = rand(4, 6); // first dive ~5s into every wave (Danny: divers every 5 seconds)
   resetShields();
   markScoreDirty();
   if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster march, double bombs!', 2.2);
@@ -1407,9 +1407,9 @@ let avgFrameMs = 16, degraded = false, frameNo = 0;
 let elapsed = 0;
 function updateFormation(dt) {
   const deadFrac = 1 - aliveCount / (COLS * ROWS);
-  // FREEZE FIX: march speed is hard-capped so late waves can't spiral.
-  // GOAL TIERS: +4% march per tier (hard cap 6 respected); SURGE waves +25%.
-  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.12) * (1 + deadFrac * 1.9) * (1 + tier * 0.04) * (surgeWave ? 1.25 : 1));
+  // FREEZE FIX: march speed is hard-capped at 6 so late waves can't spiral.
+  // STEEP RAMP (Danny 2026-10-25): +0.22/wave base, +8% per tier; SURGE waves +40%.
+  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.22) * (1 + deadFrac * 1.9) * (1 + tier * 0.08) * (surgeWave ? 1.4 : 1));
   formX += marchDir * marchSpeed * dt;
   if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.45; stepThump(); }
   else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.45; stepThump(); }
@@ -1623,9 +1623,8 @@ function updateBombs(dt) {
   bombTimer -= dt;
   if (bombTimer <= 0) {
     dropBomb();
-    // GOAL TIERS: +5% bomb rate per tier (interval x0.95^tier, 0.38s floor kept);
-    // SURGE waves drop bombs at double rate (interval x0.5) for that wave only.
-    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.06 - (1 - aliveCount / (COLS * ROWS)) * 0.3) * Math.pow(0.95, tier) * (surgeWave ? 0.5 : 1));
+    // STEEP RAMP (Danny 2026-10-25): -0.09/wave, interval x0.92^tier, SURGE x0.4; 0.38s floor kept so fire never becomes a wall.
+    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.09 - (1 - aliveCount / (COLS * ROWS)) * 0.3) * Math.pow(0.92, tier) * (surgeWave ? 0.4 : 1));
   }
   for (const b of bombs) {
     if (!b.active) continue;
@@ -1654,7 +1653,7 @@ function updateMother(dt) {
   if (!motherActive) {
     motherTimer -= dt;
     if (motherTimer <= 0) {
-      if (!MOTHERSHIP_ENABLED) { motherTimer = rand(25, 40); return; } // Saucer switch: false = off for freeze testing, true = normal (restored 2026-10-25 with cheap materials)
+      if (!MOTHERSHIP_ENABLED) { motherTimer = rand(25, 40); return; } // Saucer REMOVED 2026-10-25: cheap rebuild still froze, so the gate stays shut — timer just resets, saucer never activates, never renders, never warbles
       motherActive = true;
       motherDir = Math.random() < 0.5 ? 1 : -1;
       mother.position.set(motherDir > 0 ? -18 : 18, 11.4, -17);
@@ -1683,10 +1682,10 @@ function updateMother(dt) {
 // clearly. A diver that reaches the rail counts exactly like a bomb hit:
 // a shield layer absorbs it, otherwise one ship-lost stat — never a game over.
 const divers = []; // invaders currently diving (cap 2)
-let diverTimer = rand(8, 12);
+let diverTimer = rand(4, 6);
 const DIVER_BONUS = 50;
 function maxDivers() { return wave >= 2 ? 2 : 1; }
-function nextDiverInterval() { return Math.max(7, rand(10, 15) - wave * 0.5 - tier * 0.4); }
+function nextDiverInterval() { return rand(4, 6); } // Danny: a dive every ~5 seconds, all game long
 function diverSound() { blip(880, 240, 0.7, 'sawtooth', 0.28); blip(1320, 330, 0.6, 'square', 0.14); blip(660, 180, 0.6, 'triangle', 0.12); }
 function startDiver() {
   const candidates = [];
@@ -1699,7 +1698,7 @@ function startDiver() {
   v.grp.position.set(wx, wy, FORM_Z);
   v.grp.rotation.set(0, 0, 0);
   v.diving = true; v.diveT = 0;
-  v.diveDur = Math.max(3.4, 5.0 - wave * 0.12 - tier * 0.08);
+  v.diveDur = Math.max(2.6, 5.0 - wave * 0.25 - tier * 0.15); // STEEP RAMP: dives get faster every wave/tier; 2.6s floor keeps them dodgeable
   v.diveX0 = wx; v.diveY0 = wy;
   v.diveX1 = clamp(cannonX + rand(-0.8, 0.8), RAIL_MIN, RAIL_MAX); v.diveY1 = 1.9;
   // Brighter than formation invaders: oversized glow (pulsed per frame below).
@@ -1924,7 +1923,7 @@ function tick() {
 // in-game appearance costs ZERO new shader compiles. (Burst points, shockwave
 // sprites, and the announcement panel are already exercised by wave-1 kills and
 // wave-start announcements, so they need no warm-up.)
-{
+if (MOTHERSHIP_ENABLED) { // Saucer REMOVED 2026-10-25: skip the warm-up render too — the saucer must never render at all while the flag is false
   const warmSavedPos = mother.position.clone();
   mother.position.set(0, 4, -14); // dead-center in front of the menu camera
   mother.visible = true;
