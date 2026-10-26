@@ -36,6 +36,7 @@
   Farther and faster birds are worth more points. Rounds of 10 birds — every round gets faster.<br>
   No lives, no fail state — play as long as you like, rounds keep coming.</p>
   <button class="btn" id="vrBtn">ENTER VR</button>
+  <button class="btn" id="soundBtn" style="padding:10px 20px;font-size:16px">SOUND: ON</button>
   <div id="status"></div>
   <p class="backlink"><a href="./">← Danny's Arcade</a></p>
 </div>
@@ -223,7 +224,7 @@ function makeBird(pal) {
   g.add(body, tail, neck, head, beak, wingL, wingR, halo);
   g.visible = false;
   scene.add(g);
-  return { g, wingL, wingR, active: false, falling: false, dir: 1, speed: 5, y0: 4, z: -30, bob: 0, fallT: 0, hitR: 1.0 };
+  return { g, wingL, wingR, active: false, falling: false, dir: 1, speed: 5, y0: 4, z: -17, bob: 0, fallT: 0, hitR: 1.0, quackT: 4 };
 }
 const birds = [];
 for (let i = 0; i < 12; i++) birds.push(makeBird(pick(PLUMAGE)));
@@ -233,15 +234,23 @@ function spawnBird() {
   const dir = Math.random() < 0.5 ? 1 : -1;
   b.dir = dir;
   b.speed = rand(3.5, 6.5) * (1 + (S.round - 1) * 0.12);
-  b.y0 = rand(2.6, 6.5);
-  b.z = rand(-45, -25);
+  // VIEW-FITTED CORRIDOR (Quest forward view, FOV ~70°): at z −15…−20 the
+  // visible half-width is ~10.5–14, so birds spawn at ±10 and stay in view
+  // the whole crossing instead of flying mostly off-screen as before (±60).
+  b.y0 = rand(2.2, 5.0);
+  b.z = rand(-20, -15);
   b.bob = rand(0, Math.PI * 2);
   b.falling = false; b.fallT = 0;
-  b.g.position.set(dir === 1 ? -60 : 60, b.y0, b.z);
-  b.g.rotation.y = dir === 1 ? 0 : Math.PI;
+  b.quackT = rand(2, 5);
+  b.g.position.set(dir === 1 ? -10 : 10, b.y0, b.z);
+  // ORIENTATION RESET — the bug behind belly-up birds: a shot bird's tumble
+  // left a random roll in rotation.z, and respawns never cleared it. Reset all
+  // three axes so the belly faces DOWN and the beak points along travel.
+  b.g.rotation.set(0, dir === 1 ? 0 : Math.PI, 0);
   b.g.visible = true;
   b.active = true;
   flutterSound();
+  quackSound(0.18);
 }
 function updateBirds(dt, t) {
   for (const b of birds) {
@@ -257,11 +266,124 @@ function updateBirds(dt, t) {
     b.wingL.rotation.x = flap; b.wingR.rotation.x = -flap;
     b.g.position.x += b.dir * b.speed * dt;
     b.g.position.y = b.y0 + Math.sin(t * 2 + b.bob) * 0.35;
-    if ((b.dir === 1 && b.g.position.x > 62) || (b.dir === -1 && b.g.position.x < -62)) {
+    // Occasional mid-flight quack, staggered per bird, quieter with distance.
+    b.quackT -= dt;
+    if (b.quackT <= 0) {
+      quackSound(0.22 - Math.abs(b.z) * 0.004);
+      b.quackT = rand(3.5, 7);
+    }
+    if ((b.dir === 1 && b.g.position.x > 10.5) || (b.dir === -1 && b.g.position.x < -10.5)) {
       // Escaped: streak breaks, but nothing else is lost — rounds keep coming.
       b.active = false; b.g.visible = false;
       S.streak = 0; S.resolved++; hudDirty = true;
+      dogMiss();
     }
+  }
+}
+// ============================== marsh dog (ORIGINAL design) ==============================
+// An original retriever-style marsh dog with a neon collar. It waits in the
+// reeds at the bottom of the view. On a hit it pops up, barks happily, and
+// fetches (carries a small bird shape). On a miss it tilts its head and gives
+// a confused bark — sympathetic and funny, never mocking the player.
+function barkSound(happy) {
+  if (!AC || !soundOn) return;
+  const t = AC.currentTime;
+  const bark = (at, v) => {
+    const o = AC.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(happy ? 340 : 260, t + at);
+    o.frequency.exponentialRampToValueAtTime(170, t + at + 0.1);
+    const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 800; f.Q.value = 1.0;
+    const g = AC.createGain();
+    g.gain.setValueAtTime(0.0001, t + at);
+    g.gain.exponentialRampToValueAtTime(v, t + at + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, t + at + 0.13);
+    o.connect(f); f.connect(g); g.connect(AC.destination);
+    o.start(t + at); o.stop(t + at + 0.15);
+  };
+  if (happy) { bark(0, 0.22); bark(0.18, 0.18); }
+  else { bark(0, 0.18); bark(0.22, 0.15); }
+}
+const dog = new THREE.Group();
+{
+  const coat = basic(0x7a4a22), dark = basic(0x4a2c14), noseM = basic(0x1a1210),
+        collarM = basic(0x27e8ff);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), coat);
+  body.scale.set(0.7, 0.8, 1.35); body.position.y = 0.42;
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), coat);
+  chest.position.set(0, 0.55, 0.42);
+  const head = new THREE.Group(); head.position.set(0, 0.86, 0.55);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), coat);
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.3), coat);
+  snout.position.set(0, -0.05, 0.28);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), noseM);
+  nose.position.set(0, -0.02, 0.44);
+  const earL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.18), dark);
+  earL.position.set(-0.24, 0.05, 0); earL.rotation.z = 0.25;
+  const earR = earL.clone(); earR.position.x = 0.24; earR.rotation.z = -0.25;
+  head.add(skull, snout, nose, earL, earR);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.045, 8, 20), collarM);
+  collar.position.set(0, 0.68, 0.5); collar.rotation.x = Math.PI / 2 - 0.35;
+  const tail = new THREE.Group(); tail.position.set(0, 0.5, -0.55);
+  const tailMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.07, 0.5, 6), coat);
+  tailMesh.position.y = 0.25; tailMesh.rotation.x = -0.6;
+  tail.add(tailMesh);
+  const legGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.4, 6);
+  [[-0.22, 0.35], [0.22, 0.35], [-0.22, -0.35], [0.22, -0.35]].forEach(([x, z]) => {
+    const leg = new THREE.Mesh(legGeo, dark);
+    leg.position.set(x, 0.2, z); dog.add(leg);
+  });
+  dog.add(body, chest, head, collar, tail);
+  dog.userData.head = head; dog.userData.tail = tail;
+  // Carried bird shown only during the fetch celebration.
+  const carried = new THREE.Group();
+  const cBody = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), basic(0x6b4a2f));
+  cBody.scale.set(1.4, 0.7, 0.7);
+  const cWing = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.22), basic(0x4a3220));
+  cWing.position.set(0, 0.08, 0.14);
+  carried.add(cBody, cWing);
+  carried.position.set(0, -0.16, 0.62); carried.visible = false;
+  head.add(carried);
+  dog.userData.carried = carried;
+  // Foreground reeds spot, bottom-right of the forward view: camera sits at
+  // y 1.6, the dog is ~0.9 tall at z −4.2, so it reads at the bottom of the
+  // comfortable Quest view cone without blocking the birds or the aim.
+  dog.position.set(1.6, 0, -4.2);
+  scene.add(dog);
+}
+const dogState = { mode: 'idle', t: 0 };
+function dogFetch() {
+  dogState.mode = 'fetch'; dogState.t = 0;
+  dog.userData.carried.visible = true;
+  barkSound(true);
+}
+function dogMiss() {
+  if (dogState.mode === 'fetch') return; // never interrupt a fetch celebration
+  dogState.mode = 'miss'; dogState.t = 0;
+  barkSound(false);
+}
+function updateDog(dt, t) {
+  const { head, tail, carried } = dog.userData;
+  const st = dogState;
+  if (st.mode === 'idle') {
+    tail.rotation.y = Math.sin(t * 3) * 0.25;
+    head.rotation.set(0, Math.sin(t * 0.5) * 0.15, 0);
+    dog.position.y = 0;
+    return;
+  }
+  st.t += dt;
+  if (st.mode === 'fetch') {
+    // Pop up and bounce happily, tail wagging fast, then settle.
+    dog.position.y = Math.abs(Math.sin(st.t * 9)) * 0.22;
+    tail.rotation.y = Math.sin(t * 18) * 0.6;
+    head.rotation.set(-0.15, 0, 0);
+    if (st.t > 1.8) { st.mode = 'idle'; carried.visible = false; dog.position.y = 0; }
+  } else if (st.mode === 'miss') {
+    // Sympathetic confusion: head tilt + look-around, then settle.
+    const k = Math.min(st.t / 0.3, 1);
+    head.rotation.z = 0.45 * k;
+    head.rotation.y = Math.sin(st.t * 4) * 0.4 * Math.min(1, st.t);
+    tail.rotation.y = Math.sin(t * 2) * 0.1;
+    if (st.t > 1.6) { st.mode = 'idle'; head.rotation.set(0, 0, 0); }
   }
 }
 // ============================== feather puffs + shot tracers (pooled) ==============================
@@ -326,7 +448,7 @@ const sight = new THREE.Line(sightGeo, new THREE.LineBasicMaterial({ color: 0x27
 sight.visible = false; sight.frustumCulled = false; scene.add(sight);
 
 // ============================== synthesized audio (no samples) ==============================
-let AC = null, noiseBuf = null;
+let AC = null, noiseBuf = null, soundOn = true;
 function startAudio() {
   if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
   try {
@@ -337,7 +459,7 @@ function startAudio() {
   } catch (err) { AC = null; }
 }
 function tone(freq, dur, vol, type) {
-  if (!AC) return;
+  if (!AC || !soundOn) return;
   const o = AC.createOscillator(), g = AC.createGain();
   o.type = type || 'sine'; o.frequency.value = freq;
   g.gain.setValueAtTime(vol, AC.currentTime);
@@ -345,19 +467,64 @@ function tone(freq, dur, vol, type) {
   o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + dur);
 }
 function gunshotSound() {
-  if (!AC) return;
-  const src = AC.createBufferSource(); src.buffer = noiseBuf;
-  const f = AC.createBiquadFilter(); f.type = 'lowpass';
-  f.frequency.setValueAtTime(3000, AC.currentTime);
-  f.frequency.exponentialRampToValueAtTime(200, AC.currentTime + 0.18);
+  // Shotgun/rifle crack, all synth: a sharp loud crack, a deep boom body,
+  // and a short echoing tail. Reads instantly as a gunshot, not a pop.
+  if (!AC || !soundOn) return;
+  const t = AC.currentTime;
+  // CRACK: broadband snap through a highpass, gone in 60ms.
+  const crack = AC.createBufferSource(); crack.buffer = noiseBuf;
+  const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1500;
+  const cg = AC.createGain();
+  cg.gain.setValueAtTime(0.9, t);
+  cg.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+  crack.connect(hp); hp.connect(cg); cg.connect(AC.destination);
+  crack.start(t); crack.stop(t + 0.08);
+  // BOOM BODY: lowpassed noise falling 900→120Hz + a sine dropping 180→45Hz.
+  const boom = AC.createBufferSource(); boom.buffer = noiseBuf;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(900, t);
+  lp.frequency.exponentialRampToValueAtTime(120, t + 0.28);
+  const bg = AC.createGain();
+  bg.gain.setValueAtTime(0.7, t);
+  bg.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+  boom.connect(lp); lp.connect(bg); bg.connect(AC.destination);
+  boom.start(t); boom.stop(t + 0.3);
+  const so = AC.createOscillator(); so.type = 'sine';
+  so.frequency.setValueAtTime(180, t);
+  so.frequency.exponentialRampToValueAtTime(45, t + 0.25);
+  const sg = AC.createGain();
+  sg.gain.setValueAtTime(0.6, t);
+  sg.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+  so.connect(sg); sg.connect(AC.destination); so.start(t); so.stop(t + 0.3);
+  // ECHO TAIL: two delayed, quieter, muffled repeats, like a marsh echo.
+  [[0.09, 0.22], [0.19, 0.12]].forEach(([d, v]) => {
+    const e = AC.createBufferSource(); e.buffer = noiseBuf;
+    const ef = AC.createBiquadFilter(); ef.type = 'lowpass'; ef.frequency.value = 500;
+    const eg = AC.createGain();
+    eg.gain.setValueAtTime(v, t + d);
+    eg.gain.exponentialRampToValueAtTime(0.001, t + d + 0.18);
+    e.connect(ef); ef.connect(eg); eg.connect(AC.destination);
+    e.start(t + d); e.stop(t + d + 0.2);
+  });
+}
+function quackSound(vol) {
+  // Synthesized quack: a sawtooth burst dropping 420→170Hz through a
+  // bandpass, fast attack, ~0.2s decay. No samples, no recordings.
+  if (!AC || !soundOn) return;
+  const t = AC.currentTime, v = vol || 0.18;
+  const o = AC.createOscillator(); o.type = 'sawtooth';
+  o.frequency.setValueAtTime(420, t);
+  o.frequency.exponentialRampToValueAtTime(170, t + 0.16);
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 750; f.Q.value = 1.2;
   const g = AC.createGain();
-  g.gain.setValueAtTime(0.5, AC.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + 0.2);
-  src.connect(f); f.connect(g); g.connect(AC.destination); src.start(); src.stop(AC.currentTime + 0.2);
-  tone(140, 0.12, 0.25, 'sine');
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(v, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  o.connect(f); f.connect(g); g.connect(AC.destination);
+  o.start(t); o.stop(t + 0.22);
 }
 function flutterSound() {
-  if (!AC) return;
+  if (!AC || !soundOn) return;
   const src = AC.createBufferSource(); src.buffer = noiseBuf;
   const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900;
   const g = AC.createGain();
@@ -381,7 +548,7 @@ const hctx = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
 const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.46),
   new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false }));
-hudMesh.renderOrder = 1000; hudMesh.position.set(-0.82, 0.55, -1.5); hudMesh.visible = false;
+hudMesh.renderOrder = 1000; hudMesh.position.set(0, 0.62, -1.5); hudMesh.visible = false;
 camera.add(hudMesh);
 const bannerEl = document.getElementById('banner');
 let bannerTimer = null;
@@ -444,6 +611,7 @@ function shootFrom(origin, dir) {
     burst(best.g.position, 0xfff2cc);
     chimeSound();
     showBanner('+' + pts + '  ·  STREAK ' + S.streak, 1.4);
+    dogFetch();
   } else {
     _v.copy(shotO).addScaledVector(shotD, 80);
     tracer(shotO, _v);
@@ -516,6 +684,7 @@ function tick() {
       S.spawnT = rand(1.2, 2.2);
     }
     updateBirds(dt, elapsed);
+    updateDog(dt, elapsed);
     // Round ends when all 10 are hit or flown off — next round, faster, forever.
     if (S.spawned >= 10 && S.resolved >= 10) {
       S.round++; S.spawned = 0; S.resolved = 0; S.spawnT = 1.0; hudDirty = true;
@@ -537,6 +706,12 @@ window.addEventListener('resize', () => {
 // ============================== VR session ==============================
 const panel = document.getElementById('panel');
 const vrBtn = document.getElementById('vrBtn');
+const soundBtn = document.getElementById('soundBtn');
+soundBtn.addEventListener('click', () => {
+  soundOn = !soundOn;
+  soundBtn.textContent = soundOn ? 'SOUND: ON' : 'SOUND: OFF';
+  if (soundOn) { startAudio(); quackSound(0.18); }
+});
 const statusEl = document.getElementById('status');
 function setStatus(t) { statusEl.textContent = t; }
 function hidePanel() { panel.style.display = 'none'; }
