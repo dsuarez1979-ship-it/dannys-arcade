@@ -39,10 +39,12 @@
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
   #hud {
     position:fixed; left:12px; top:52px; z-index:5;
-    color:#7df9ff; font-size:13px; font-weight:800; letter-spacing:1px;
+    color:#7df9ff; font-size:14px; font-weight:800; letter-spacing:1px; line-height:1.5;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:pre;
-    background:rgba(10,6,2,.6); border:1px solid rgba(39,232,255,.4); border-radius:8px; padding:8px 12px;
+    background:rgba(8,4,2,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px;
   }
+  #hud b { color:#ffd319; }
+  #hud .wind { color:#2bff88; }
   #banner {
     position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
     color:#ffd319; font-size:28px; font-weight:900; letter-spacing:2px; text-align:center;
@@ -126,15 +128,30 @@ sun.position.set(-40, 30, -80);
 scene.add(sun);
 
 // ============================== range environment ==============================
-// Golden-hour sky dome (canvas gradient, unlit, backside).
+// Golden-hour sky dome (canvas gradient + baked-in clouds, unlit, backside).
+// Clouds are painted into the texture: soft puffs with zero per-frame cost.
 function skyTexture() {
-  const c = document.createElement('canvas'); c.width = 16; c.height = 512;
+  const c = document.createElement('canvas'); c.width = 512; c.height = 512;
   const g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0, '#12082a'); grad.addColorStop(0.35, '#5a2a4a');
-  grad.addColorStop(0.62, '#c65a2a'); grad.addColorStop(0.8, '#ffb066');
+  grad.addColorStop(0, '#0b0620'); grad.addColorStop(0.28, '#3a1c44');
+  grad.addColorStop(0.5, '#7a3050'); grad.addColorStop(0.68, '#c65a2a');
+  grad.addColorStop(0.82, '#ffb066'); grad.addColorStop(0.94, '#e8905a');
   grad.addColorStop(1, '#3a2410');
-  g.fillStyle = grad; g.fillRect(0, 0, 16, 512);
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 512);
+  const puffs = [
+    [60, 150, 90, 16, 0.20], [180, 120, 120, 18, 0.16], [320, 165, 100, 14, 0.18],
+    [430, 120, 80, 15, 0.14], [250, 200, 130, 16, 0.15], [90, 210, 70, 12, 0.12],
+    [380, 215, 90, 13, 0.12], [150, 90, 60, 10, 0.10], [470, 180, 60, 11, 0.10]
+  ];
+  puffs.forEach(p => {
+    const rg = g.createRadialGradient(p[0], p[1], 2, p[0], p[1], p[2]);
+    rg.addColorStop(0, 'rgba(255,205,170,' + p[4] + ')');
+    rg.addColorStop(1, 'rgba(255,205,170,0)');
+    g.fillStyle = rg;
+    g.save(); g.translate(p[0], p[1]); g.scale(1, p[3] / p[2]); g.translate(-p[0], -p[1]);
+    g.beginPath(); g.arc(p[0], p[1], p[2], 0, Math.PI * 2); g.fill(); g.restore();
+  });
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 const sky = new THREE.Mesh(
@@ -157,14 +174,64 @@ const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
 }));
 sunGlow.scale.set(180, 180, 1); sunGlow.position.set(-160, 55, -600);
 scene.add(sunGlow);
+// Bright sun core disc in front of the glow sprite.
+const sunCore = new THREE.Mesh(
+  new THREE.CircleGeometry(22, 24),
+  new THREE.MeshBasicMaterial({ color: 0xfff3c0, fog: false, transparent: true, opacity: 0.95 })
+);
+sunCore.position.set(-160, 55, -599);
+scene.add(sunCore);
 
-// Ground: dark dry-grass range floor.
+// Ground: dry-grass range floor with a procedural speckle texture, plus a
+// gravel firing-line strip under the bench. Static, cheap, standard material
+// so the warm sun still shades it.
+function groundTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#4a3a1e'; g.fillRect(0, 0, 256, 256);
+  const tones = ['#5a4a26', '#3a2c14', '#6b5a2a', '#7a6a35', '#2e2410', '#54401f'];
+  for (let i = 0; i < 5200; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.globalAlpha = 0.12 + rand(0, 0.25);
+    const s = rand(1, 3);
+    g.fillRect(rand(0, 256), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 0.10;
+  for (let i = 0; i < 24; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.beginPath(); g.arc(rand(0, 256), rand(0, 256), rand(8, 26), 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(12, 12); return t;
+}
+function gravelTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6a6257'; g.fillRect(0, 0, 256, 256);
+  const tones = ['#8a8272', '#4a443c', '#7a7264', '#9a9282', '#5a544a'];
+  for (let i = 0; i < 4200; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.globalAlpha = 0.25 + rand(0, 0.4);
+    const s = rand(1, 4);
+    g.fillRect(rand(0, 256), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 2); return t;
+}
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(600, 600),
-  new THREE.MeshStandardMaterial({ color: 0x4a3a1e, roughness: 1 })
+  new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 })
 );
 ground.rotation.x = -Math.PI / 2; ground.position.y = -1.6;
 scene.add(ground);
+const gravel = new THREE.Mesh(
+  new THREE.PlaneGeometry(10, 6),
+  new THREE.MeshStandardMaterial({ map: gravelTexture(), roughness: 1 })
+);
+gravel.rotation.x = -Math.PI / 2; gravel.position.set(0, -1.58, -1.5);
+scene.add(gravel);
 
 // Firing line: wooden bench + sandbags in front of the player.
 const benchMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.9 });
@@ -173,24 +240,119 @@ bench.position.set(0, -0.55, -1.4); scene.add(bench);
 const benchLegL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.6), benchMat);
 benchLegL.position.set(-1.0, -1.1, -1.4); scene.add(benchLegL);
 const benchLegR = benchLegL.clone(); benchLegR.position.x = 1.0; scene.add(benchLegR);
-const sandMat = new THREE.MeshStandardMaterial({ color: 0x6b5a33, roughness: 1 });
-for (let i = 0; i < 3; i++) {
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.28, 0.4), sandMat);
-  bag.position.set(-0.7 + i * 0.7, -0.42, -1.35); bag.rotation.y = rand(-0.15, 0.15);
-  scene.add(bag);
+function fabricTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6b5a33'; g.fillRect(0, 0, 128, 128);
+  g.globalAlpha = 0.15; g.strokeStyle = '#3a2f18'; g.lineWidth = 1;
+  for (let y = 0; y <= 128; y += 8) { g.beginPath(); g.moveTo(0, y); g.lineTo(128, y); g.stroke(); }
+  for (let x = 0; x <= 128; x += 8) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 128); g.stroke(); }
+  g.globalAlpha = 0.5; g.strokeStyle = '#2e2410'; g.setLineDash([6, 5]); g.lineWidth = 2;
+  g.strokeRect(6, 6, 116, 116); g.setLineDash([]);
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-
-// Mountain silhouettes downrange + on the flanks.
-const mtnMat = new THREE.MeshStandardMaterial({ color: 0x2e1c2e, roughness: 1, flatShading: true });
-[[-260, 60, -520, 220, 90], [220, 70, -540, 260, 110], [0, 90, -580, 320, 130],
- [-420, 40, -380, 200, 60], [430, 45, -400, 220, 70]].forEach(m => {
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(m[3], m[4], 5), mtnMat);
-  cone.position.set(m[0], m[1] - 1.6, m[2]); cone.rotation.y = rand(0, 3);
-  scene.add(cone);
+const sandMat = new THREE.MeshStandardMaterial({ map: fabricTexture(), roughness: 1 });
+// Rounded sandbags, stacked 3 + 2, with a slight random yaw each.
+[[-0.7, -0.40], [0, -0.40], [0.7, -0.40], [-0.35, -0.16], [0.35, -0.16]].forEach(b => {
+  const bag = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), sandMat);
+  bag.scale.set(0.38, 0.15, 0.22);
+  bag.position.set(b[0], b[1], -1.35); bag.rotation.y = rand(-0.2, 0.2);
+  scene.add(bag);
 });
 
+// Layered mountain ridges: jagged silhouette strips with procedural
+// rock/snow canvas textures and baked haze on the far ranges. All static,
+// unlit (basic) materials — no lighting cost, no per-frame work. The old
+// flat cones are gone; these read as real mountains.
+function ridgeTexture(rockTop, rockBottom, snowAmt, hazeAlpha, hazeColor) {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 256, 0, 0);
+  grad.addColorStop(0, rockBottom); grad.addColorStop(0.55, rockTop);
+  grad.addColorStop(0.8, rockTop); grad.addColorStop(1, '#e8e4dc');
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
+  // Rock speckle + strata lines.
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.08)';
+    const s = rand(1, 3);
+    g.fillRect(rand(0, 512), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 0.16; g.strokeStyle = '#000';
+  for (let y = 30; y < 256; y += 12 + Math.floor(rand(0, 12))) {
+    g.beginPath(); g.moveTo(0, y);
+    for (let x = 0; x <= 512; x += 32) g.lineTo(x, y + rand(-3, 3));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  // Noisy snow: white speckles concentrated near the top, fading down.
+  for (let i = 0; i < 1400 * snowAmt; i++) {
+    const y = rand(0, 90);
+    g.fillStyle = 'rgba(240,238,230,' + (0.5 * (1 - y / 110)) + ')';
+    g.fillRect(rand(0, 512), y, rand(1, 4), rand(1, 3));
+  }
+  // Baked atmospheric haze for the far ranges.
+  if (hazeAlpha > 0) { g.fillStyle = hazeColor; g.globalAlpha = hazeAlpha; g.fillRect(0, 0, 512, 256); g.globalAlpha = 1; }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function ridgeProfile(width, minH, maxH, steps) {
+  const pts = [];
+  let h = minH + rand(0, (maxH - minH) * 0.3);
+  for (let i = 0; i <= steps; i++) {
+    const x = -width / 2 + (i / steps) * width;
+    h += rand(-1, 1) * (maxH - minH) * 0.35;
+    h = Math.max(minH, Math.min(maxH, h));
+    if (i % 4 === 2) h = Math.min(maxH, h + (maxH - minH) * 0.35);
+    pts.push([x, h]);
+  }
+  pts[0][1] = minH * 0.5; pts[pts.length - 1][1] = minH * 0.5;
+  return pts;
+}
+function makeRidge(width, xOff, z, baseY, minH, maxH, tex) {
+  const peaks = ridgeProfile(width, minH, maxH, 42);
+  const pos = [], uv = [], idx = [];
+  peaks.forEach((p, i) => {
+    pos.push(p[0] + xOff, baseY, z, p[0] + xOff, baseY + p[1], z);
+    uv.push(i / (peaks.length - 1), 0, i / (peaks.length - 1), 1);
+  });
+  for (let i = 0; i < peaks.length - 1; i++) {
+    const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo,
+    new THREE.MeshBasicMaterial({ map: tex, fog: false, side: THREE.DoubleSide }));
+  scene.add(mesh); return mesh;
+}
+const farTex = ridgeTexture('#5a4a52', '#3a2c38', 1.0, 0.45, 'rgba(150,130,180,1)');
+const midTex = ridgeTexture('#4a382c', '#2e2018', 0.8, 0.20, 'rgba(150,130,180,1)');
+const nearTex = ridgeTexture('#3a2a1e', '#241812', 0.5, 0, 'rgba(0,0,0,0)');
+makeRidge(1100, 0, -560, -1.6, 60, 150, farTex);
+makeRidge(1000, 0, -470, -1.6, 40, 110, midTex);
+makeRidge(900, 0, -380, -1.6, 25, 75, nearTex);
+makeRidge(420, -480, -330, -1.6, 20, 55, nearTex);
+makeRidge(420, 480, -340, -1.6, 20, 60, nearTex);
+
 // Berms + glowing distance markers at each lane.
-const bermMat = new THREE.MeshStandardMaterial({ color: 0x3d2c14, roughness: 1 });
+function dirtTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#3d2c14'; g.fillRect(0, 0, 256, 256);
+  const tones = ['#2e2010', '#4a3820', '#54401f', '#332412'];
+  for (let i = 0; i < 3800; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.globalAlpha = 0.15 + rand(0, 0.3);
+    const s = rand(1, 4);
+    g.fillRect(rand(0, 256), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 1); return t;
+}
+const bermMat = new THREE.MeshStandardMaterial({ map: dirtTexture(), roughness: 1 });
+const bermGrassMat = new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 });
 function markerTexture(text, color) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 128;
   const g = c.getContext('2d');
@@ -208,13 +370,20 @@ const LANES = [
 LANES.forEach(L => {
   const berm = new THREE.Mesh(new THREE.BoxGeometry(90, 3, 4), bermMat);
   berm.position.set(0, -0.1, L.z - 6); scene.add(berm);
+  const bermTop = new THREE.Mesh(new THREE.BoxGeometry(90, 0.35, 4.4), bermGrassMat);
+  bermTop.position.set(0, 1.55, L.z - 6); scene.add(bermTop);
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.5, metalness: 0.7 });
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(9.6, 5.1, 0.2), frameMat);
+  frame.position.set(34, 3.5, L.z - 4.2); scene.add(frame);
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(9, 4.5),
     new THREE.MeshBasicMaterial({ map: markerTexture(L.yd + ' YDS', L.css), transparent: false, fog: false })
   );
   sign.position.set(34, 3.5, L.z - 4); scene.add(sign);
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4, 0.4), benchMat);
-  post.position.set(34, 0, L.z - 4); scene.add(post);
+  [30.5, 37.5].forEach(px => {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 5.2, 0.4), benchMat);
+    post.position.set(px, 0.9, L.z - 4.2); scene.add(post);
+  });
 });
 
 // Wind flags downrange — they swing with the wind so the player can read it
@@ -338,15 +507,26 @@ const laser = new THREE.Mesh(
 laser.renderOrder = 898; laser.visible = false; scene.add(laser);
 const _laserD = new THREE.Vector3();
 
-// ============================== HUD (in-VR plane + desktop DOM) ==============================
-const hudCanvas = document.createElement('canvas'); hudCanvas.width = 640; hudCanvas.height = 260;
+// ============================== Scoreboard: ONE shared arcade cell ==============================
+// Single scoreboard in both forms, same content, same dark translucent cell
+// with a thin neon border: (a) a camera-attached plane in VR, (b) the #hud
+// DOM element on desktop. Key numbers only: score + hits, current rifle,
+// and wind speed/direction (it fits on its own uncrowded line; the old
+// zoom/damage/bolt/drift extras are dropped from the cell, not from the
+// game — rifles, zoom, and the wind flags in the world are untouched).
+// VR view margins (camera FOV 70, depth -1.5): visible half-width and
+// half-height are both ~1.05, so with a 0.80-wide x 0.36-tall cell and a
+// 0.10 margin from the left and top edges, the cell spans x -0.95..-0.15
+// and y 0.59..0.95 — its entire width/height inside the view, top-left.
+// Canvas 640x288 matches the plane aspect (0.80/0.36 = 2.222) so text is undistorted.
+const hudCanvas = document.createElement('canvas'); hudCanvas.width = 640; hudCanvas.height = 288;
 const hctx = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
 const hudMesh = new THREE.Mesh(
-  new THREE.PlaneGeometry(1.15, 0.47),
+  new THREE.PlaneGeometry(0.80, 0.36),
   new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, fog: false })
 );
-hudMesh.position.set(-0.62, -0.52, -1.2); hudMesh.renderOrder = 890;
+hudMesh.position.set(-0.55, 0.77, -1.5); hudMesh.renderOrder = 890;
 camera.add(hudMesh);
 let hudDirty = true;
 const hudEl = document.getElementById('hud');
@@ -354,21 +534,21 @@ function drawHud() {
   const w = WEAPONS[wpnIdx];
   const windArrow = wind.dir > 0 ? '→' : '←';
   const lines = [
-    'SCORE ' + S.score + '   HITS ' + S.hits,
-    w.name + '  ·  ZOOM ' + w.zoom + '×  ·  DMG ' + w.dmg,
-    'ALWAYS LOADED  ·  ' + (w.bolt ? 'BOLT ' + w.bolt.toFixed(1) + 's CYCLE' : 'SEMI-AUTO'),
-    'WIND ' + wind.mph.toFixed(0) + ' mph ' + windArrow + '  ·  600-yd drift ' + Math.abs(windDriftAt(600)).toFixed(1) + ' — aim ' + (wind.dir > 0 ? 'left' : 'right')
+    'SCORE ' + S.score + ' · HITS ' + S.hits,
+    w.name,
+    'WIND ' + wind.mph.toFixed(0) + ' mph ' + windArrow
   ];
-  hctx.clearRect(0, 0, 640, 260);
-  hctx.fillStyle = 'rgba(8,4,2,0.72)'; hctx.fillRect(0, 0, 640, 260);
-  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 3; hctx.strokeRect(4, 4, 632, 252);
+  hctx.clearRect(0, 0, 640, 288);
+  hctx.fillStyle = 'rgba(8,4,2,0.72)'; hctx.fillRect(0, 0, 640, 288);
+  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 4; hctx.strokeRect(4, 4, 632, 280);
+  hctx.font = 'bold 38px Arial';
+  hctx.fillStyle = '#ffd319'; hctx.fillText(lines[0], 20, 60);
+  hctx.font = 'bold 32px Arial';
+  hctx.fillStyle = '#7df9ff'; hctx.fillText(lines[1], 20, 155);
   hctx.font = 'bold 30px Arial';
-  hctx.fillStyle = '#ffd319'; hctx.fillText(lines[0], 20, 48);
-  hctx.fillStyle = '#7df9ff'; hctx.fillText(lines[1], 20, 98);
-  hctx.fillStyle = '#bfe3ff'; hctx.fillText(lines[2], 20, 148);
-  hctx.fillStyle = '#2bff88'; hctx.fillText(lines[3], 20, 198);
+  hctx.fillStyle = '#2bff88'; hctx.fillText(lines[2], 20, 250);
   hudTex.needsUpdate = true;
-  hudEl.textContent = lines.join('\n');
+  hudEl.innerHTML = '<b>' + lines[0] + '</b>\n' + lines[1] + '\n<span class="wind">' + lines[2] + '</span>';
 }
 
 // ============================== audio (original synth) ==============================
@@ -505,6 +685,18 @@ function addTarget(kind, x, y, z, r, hp, pts, laneColor) {
     }
   }
   group.add(body);
+  if (kind === 'plate') {
+    // Static range stand: two legs + crossbar, left in the world (not the
+    // group) so the plate can tip off it when downed. All plates bottom
+    // out at y = 0, ground is at -1.6, so one 1.7-tall stand fits all.
+    const legGeo = new THREE.BoxGeometry(0.18, 1.7, 0.18);
+    [-r * 0.6, r * 0.6].forEach(dx => {
+      const leg = new THREE.Mesh(legGeo, steelDark);
+      leg.position.set(x + dx, -0.75, z + 0.35); scene.add(leg);
+    });
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(r * 1.5, 0.18, 0.18), steelDark);
+    bar.position.set(x, -0.05, z + 0.35); scene.add(bar);
+  }
   group.position.set(x, y, z);
   group.userData = { body, baseX: x, baseY: y, baseZ: z };
   scene.add(group);

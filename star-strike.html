@@ -32,9 +32,9 @@
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
   #hud {
     position:fixed; left:12px; top:52px; z-index:5;
-    color:#7df9ff; font-size:13px; font-weight:800; letter-spacing:1px;
+    color:#7df9ff; font-size:14px; font-weight:800; letter-spacing:1px; line-height:1.5;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
-    background:rgba(2,8,24,.55); border:1px solid rgba(39,232,255,.4); border-radius:8px; padding:6px 10px;
+    background:rgba(2,8,24,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px;
   }
   #banner {
     position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
@@ -75,7 +75,7 @@
   </div>
 </div>
 
-<div id="hud">SCORE 0</div>
+<div id="hud">SCORE 0 &nbsp;·&nbsp; WAVE 1 &nbsp;·&nbsp; HULL 100/100</div>
 <div id="banner"></div>
 <button id="muteBtn">SOUND: ON</button>
 <button id="recallBtn">RECALL SHIP</button>
@@ -325,6 +325,35 @@ function glowTexture() {
   return tex;
 }
 const glowTex = glowTexture();
+// Shared procedural regolith texture for asteroids: gray-brown rock with
+// darker patches, crater dots, and speckle noise. One texture shared by all
+// rocks (one-time cost); per-rock variety comes from geometry and tint.
+function rockTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = '#8a7f72'; x.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 40; i++) { // darker mineral patches
+    x.fillStyle = 'rgba(60,52,44,' + (0.08 + Math.random() * 0.14) + ')';
+    x.beginPath();
+    x.ellipse(Math.random() * 256, Math.random() * 256, 12 + Math.random() * 42, 8 + Math.random() * 30, Math.random() * 3, 0, 7);
+    x.fill();
+  }
+  for (let i = 0; i < 26; i++) { // craters: dark pit + light rim arc
+    const cx = Math.random() * 256, cy = Math.random() * 256, r = 3 + Math.random() * 11;
+    x.fillStyle = 'rgba(40,34,28,0.55)';
+    x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill();
+    x.strokeStyle = 'rgba(200,190,175,0.35)'; x.lineWidth = 1.5;
+    x.beginPath(); x.arc(cx, cy, r, Math.PI * 0.9, Math.PI * 1.9); x.stroke();
+  }
+  for (let i = 0; i < 2600; i++) { // speckle noise
+    x.fillStyle = Math.random() < 0.5 ? 'rgba(50,44,38,0.25)' : 'rgba(210,200,185,0.22)';
+    x.fillRect(Math.random() * 256, Math.random() * 256, 1.5, 1.5);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const rockTex = rockTexture();
 // Neon Invaders VR glow helper: white-core sprite, tinted by color, additive,
 // tone-mapping- and fog-exempt so neon stays pure and bright at any distance.
 function glowSprite(color, scale, opacity) {
@@ -349,8 +378,9 @@ const MAT = {
   enemyRing: new THREE.MeshStandardMaterial({ color: 0x1a0f2e, metalness: 0.85, roughness: 0.35, emissive: 0xff3df0, emissiveIntensity: 0.4 }),
   shard: new THREE.MeshStandardMaterial({ color: 0x0e5159, emissive: 0x27e8ff, emissiveIntensity: 0.55, metalness: 0.3, roughness: 0.35 }),
   shardFin: new THREE.MeshStandardMaterial({ color: 0x0e5159, metalness: 0.8, roughness: 0.3, emissive: 0x27e8ff, emissiveIntensity: 0.8 }),
-  rock: new THREE.MeshStandardMaterial({ color: 0x141a2e, roughness: 0.9, flatShading: true, emissive: 0x27e8ff, emissiveIntensity: 0.12 }),
-  rockDark: new THREE.MeshStandardMaterial({ color: 0x0e1220, roughness: 1.0, flatShading: true, emissive: 0x7b2d8b, emissiveIntensity: 0.12 }),
+  rock: new THREE.MeshStandardMaterial({ color: 0x9a8d7d, map: rockTex, roughness: 1.0, flatShading: true }),
+  rockMid: new THREE.MeshStandardMaterial({ color: 0x84796a, map: rockTex, roughness: 1.0, flatShading: true }),
+  rockDark: new THREE.MeshStandardMaterial({ color: 0x6f665b, map: rockTex, roughness: 1.0, flatShading: true }),
   boltP: new THREE.MeshBasicMaterial({ color: 0xbffcff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
   boltE: new THREE.MeshBasicMaterial({ color: 0xff5566, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
   plasma: new THREE.MeshBasicMaterial({ color: 0xff55ff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
@@ -472,56 +502,104 @@ muzzle.scale.set(1.4, 1.4, 1);
 scene.add(muzzle);
 let muzzleT = 0;
 
-// ============================== HUD (3D visor panel + DOM fallback) ==============================
+// ============================== SCOREBOARD CELL (shared arcade cell) ==============================
+// ONE small dark translucent rectangular cell with a thin neon border, top-left
+// of the view, in the neon house style shared across the arcade. Two forms of
+// the SAME scoreboard: (a) this camera-attached plane in VR, (b) the #hud DOM
+// element on desktop. Key numbers only: SCORE + WAVE + HULL (the one extra
+// essential this game already tracks). No other scoreboard exists on screen.
+// VIEW MARGINS (camera FOV 70°, depth -1.5): visible half-width ≈ 1.05 and
+// visible half-height = 1.5·tan(35°) ≈ 1.05, so the view spans about ±1.05.
+// Cell 0.80 wide at center x −0.55 → left edge −0.95 (0.10 margin from the
+// left edge), right edge −0.15. Cell 0.20 tall at center y 0.85 → top edge
+// 0.95 (0.10 margin below the view top), bottom edge 0.75. Entire cell fits.
 const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 640; hudCanvas.height = 300;
+hudCanvas.width = 640; hudCanvas.height = 160;
 const hctx = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
 const hudPanel = new THREE.Mesh(
-  new THREE.PlaneGeometry(1.05, 0.49),
+  new THREE.PlaneGeometry(0.80, 0.20),
   new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false })
 );
 hudPanel.renderOrder = 999;
-hudPanel.position.set(-0.98, 0.62, -1.5); // small, top-left of the view — never center-screen
+hudPanel.position.set(-0.55, 0.85, -1.5);
 camera.add(hudPanel);
+// Pre-existing RAVAGER boss bar, preserved as its own transient bar directly
+// below the scoreboard cell (NOT part of the cell, NOT a second scoreboard):
+// same label/bar colours and bossHp/bossMax maths as before, visible only
+// while a boss is alive. 0.80 wide at center x −0.55 → left −0.95, right −0.15;
+// 0.08 tall at center y 0.68 → top 0.72 (0.03 gap below the cell), bottom 0.64.
+const bossCanvas = document.createElement('canvas');
+bossCanvas.width = 640; bossCanvas.height = 64;
+const bossCtx = bossCanvas.getContext('2d');
+const bossTex = new THREE.CanvasTexture(bossCanvas);
+const bossBarMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.80, 0.08),
+  new THREE.MeshBasicMaterial({ map: bossTex, transparent: true, depthTest: false })
+);
+bossBarMesh.renderOrder = 999;
+bossBarMesh.position.set(-0.55, 0.68, -1.5);
+bossBarMesh.visible = false;
+camera.add(bossBarMesh);
+// Pre-existing wave/tier announcement line (S.msg), likewise preserved as its
+// own transient line below the boss bar (NOT part of the scoreboard cell):
+// same text, colour and msgT timing as the old panel's message row, visible
+// only while a message is set. 0.80 wide at center x −0.55 → left −0.95,
+// right −0.15; 0.08 tall at center y 0.57 → top 0.61 (0.03 gap below the boss
+// bar), bottom 0.53. Banners themselves (bannerMesh / #banner) are untouched.
+const msgCanvas = document.createElement('canvas');
+msgCanvas.width = 640; msgCanvas.height = 64;
+const msgCtx = msgCanvas.getContext('2d');
+const msgTex = new THREE.CanvasTexture(msgCanvas);
+const msgMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.80, 0.08),
+  new THREE.MeshBasicMaterial({ map: msgTex, transparent: true, depthTest: false })
+);
+msgMesh.renderOrder = 999;
+msgMesh.position.set(-0.55, 0.57, -1.5);
+msgMesh.visible = false;
+camera.add(msgMesh);
 const hudEl = document.getElementById('hud');
 let hudDirty = true;
 function drawHUD(state) {
   if (!hudDirty) return;
   hudDirty = false;
-  hctx.clearRect(0, 0, 640, 300);
-  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 640, 300);
-  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 3; hctx.strokeRect(4, 4, 632, 292);
-  hctx.font = 'bold 32px Arial'; hctx.fillStyle = '#7df9ff';
-  hctx.fillText('SCORE ' + state.score, 22, 46);
-  hctx.fillStyle = '#ffd319'; hctx.fillText('WAVE ' + state.wave, 330, 46);
-  hctx.fillStyle = '#ff5566'; hctx.font = 'bold 26px Arial'; hctx.fillText('HULL', 22, 96);
-  hctx.fillStyle = '#123'; hctx.fillRect(110, 72, 300, 26);
+  hctx.clearRect(0, 0, 640, 160);
+  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 640, 160);
+  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 3; hctx.strokeRect(3, 3, 634, 154);
+  hctx.textAlign = 'left';
+  hctx.font = 'bold 42px Arial'; hctx.fillStyle = '#7df9ff';
+  hctx.fillText('SCORE ' + state.score, 22, 60);
+  hctx.textAlign = 'right'; hctx.fillStyle = '#ffd319';
+  hctx.fillText('WAVE ' + state.wave, 618, 60);
+  hctx.textAlign = 'left';
+  hctx.font = 'bold 36px Arial';
   hctx.fillStyle = state.hull > state.maxHull * 0.3 ? '#33ff88' : '#ff5566';
-  hctx.fillRect(110, 72, 300 * Math.max(0, state.hull) / state.maxHull, 26);
-  hctx.fillStyle = '#bfe3ff';
-  hctx.fillText(Math.max(0, Math.round(state.hull)) + '/' + state.maxHull, 420, 96);
-  hctx.fillStyle = '#33ffcc'; hctx.fillText('SHIELD ' + Math.max(0, Math.round(state.shield)), 22, 134);
-  hctx.fillStyle = '#bfe3ff'; hctx.fillText('RETRIES ' + state.retries, 330, 134);
-  // Weapons row — the 3 equipped slots by name (empty slots shown as —)
-  const u = state.upg;
-  hctx.font = 'bold 22px Arial'; hctx.fillStyle = '#7df9ff';
-  hctx.fillText('WEAPONS  ' + slotLabel() + (state.slots.includes('nova') ? '  (NOVA x' + state.nova + ')' : ''), 22, 172);
-  hctx.fillStyle = '#ffd319';
-  hctx.fillText('UPGRADES  PLATE x' + u.plate + '  CELL x' + u.cell + '  ENG x' + u.engine + '  PWR x' + u.power, 22, 204);
-  // Difficulty tier + next goal — always visible
-  const nextAt = (state.tier + 1) * 10000;
-  hctx.font = 'bold 22px Arial'; hctx.fillStyle = '#ff7e47';
-  hctx.fillText('TIER ' + state.tier + '  ·  NEXT TIER AT ' + nextAt + ' PTS (' + Math.max(0, nextAt - state.score) + ' TO GO)', 22, 272);
-  if (state.bossHp > 0) {
-    hctx.fillStyle = '#ff3355'; hctx.font = 'bold 26px Arial'; hctx.fillText('RAVAGER', 22, 248);
-    hctx.fillStyle = '#123'; hctx.fillRect(150, 228, 400, 18);
-    hctx.fillStyle = '#ff3355'; hctx.fillRect(150, 228, 400 * state.bossHp / state.bossMax, 18);
-  } else if (state.msg) {
-    hctx.fillStyle = '#ffd319'; hctx.font = 'bold 26px Arial'; hctx.fillText(state.msg, 22, 248);
-  }
+  hctx.fillText('HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull, 22, 124);
   hudTex.needsUpdate = true;
-  hudEl.textContent = 'SCORE ' + state.score + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull + '  ·  SHIELD ' + Math.max(0, Math.round(state.shield)) + '  ·  WAVE ' + state.wave + '  ·  ' + slotLabel();
+  if (state.bossHp > 0) {
+    bossCtx.clearRect(0, 0, 640, 64);
+    bossCtx.fillStyle = 'rgba(2,8,24,0.72)'; bossCtx.fillRect(0, 0, 640, 64);
+    bossCtx.fillStyle = '#ff3355'; bossCtx.font = 'bold 26px Arial'; bossCtx.textAlign = 'left';
+    bossCtx.fillText('RAVAGER', 16, 42);
+    bossCtx.fillStyle = '#123'; bossCtx.fillRect(150, 20, 400, 24);
+    bossCtx.fillStyle = '#ff3355'; bossCtx.fillRect(150, 20, 400 * state.bossHp / state.bossMax, 24);
+    bossTex.needsUpdate = true;
+    bossBarMesh.visible = true;
+  } else {
+    bossBarMesh.visible = false;
+  }
+  if (state.msg) {
+    msgCtx.clearRect(0, 0, 640, 64);
+    msgCtx.fillStyle = 'rgba(2,8,24,0.72)'; msgCtx.fillRect(0, 0, 640, 64);
+    msgCtx.fillStyle = '#ffd319'; msgCtx.font = 'bold 26px Arial'; msgCtx.textAlign = 'center';
+    msgCtx.fillText(state.msg, 320, 42);
+    msgTex.needsUpdate = true;
+    msgMesh.visible = true;
+  } else {
+    msgMesh.visible = false;
+  }
+  hudEl.textContent = 'SCORE ' + state.score + '  ·  WAVE ' + state.wave + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull;
 }
 
 // ============================== pickup banner (DOM + in-VR 3D banner) ==============
@@ -818,24 +896,37 @@ function makeShard() {
 for (let i = 0; i < 16; i++) ENEMIES.push(makeDrone());
 for (let i = 0; i < 10; i++) ENEMIES.push(makeShard());
 
-// Asteroids with jittered-vertex surface detail (each rock unique)
-function jitteredRockGeo() {
-  const g = new THREE.IcosahedronGeometry(1.0, 1);
+// Realistic craggy asteroids: direction-based smooth-noise displacement.
+// The old per-vertex-index random scale tore the non-indexed icosahedron
+// apart (coincident vertices got different scales) and the dark blue/purple
+// emissive materials read as glowing blobs, not rock. Displacement here is
+// a smooth function of each vertex DIRECTION only, so coincident vertices
+// move identically — no cracks — and each rock gets its own seed. One-time
+// cost at spawn; tumble rotation is the only per-frame cost.
+function craggyRockGeo(seed) {
+  const g = new THREE.IcosahedronGeometry(1.0, 2);
   const pos = g.attributes.position;
   for (let i = 0; i < pos.count; i++) {
-    const s = rand(0.75, 1.25);
-    pos.setXYZ(i, pos.getX(i) * s, pos.getY(i) * s, pos.getZ(i) * s);
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const len = Math.hypot(x, y, z) || 1;
+    const dx = x / len, dy = y / len, dz = z / len;
+    const n = 0.86
+      + 0.14 * Math.sin(3.1 * dx + seed) * Math.sin(2.7 * dy + seed * 1.3)
+      + 0.10 * Math.sin(5.3 * dy + seed * 0.7) * Math.sin(4.1 * dz + seed * 2.1)
+      + 0.08 * Math.sin(7.7 * dz + seed);
+    pos.setXYZ(i, x * n, y * n, z * n);
   }
   g.computeVertexNormals();
   return g;
 }
 const ROCKS = [];
+const ROCK_MATS = [MAT.rock, MAT.rockMid, MAT.rockDark];
 for (let i = 0; i < 14; i++) {
-  const m = new THREE.Mesh(jitteredRockGeo(), i % 2 === 0 ? MAT.rock : MAT.rockDark);
+  const m = new THREE.Mesh(craggyRockGeo(rand(0, 6.28)), ROCK_MATS[i % 3]);
   const s = rand(0.5, 1.6);
   m.scale.set(s, s * rand(0.7, 1.2), s);
   m.visible = false; scene.add(m);
-  ROCKS.push({ m, on: false, vx: 0, vy: 0, vz: 0, rx: rand(0, 3), ry: rand(0, 3) });
+  ROCKS.push({ m, on: false, vx: 0, vy: 0, vz: 0, rx: rand(0, 3), ry: rand(0, 3), rz: rand(0, 3) });
 }
 
 // Pickups: one pool entry per kind (x2) — weapons equip into max 3 slots, upgrades stack without limit
@@ -1451,7 +1542,7 @@ function tick() {
     for (const r of ROCKS) {
       if (!r.on) continue;
       r.m.position.x += r.vx * dt; r.m.position.y += r.vy * dt; r.m.position.z += r.vz * dt;
-      r.m.rotation.x += r.rx * dt; r.m.rotation.y += r.ry * dt;
+      r.m.rotation.x += r.rx * dt; r.m.rotation.y += r.ry * dt; r.m.rotation.z += r.rz * dt;
       if (r.m.position.z > 8) { r.on = false; r.m.visible = false; continue; }
       let broken = false;
       for (const list of [pBolts, pPlasma]) {

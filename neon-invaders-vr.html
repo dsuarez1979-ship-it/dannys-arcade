@@ -34,8 +34,12 @@
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
   #hud {
-    position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:5;
-    color:#7df9ff; font-size:17px; font-weight:800; letter-spacing:1px;
+    /* Shared arcade scoreboard cell (desktop form): small dark translucent
+       rectangle with a thin neon border, top-left. Mirrors the VR cell. */
+    position:fixed; left:12px; top:12px; z-index:5;
+    background:rgba(8,10,26,.78); border:1px solid #27e8ff; border-radius:8px;
+    padding:8px 12px;
+    color:#7df9ff; font-size:15px; font-weight:800; letter-spacing:1px;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
   }
   #muteBtn {
@@ -409,13 +413,25 @@ function makePanel(w, h) {
   tex.colorSpace = THREE.SRGBColorSpace;
   return { cv, ctx: cv.getContext('2d'), tex };
 }
-// Score panel, floating left of the formation
-const scorePanel = makePanel(3.6, 2.55);
-const scoreMesh = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.55),
-  new THREE.MeshBasicMaterial({ map: scorePanel.tex, toneMapped: false, fog: false }));
-scoreMesh.position.set(-10.1, 6.9, -13.4);
-scoreMesh.rotation.y = 0.38;
-scene.add(scoreMesh);
+// SCOREBOARD CELL (shared arcade design, the game's ONLY scoreboard):
+// a small dark translucent rectangle with a thin neon border, top-left.
+// VR form: a camera-attached plane (same trick as the hit-flash quads, so it
+// follows the headset). Desktop form: the #hud DOM cell, same numbers.
+// VIEW-MARGIN MATH (Marsh Shot lesson): at depth -1.5, camera FOV 72 gives a
+// visible half-height of tan(36deg) x 1.5 = ~1.09 and a visible half-width of
+// only ~1.05. Cell 0.8 wide x 0.26 tall, centred at (-0.55, 0.88, -1.5):
+// left edge -0.95 (0.10 margin from the -1.05 left edge), right edge -0.15,
+// top edge 1.01 (0.08 margin below the 1.09 view top), bottom edge 0.75.
+// The whole cell fits inside the view on Quest and desktop — never parked
+// half off-screen. Visible only while an XR session is presenting; on
+// desktop the DOM cell is shown instead (see tick()).
+const scorePanel = makePanel(0.8, 0.26);
+const scoreMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.26),
+  new THREE.MeshBasicMaterial({ map: scorePanel.tex, transparent: true, toneMapped: false, fog: false, depthTest: false }));
+scoreMesh.position.set(-0.55, 0.88, -1.5);
+scoreMesh.renderOrder = 997;
+scoreMesh.visible = false;
+camera.add(scoreMesh);
 // Announcement panel, centre above the formation (WAVE N / warnings / bonuses)
 const annPanel = makePanel(7.2, 1.8);
 const annMesh = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 1.8),
@@ -484,7 +500,7 @@ function assignElites() {
     pick.elite = true; pick.hp = 2; pick.points = pick.def.points * 2;
   }
 }
-let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnGear = '', drawnTier = -1, drawnSurge = false;
+let drawnScore = -1, drawnWave = -1, drawnLost = -1;
 const hud = document.getElementById('hud');
 let hudText = '';
 // Weapons: PICKUPS ONLY, max 3 equipped at once (Danny's rule — the old
@@ -513,10 +529,10 @@ function slotShortString() {
 function gearString() {
   return 'W[' + slotString() + '] | F' + U.rate + ' H' + U.shield + ' P' + U.power + ' V' + U.speed;
 }
-// ROUND-2 FREEZE FIX: the score panel canvas re-uploads its texture to the GPU
-// on every redraw, so per-kill redraws stalled VR at high kill rates. Score
-// changes now only mark the panel dirty (markScoreDirty), and tick() flushes
-// the redraw at most 4 times per second — never per kill.
+// ROUND-2 FREEZE FIX: the scoreboard cell canvas re-uploads its texture to
+// the GPU on every redraw, so per-kill redraws stalled VR at high kill rates.
+// Score changes now only mark the cell dirty (markScoreDirty), and tick()
+// flushes the redraw at most 4 times per second — never per kill.
 let scorePanelDirty = true;
 let scorePanelTimer = 0;
 function markScoreDirty() { scorePanelDirty = true; }
@@ -529,34 +545,27 @@ function flushScorePanel(dt) {
   }
 }
 function drawScorePanel() {
-  const gear = gearString();
-  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && gear === drawnGear && tier === drawnTier && surgeWave === drawnSurge) return;
-  drawnScore = score; drawnWave = wave; drawnLost = shipsLost; drawnGear = gear; drawnTier = tier; drawnSurge = surgeWave;
+  // The cell shows key numbers only — score, wave, and ships lost (the one
+  // extra stat the game already tracks). No new scoring, no scoring-logic
+  // change: tier/SURGE/gear info still arrives via announcements and pickup
+  // labels, exactly as before. Same numbers go to both forms of the cell.
+  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost) return;
+  drawnScore = score; drawnWave = wave; drawnLost = shipsLost;
   const g = scorePanel.ctx, W2 = scorePanel.cv.width, H = scorePanel.cv.height;
-  g.fillStyle = 'rgba(8,10,26,0.88)'; g.fillRect(0, 0, W2, H);
-  g.strokeStyle = '#27e8ff'; g.lineWidth = 5; g.strokeRect(5, 5, W2 - 10, H - 10);
+  g.clearRect(0, 0, W2, H);
+  g.fillStyle = 'rgba(8,10,26,0.78)'; g.fillRect(0, 0, W2, H);
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 4; g.strokeRect(3, 3, W2 - 6, H - 6);
   g.textAlign = 'left';
-  g.fillStyle = '#7df9ff'; g.font = '900 34px Arial';
-  g.fillText('NEON INVADERS VR', 28, 52);
-  g.fillStyle = '#eaf6ff'; g.font = '900 84px Arial';
-  g.fillText(String(score).padStart(6, '0'), 28, 148);
-  g.font = '700 30px Arial'; g.fillStyle = '#8fb4d9';
-  g.fillText('SCORE', 30, 184);
-  g.fillStyle = '#2bff88'; g.font = '900 44px Arial'; g.textAlign = 'right';
-  g.fillText('WAVE ' + wave, W2 - 28, 148);
-  g.fillStyle = '#ffb3d9'; g.font = '700 30px Arial';
-  g.fillText('SHIPS LOST ' + shipsLost, W2 - 28, 184);
-  g.textAlign = 'center';
-  g.fillStyle = '#27e8ff'; g.font = '700 20px Arial';
-  g.fillText('WEAPONS  ' + slotShortString(), W2 / 2, 222);
-  g.fillStyle = '#2bff88'; g.font = '700 26px Arial';
-  g.fillText('UPGRADES  F' + U.rate + '  H' + U.shield + '  P' + U.power + '  V' + U.speed, W2 / 2, 256);
-  g.fillStyle = surgeWave ? '#ff2e88' : '#ffd319'; g.font = '700 26px Arial';
-  g.fillText(surgeWave ? 'SURGE WAVE - DOUBLE POINTS - TIER ' + tier : 'TIER ' + tier + ' - NEXT TIER IN ' + (TIER_POINTS - (score % TIER_POINTS)) + ' PTS', W2 / 2, 292);
-  g.fillStyle = '#ffd319'; g.font = '700 26px Arial';
-  g.fillText('SHIPS: ∞ UNLIMITED  ·  WEAPONS: 3 SLOTS MAX', W2 / 2, H - 22);
+  g.fillStyle = '#eaf6ff'; g.font = '900 52px Arial';
+  g.fillText('SCORE ' + String(score).padStart(6, '0'), 24, 68);
+  g.font = '700 32px Arial';
+  g.fillStyle = '#2bff88';
+  const waveText = 'WAVE ' + wave;
+  g.fillText(waveText, 24, 128);
+  g.fillStyle = '#ffb3d9';
+  g.fillText(' · SHIPS LOST ' + shipsLost, 24 + g.measureText(waveText).width, 128);
   scorePanel.tex.needsUpdate = true;
-  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · TIER ' + tier + ' · NEXT TIER IN ' + (TIER_POINTS - (score % TIER_POINTS)) + ' PTS' + (surgeWave ? ' · SURGE!' : '') + ' · SHIPS LOST ' + shipsLost + ' · ' + gear;
+  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost;
   if (t !== hudText) { hudText = t; hud.textContent = t; }
 }
 drawScorePanel();
@@ -1327,11 +1336,15 @@ function resetFormation(fullRestore) {
   }
   // Divers live in world space (children of scene); put every invader back
   // into formation-local space so the next wave marches correctly.
+  // DIVER FIX: on a landing (fullRestore=false) an active diver keeps flying
+  // to the rail — yanking it back to the formation made divers vanish mid-dive.
+  // Only a full wave restore clears divers.
   for (const v of invaders) {
+    if (v.diving && !fullRestore) continue;
     if (v.diving || v.grp.parent !== formation) { formation.add(v.grp); v.grp.position.set(v.lx, v.ly, 0); v.grp.rotation.set(0, 0, 0); }
     v.diving = false;
   }
-  divers.length = 0;
+  if (fullRestore) divers.length = 0;
   formX = 0; marchDir = 1;
   formY = Math.max(FORM_TOP_Y - (wave - 1) * 0.3, 7.4);
   formation.position.set(formX, formY, FORM_Z);
@@ -1359,7 +1372,7 @@ function startGame() {
   W.spread = W.twin = W.rail = W.seeker = W.bomb = 0;
   equipped.length = 0;
   U.rate = U.shield = U.power = U.speed = 0;
-  drawnScore = drawnWave = drawnLost = -1; drawnGear = ''; drawnTier = -1; drawnSurge = false;
+  drawnScore = drawnWave = drawnLost = -1;
   cannonX = 0;
   for (const p of pickups) { p.active = false; p.grp.visible = false; }
   for (const m of missiles) { m.active = false; m.grp.visible = false; }
@@ -1700,7 +1713,11 @@ function startDiver() {
   v.diving = true; v.diveT = 0;
   v.diveDur = Math.max(2.6, 5.0 - wave * 0.25 - tier * 0.15); // STEEP RAMP: dives get faster every wave/tier; 2.6s floor keeps them dodgeable
   v.diveX0 = wx; v.diveY0 = wy;
-  v.diveX1 = clamp(cannonX + rand(-0.8, 0.8), RAIL_MIN, RAIL_MAX); v.diveY1 = 1.9;
+  // DIVER FIX: the rail target is clamped to the forward view cone (±0.9 =
+  // tan(30°) × rail distance 1.6). Diving at an off-center cannon let the diver
+  // slide out of the player's view sideways as it closed in — it "disappeared"
+  // mid-dive. Arrival still counts exactly like a bomb hit.
+  v.diveX1 = clamp(cannonX + rand(-0.8, 0.8), -0.9, 0.9); v.diveY1 = 1.9;
   // Brighter than formation invaders: oversized glow (pulsed per frame below).
   v.grp.children[v.grp.children.length - 1].scale.set(4.2, 4.2, 1);
   divers.push(v);
@@ -1720,10 +1737,17 @@ function updateDivers(dt) {
     v.diveT += dt;
     const t = Math.min(v.diveT / v.diveDur, 1);
     const ease = t * t * (3 - 2 * t);
-    const sway = Math.sin(t * Math.PI * 2 + v.phase) * (1 - t) * 1.2;
-    v.grp.position.x = v.diveX0 + (v.diveX1 - v.diveX0) * ease + sway;
+    // DIVER FIX: sway starts at zero (the old form was nonzero at t=0, which
+    // would teleport the diver on its first frame once the cone clamp applies).
+    const sway = Math.sin(t * Math.PI) * Math.sin(t * Math.PI * 2 + v.phase) * 1.2;
+    const diveZ = FORM_Z + (RAIL_Z - FORM_Z) * ease;
+    // DIVER FIX: keep the diver inside the forward view cone for the whole dive.
+    // At close range a fixed x subtends a huge angle (x=2 at z=-1.6 is 51° off
+    // axis, far outside the ~35° half-FOV), so clamp x to tan(30°) × distance.
+    const coneX = Math.abs(diveZ) * 0.577;
+    v.grp.position.x = clamp(v.diveX0 + (v.diveX1 - v.diveX0) * ease + sway, -coneX, coneX);
     v.grp.position.y = v.diveY0 + (v.diveY1 - v.diveY0) * ease + Math.sin(t * Math.PI) * 1.2;
-    v.grp.position.z = FORM_Z + (RAIL_Z - FORM_Z) * ease;
+    v.grp.position.z = diveZ;
     v.grp.rotation.z = Math.cos(t * Math.PI * 2 + v.phase) * 0.4;
     const gs = 4.0 + Math.sin(elapsed * 10 + v.phase) * 0.8;
     v.grp.children[v.grp.children.length - 1].scale.set(gs, gs, 1);
@@ -1805,6 +1829,14 @@ function tick() {
   if (!degraded && avgFrameMs > 20) degraded = true;
   else if (degraded && avgFrameMs < 16) degraded = false;
   const presenting = renderer.xr.isPresenting;
+
+  // ONE scoreboard, one visible form at a time: the camera-attached VR cell
+  // while presenting, the top-left DOM cell on desktop preview. (The DOM is
+  // invisible inside an immersive session anyway; this keeps the two forms
+  // from ever doubling up on desktop.)
+  scoreMesh.visible = presenting;
+  if (mode === 'play') hud.style.display = presenting ? 'none' : 'block';
+  else hud.style.display = 'none';
 
   if (mode === 'play') {
     const fire = pollInput(dt);

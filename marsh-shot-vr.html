@@ -16,7 +16,7 @@
   .backlink { margin-top: 18px; font-size: 16px; }
   .backlink a { color: #27e8ff; }
   #status { margin-top: 12px; color: #ffd319; font-size: 15px; min-height: 20px; }
-  #hud { position: fixed; top: 10px; left: 10px; z-index: 5; background: rgba(2, 8, 24, 0.72); border: 3px solid #27e8ff; box-shadow: 0 0 18px #ff2fd6; border-radius: 10px; padding: 10px 14px; color: #7df9ff; font-weight: bold; font-size: 17px; line-height: 1.5; pointer-events: none; }
+  #hud { position: fixed; top: 10px; left: 10px; z-index: 5; background: rgba(2, 8, 24, 0.72); border: 2px solid #27e8ff; box-shadow: 0 0 14px rgba(255, 47, 214, 0.45); border-radius: 8px; padding: 8px 12px; color: #7df9ff; font-weight: bold; font-size: 16px; line-height: 1.45; white-space: nowrap; pointer-events: none; }
   #hud b { color: #ffd319; }
   #banner { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); z-index: 6; display: none; background: rgba(2, 8, 24, 0.8); border: 3px solid #ffd319; box-shadow: 0 0 24px #27e8ff; color: #ffd319; font-weight: bold; font-size: 30px; padding: 12px 26px; border-radius: 12px; pointer-events: none; text-align: center; }
   #cross { position: fixed; z-index: 4; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 3px solid #27e8ff; border-radius: 50%; box-shadow: 0 0 12px #ff2fd6; pointer-events: none; display: none; }
@@ -25,7 +25,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hud">SCORE <b id="hScore">0</b> &nbsp;·&nbsp; ROUND <b id="hRound">1</b><br>BIRDS <b id="hBirds">0/10</b> &nbsp;·&nbsp; ACCURACY <b id="hAcc">—</b><br>STREAK <b id="hStreak">0</b></div>
+<div id="hud">SCORE <b id="hScore">0</b><br>ROUND <b id="hRound">1</b> · BIRDS <b id="hBirds">0/10</b> · STREAK <b id="hStreak">0</b></div>
 <div id="banner"></div>
 <div id="cross"></div>
 <div class="panel" id="panel">
@@ -540,15 +540,20 @@ const S = { mode: 'menu', score: 0, round: 1, spawned: 0, resolved: 0, hits: 0, 
 let hudDirty = true;
 const hudEls = {
   score: document.getElementById('hScore'), round: document.getElementById('hRound'),
-  birds: document.getElementById('hBirds'), acc: document.getElementById('hAcc'), streak: document.getElementById('hStreak')
+  birds: document.getElementById('hBirds'), streak: document.getElementById('hStreak')
 };
-// In-VR scoreboard: small neon-edged canvas plane, top-left of the view.
-const hudCanvas = document.createElement('canvas'); hudCanvas.width = 512; hudCanvas.height = 224;
+// Shared arcade scoreboard cell, TOP-LEFT in VR and on desktop (same numbers
+// in both forms; one cell only, no duplicate). VIEW-MARGIN MATH at depth -1.5:
+// visible half-width/height ≈ 1.05, so with a 0.10 margin the left edge sits at
+// -0.95 and the top edge at 0.95. Cell 0.80 wide × 0.30 tall → center
+// (-0.95 + 0.80/2, 0.95 - 0.30/2) = (-0.55, 0.80). Edges: left -0.95, right
+// -0.15, top 0.95, bottom 0.65 — the whole cell fits inside the view.
+const hudCanvas = document.createElement('canvas'); hudCanvas.width = 512; hudCanvas.height = 192;
 const hctx = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
-const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.46),
+const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.80, 0.30),
   new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false }));
-hudMesh.renderOrder = 1000; hudMesh.position.set(0, 0.62, -1.5); hudMesh.visible = false;
+hudMesh.renderOrder = 1000; hudMesh.position.set(-0.55, 0.80, -1.5); hudMesh.visible = false;
 camera.add(hudMesh);
 const bannerEl = document.getElementById('banner');
 let bannerTimer = null;
@@ -563,18 +568,14 @@ function updateHUD() {
   hudEls.score.textContent = S.score;
   hudEls.round.textContent = S.round;
   hudEls.birds.textContent = Math.min(S.resolved, 10) + '/10';
-  hudEls.acc.textContent = S.shots ? Math.round(S.hits / S.shots * 100) + '%' : '—';
   hudEls.streak.textContent = S.streak;
-  hctx.clearRect(0, 0, 512, 224);
-  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 512, 224);
-  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 4; hctx.strokeRect(4, 4, 504, 216);
-  hctx.font = 'bold 34px Arial'; hctx.fillStyle = '#ffd319';
-  hctx.fillText('SCORE ' + S.score, 20, 52);
-  hctx.fillStyle = '#7df9ff'; hctx.font = 'bold 28px Arial';
-  hctx.fillText('ROUND ' + S.round + '  ·  BIRDS ' + Math.min(S.resolved, 10) + '/10', 20, 100);
-  hctx.fillText('ACCURACY ' + (S.shots ? Math.round(S.hits / S.shots * 100) + '%' : '—') + '  ·  STREAK ' + S.streak, 20, 148);
-  hctx.fillStyle = '#ff2fd6'; hctx.font = 'bold 24px Arial';
-  hctx.fillText('FARTHER + FASTER = MORE POINTS', 20, 196);
+  hctx.clearRect(0, 0, 512, 192);
+  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 512, 192);
+  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 3; hctx.strokeRect(3, 3, 506, 186);
+  hctx.font = 'bold 44px Arial'; hctx.fillStyle = '#ffd319';
+  hctx.fillText('SCORE ' + S.score, 18, 78);
+  hctx.fillStyle = '#7df9ff'; hctx.font = 'bold 26px Arial';
+  hctx.fillText('ROUND ' + S.round + ' · BIRDS ' + Math.min(S.resolved, 10) + '/10 · STREAK ' + S.streak, 18, 138);
   hudTex.needsUpdate = true;
 }
 // ============================== shooting ==============================

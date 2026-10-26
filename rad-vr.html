@@ -30,11 +30,17 @@
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  /* Shared arcade scoreboard cell: small dark translucent rectangle, thin neon
+     border, TOP-LEFT. Mirrored 1:1 by the VR camera-attached plane below. */
   #hud {
-    position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:5;
-    color:#27e8ff; font-size:22px; font-weight:800; letter-spacing:2px;
-    text-shadow:0 2px 8px #000; pointer-events:none; display:none;
+    position:fixed; top:12px; left:12px; z-index:5;
+    background:rgba(8,6,20,0.72); border:2px solid #27e8ff; border-radius:10px;
+    padding:8px 12px; pointer-events:none; display:none; text-align:left;
+    text-shadow:0 2px 8px #000; letter-spacing:1px;
   }
+  #hudL1 { color:#ffffff; font-size:20px; font-weight:900; letter-spacing:1px; }
+  #hudL2 { color:#27e8ff; font-size:14px; font-weight:700; letter-spacing:1px; margin-top:2px; }
+  #hudL3 { color:#ffd319; font-size:13px; font-weight:700; letter-spacing:1px; margin-top:2px; }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
     background:rgba(20,10,40,.7); color:#ffd9ec; border:1px solid #ff71ce; border-radius:8px;
@@ -81,7 +87,7 @@
   </div>
 </div>
 
-<div id="hud">0 MPH</div>
+<div id="hud"><div id="hudL1">0 PTS · 0 MPH</div><div id="hudL2">0.00 MI · TIER 1</div><div id="hudL3">NEXT TIER 1500m · RUSH IN 5000 PTS</div></div>
 <button id="muteBtn">SOUND: ON</button>
 <button id="todBtn">TIME: SUNSET</button>
 
@@ -1623,6 +1629,58 @@ const dashGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.31),
 dashGlow.position.set(0, -0.375, -0.748); dashGlow.rotation.x = -0.30;
 cockpit.add(dashGlow);
 
+// ============================== shared arcade scoreboard cell (VR form) ==============================
+// ONE scoreboard, in the neon house style shared across the arcade: a small dark
+// translucent rectangular cell with a thin neon border. The DOM #hud above is the
+// desktop form; this camera-attached plane is the VR form, showing the same three
+// lines (score + speed, distance + tier, next-tier / RUSH countdown). The 3D
+// dashboard below stays untouched — this cell is only the scoreboard.
+// VIEW MARGINS (Quest lesson): at depth -1.5 the visible half-width is only
+// ~1.05 and the visible half-height is 1.5*tan(36deg) = ~1.09 (72deg vertical FOV).
+// Cell 0.80 wide x 0.35 tall at centre (-0.55, 0.81, -1.5) gives:
+//   left edge -0.95 (0.10 margin from the -1.05 left edge), right edge -0.15,
+//   top edge 0.985 (0.10 margin below the 1.09 view top), bottom edge 0.635.
+// The whole cell fits inside the left view margin; nothing parks off-screen.
+// The plane is visible ONLY while a VR session is presenting (see tick) so the
+// desktop preview never shows two scoreboards at once.
+const scoreCellCanvas = document.createElement('canvas');
+scoreCellCanvas.width = 512; scoreCellCanvas.height = 224;
+const scoreCellCtx = scoreCellCanvas.getContext('2d');
+const scoreCellTex = new THREE.CanvasTexture(scoreCellCanvas);
+scoreCellTex.colorSpace = THREE.SRGBColorSpace;
+const scoreCell = new THREE.Mesh(new THREE.PlaneGeometry(0.80, 0.35),
+  new THREE.MeshBasicMaterial({ map: scoreCellTex, transparent: true, toneMapped: false }));
+scoreCell.position.set(-0.55, 0.81, -1.5);
+scoreCell.visible = false;
+camera.add(scoreCell);
+function drawScoreCell(l1, l2, l3) {
+  const g = scoreCellCtx;
+  g.clearRect(0, 0, 512, 224);
+  // Dark translucent cell + thin neon border (rounded corners, hand-rolled path
+  // so it renders identically in the Quest browser).
+  const r = 22;
+  g.beginPath();
+  g.moveTo(8 + r, 8); g.lineTo(504 - r, 8); g.arcTo(504, 8, 504, 8 + r, r);
+  g.lineTo(504, 216 - r); g.arcTo(504, 216, 504 - r, 216, r);
+  g.lineTo(8 + r, 216); g.arcTo(8, 216, 8, 216 - r, r);
+  g.lineTo(8, 8 + r); g.arcTo(8, 8, 8 + r, 8, r); g.closePath();
+  g.fillStyle = 'rgba(8,6,20,0.72)'; g.fill();
+  g.lineWidth = 5; g.strokeStyle = '#27e8ff'; g.stroke();
+  g.textAlign = 'left';
+  // Auto-fit: shrink each line until it fits the 460px inner width, so long
+  // point totals can never spill past the cell's neon border.
+  const fit = (txt, weight, px) => {
+    let s = px;
+    g.font = weight + ' ' + s + 'px Arial';
+    while (g.measureText(txt).width > 460 && s > 18) { s -= 2; g.font = weight + ' ' + s + 'px Arial'; }
+  };
+  fit(l1, '900', 52); g.fillStyle = '#ffffff'; g.fillText(l1, 26, 74);
+  fit(l2, '700', 34); g.fillStyle = '#27e8ff'; g.fillText(l2, 26, 128);
+  fit(l3, '700', 29); g.fillStyle = '#ffd319'; g.fillText(l3, 26, 182);
+  scoreCellTex.needsUpdate = true;
+}
+drawScoreCell('0 PTS · 0 MPH', '0.00 MI · TIER 1', 'NEXT TIER 1500m · RUSH IN 5000 PTS');
+
 // Analog gauge cluster: speedometer + tachometer with live needles, small fuel/temp
 // readouts, gear indicator. Needles are driven by the game's actual speed (mph),
 // never a canned animation. Backlight level follows the time-of-day mode.
@@ -1835,6 +1893,9 @@ const vrBtn = document.getElementById('vrBtn');
 const statusEl = document.getElementById('status');
 const panel = document.getElementById('panel');
 const hud = document.getElementById('hud');
+const hudL1 = document.getElementById('hudL1');
+const hudL2 = document.getElementById('hudL2');
+const hudL3 = document.getElementById('hudL3');
 let xrSupported = false;
 
 function setStatus(msg) { statusEl.textContent = msg; }
@@ -2248,8 +2309,18 @@ function tick() {
     dashTimer = 0;
     drawDash(mph);
     drawGauges(mph);
-    const r = Math.round(mph);
-    hud.textContent = r + ' MPH · T' + tier + ' · ITEMS [' + slotsText() + '] · NEXT TIER ' + Math.max(0, Math.ceil(nextTierAt - distance)) + 'm · RUSH ' + Math.max(0, Math.ceil(nextRushAt - pointsTotal())) + 'pts' + (rushT > 0 ? ' · RUSH ' + Math.ceil(rushT) + 's!' : '');
+    // Single shared scoreboard cell: same three lines in the DOM cell (desktop)
+    // and on the VR camera-attached plane. Values only — no scoring logic changed.
+    // (Held ITEMS still show on the 3D dash screen; they are not score numbers.)
+    const pts = Math.floor(pointsTotal());
+    const l1 = pts.toLocaleString('en-US') + ' PTS · ' + Math.round(mph) + ' MPH';
+    const l2 = (distance / 1609.34).toFixed(2) + ' MI · TIER ' + tier;
+    const l3 = rushT > 0
+      ? 'RUSH ' + Math.ceil(rushT) + 's! BONUS x2'
+      : 'NEXT TIER ' + Math.max(0, Math.ceil(nextTierAt - distance)) + 'm · RUSH IN ' + Math.max(0, Math.ceil(nextRushAt - pointsTotal())) + ' PTS';
+    hudL1.textContent = l1; hudL2.textContent = l2; hudL3.textContent = l3;
+    drawScoreCell(l1, l2, l3);
+    scoreCell.visible = renderer.xr.isPresenting;
   }
   updateAudio(speedPercent, input.gas);
 
