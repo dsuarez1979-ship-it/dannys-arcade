@@ -65,7 +65,7 @@
     <div class="sub">An original VR space shooter — unlimited retries, 3 weapon slots, unlimited upgrades</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p>You are rookie pilot <b>Jax Vega</b> in the interceptor <b>Kestrel</b>, holding the line against the Void drone swarm.</p>
-    <p><b>Left thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible) &nbsp;·&nbsp; <b>A</b> = Nova Bomb &nbsp;·&nbsp; <b>Click either thumbstick</b> = recall ship to view center</p>
+    <p><b>Either thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible) &nbsp;·&nbsp; <b>A</b> = Nova Bomb &nbsp;·&nbsp; <b>Click either thumbstick</b> = recall ship to view center</p>
     <p>Start with the base laser. Grab weapon pickups — <b>Triple Laser, Seeker Missiles, Plasma Cannon, Rail Beam, Nova Bomb</b> — up to <b>3 equipped at once</b> (a 4th replaces your oldest weapon). Upgrade pickups — <b>Hull Plating, Shield Cells, Engine Speed, Weapon Power</b> — stack with <b>no maximum</b>. Each cleared wave also grants a bonus upgrade.</p>
     <p class="small">Difficulty climbs as you play: every cleared wave makes enemies faster, more numerous, and quicker to fire — and every 10,000 points raises your tier, unlocking elite drones, asteroid storms, and bomber squadrons. Boss waves (every 5th) add a new Ravager attack pattern each time.</p>
     <p class="small">Getting hit costs hull — at zero hull you explode and instantly respawn with your score, weapons and upgrades intact. There is no game over, ever.</p>
@@ -203,6 +203,111 @@ const neb2 = nebulaSprite('#1fb6d9', 220); neb2.material.opacity = 0.12; neb2.po
 const neb3 = nebulaSprite('#7b2d8b', 180); neb3.material.opacity = 0.14; neb3.position.set(20, 90, -340); scene.add(neb3);
 const neb4 = nebulaSprite('#ff7e47', 200); neb4.material.opacity = 0.08; neb4.position.set(-180, -60, -310); scene.add(neb4);
 const neb5 = nebulaSprite('#27e8ff', 190); neb5.material.opacity = 0.10; neb5.position.set(180, 70, -330); scene.add(neb5);
+
+// ---- Deep-space scenery: planets, extra nebulas, denser starfield --------
+// Static far-field backdrop ONLY (z ≈ -280 to -350, far outside the play
+// area). Every mesh here uses cheap unlit MeshBasicMaterial with fog:false,
+// so scene fog and lighting never touch them, and NOTHING here has a
+// collision or gameplay hook — asteroids, bolts, the ship beacon, and the
+// off-view arrow all pass freely. Scenery frames the action, never blocks it.
+function bandedPlanetTexture(colors, storm) {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const x = c.getContext('2d');
+  let y = 0;
+  for (let i = 0; i < colors.length; i++) {
+    const h = 256 / colors.length;
+    x.fillStyle = colors[i]; x.fillRect(0, y, 512, h + 1);
+    // Wavy band edge so it reads as gas, not stripes.
+    x.fillStyle = colors[(i + 1) % colors.length];
+    x.beginPath();
+    for (let px = 0; px <= 512; px += 16) x.lineTo(px, y + h + Math.sin(px * 0.05 + i) * 3);
+    x.lineTo(512, y + h + 14); x.lineTo(0, y + h + 14); x.closePath(); x.fill();
+    y += h;
+  }
+  if (storm) {
+    x.fillStyle = storm;
+    x.beginPath(); x.ellipse(330, 150, 42, 18, 0, 0, Math.PI * 2); x.fill();
+    x.fillStyle = 'rgba(255,255,255,0.25)';
+    x.beginPath(); x.ellipse(330, 150, 26, 10, 0, 0, Math.PI * 2); x.fill();
+  }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function crateredTexture() {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = '#8a7a6a'; x.fillRect(0, 0, 512, 256);
+  for (let i = 0; i < 260; i++) {
+    x.fillStyle = Math.random() < 0.5 ? 'rgba(60,50,42,0.35)' : 'rgba(190,175,155,0.25)';
+    x.beginPath(); x.arc(Math.random() * 512, Math.random() * 256, rand(2, 14), 0, Math.PI * 2); x.fill();
+  }
+  for (let i = 0; i < 60; i++) { // darker crater rims
+    const cx = Math.random() * 512, cy = Math.random() * 256, r = rand(4, 16);
+    x.strokeStyle = 'rgba(40,32,26,0.5)'; x.lineWidth = 2;
+    x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function makePlanet(radius, tex, px, py, pz) {
+  const m = new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 32, 24),
+    new THREE.MeshBasicMaterial({ map: tex, fog: false, toneMapped: false })
+  );
+  m.position.set(px, py, pz); scene.add(m); return m;
+}
+// Banded gas giant (left, high) — cratered rock world (right, low) — ringed
+// planet (high center). All parked far outside the play area.
+makePlanet(45, bandedPlanetTexture(['#d8a05a', '#b8763e', '#e8c890', '#a85f33', '#e0b878'], '#c8552e'), -150, 60, -320);
+makePlanet(30, crateredTexture(), 160, -55, -330);
+makePlanet(28, bandedPlanetTexture(['#4a7fa5', '#6fa8c8', '#2e5a7a', '#7fb5d5'], null), -30, 115, -350);
+{
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(36, 62, 48),
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, fog: false, toneMapped: false, depthWrite: false })
+  );
+  ring.position.set(-30, 115, -350); ring.rotation.x = -1.1; ring.rotation.z = 0.3; scene.add(ring);
+}
+// Three more big soft nebulas (static, unlike the drifting neb1/neb4).
+const neb6 = nebulaSprite('#a855f7', 300); neb6.material.opacity = 0.10; neb6.position.set(-60, -80, -330); scene.add(neb6);
+const neb7 = nebulaSprite('#2dd4bf', 260); neb7.material.opacity = 0.09; neb7.position.set(60, 120, -340); scene.add(neb7);
+const neb8 = nebulaSprite('#f472b6', 240); neb8.material.opacity = 0.09; neb8.position.set(-220, 110, -320); scene.add(neb8);
+// Denser starfield: one more shell on top of the existing three.
+makeStars(1500, 380, 1.2);
+
+// Shooting star: one stretched gradient streak, far field, every ~9–16s.
+// A single mesh + one opacity update per frame — near-zero cost.
+const shootCanvas = document.createElement('canvas'); shootCanvas.width = 256; shootCanvas.height = 32;
+{
+  const x = shootCanvas.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 256, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.85, 'rgba(190,230,255,0.7)'); g.addColorStop(1, 'rgba(255,255,255,1)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 32);
+}
+const shootTex = new THREE.CanvasTexture(shootCanvas);
+const shootMat = new THREE.MeshBasicMaterial({ map: shootTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide });
+const shootStar = new THREE.Mesh(new THREE.PlaneGeometry(14, 0.5), shootMat);
+shootStar.visible = false; shootStar.frustumCulled = false; scene.add(shootStar);
+let shootTimer = rand(6, 12), shootT = 0, shootDur = 0, shootVX = 0, shootVY = 0;
+function updateShootingStar(dt) {
+  if (!shootStar.visible) {
+    shootTimer -= dt;
+    if (shootTimer <= 0) {
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      shootStar.position.set(-dir * 180, rand(20, 130), -280);
+      shootVX = dir * 55; shootVY = -8;
+      shootStar.rotation.z = Math.atan2(shootVY, shootVX);
+      shootT = 0; shootDur = rand(2.2, 3.2); shootStar.visible = true;
+    }
+    return;
+  }
+  shootT += dt;
+  const t = shootT / shootDur;
+  if (t >= 1) { shootStar.visible = false; shootTimer = rand(9, 16); return; }
+  shootStar.position.x += shootVX * dt;
+  shootStar.position.y += shootVY * dt;
+  shootMat.opacity = Math.min(t * 3, 1) * (1 - t) * 0.9;
+}
 
 // Shared radial glow texture, Neon Invaders VR style: white core fading out,
 // tinted by each sprite's material color. Every fake glow in the game uses it.
@@ -517,8 +622,12 @@ window.addEventListener('mouseup', () => { mouse.down = false; });
 const DEAD = 0.14;
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3();
 function pollXR() {
-  // Returns: steerX, steerY (thumbstick), fire, roll, nova, recall, aimX, aimY (right-controller ray on z=0 plane)
+  // Returns: steerX, steerY (EITHER thumbstick — both steer, averaged if both
+  // give input so speed never doubles), fire, roll, nova, recall, aimX, aimY
+  // (right-controller ray on z=0 plane, fallback only when neither stick is
+  // touched — the tick loop prefers stick input over aim).
   const out = { sx: 0, sy: 0, fire: false, roll: false, nova: false, recall: false, aim: null };
+  let lx = 0, ly = 0, rx = 0, ry = 0; // per-hand stick values, combined below
   if (!renderer.xr.isPresenting) return out;
   const session = renderer.xr.getSession();
   if (!session) return out;
@@ -528,8 +637,11 @@ function pollXR() {
     if (gp.axes && gp.axes.length > 3) {
       const ax = gp.axes[2] || 0, ay = gp.axes[3] || 0;
       if (src.handedness === 'left') {
-        if (Math.abs(ax) > DEAD) out.sx = ax;
-        if (Math.abs(ay) > DEAD) out.sy = -ay;
+        if (Math.abs(ax) > DEAD) lx = ax;
+        if (Math.abs(ay) > DEAD) ly = -ay;
+      } else if (src.handedness === 'right') {
+        if (Math.abs(ax) > DEAD) rx = ax;
+        if (Math.abs(ay) > DEAD) ry = -ay;
       }
     }
     const trig = (gp.buttons && gp.buttons[0]) ? (gp.buttons[0].value || 0) : 0;
@@ -551,11 +663,15 @@ function pollXR() {
         _dir.set(0, 0, -1).applyQuaternion(_q);
         if (_dir.z < -0.05) {
           const t = (0 - _v.z) / _dir.z;
-          if (t > 0) out.aim = { x: clamp(_v.x + _dir.x * t, -7, 7), y: clamp(_v.y + _dir.y * t, -2.5, 3.5) };
+          if (t > 0) out.aim = { x: clamp(_v.x + _dir.x * t, PX.min, PX.max), y: clamp(_v.y + _dir.y * t, PY.min, PY.max) };
         }
       }
     }
   }
+  // DUAL-STICK STEERING: one active stick behaves exactly as before; two
+  // active sticks average per axis, so using both never doubles speed.
+  out.sx = (lx !== 0 && rx !== 0) ? (lx + rx) / 2 : (lx || rx);
+  out.sy = (ly !== 0 && ry !== 0) ? (ly + ry) / 2 : (ly || ry);
   return out;
 }
 
@@ -603,7 +719,15 @@ function checkTier() {
   else S.bomberLvl++;
   S.msg = 'TIER ' + t + ' — ' + name + ' UNLOCKED'; S.msgT = 3; sfxTier(); hudDirty = true;
 }
-const PX = { min: -7, max: 7 }, PY = { min: -2.5, max: 3.5 };
+// SHRUNK PLAY AREA (2026-10-25): old bounds ±7 / −2.5…3.5 exceeded the
+// headset's forward view at the ship's distance — rig z=6, camera FOV 70°:
+// half-width at the ship plane ≈ 6·tan(35°) ≈ 4.2 with a square per-eye
+// aspect, and the ship's half-width is ≈ 1.65 (wingtips + nav lights), so
+// ±2.5 keeps the whole ship in view (outer edge 4.15 → 34.7° < 35° half-FOV)
+// when looking straight ahead, with margin. Bottom −1.5 fixes the tight
+// vertical side (old −2.5 nearly touched the bottom edge); top 3.5 was
+// already comfortably in view and is unchanged.
+const PX = { min: -2.5, max: 2.5 }, PY = { min: -1.5, max: 3.5 };
 let px = 0, py = 0, pvx = 0, pvy = 0, prevRoll = false, prevNova = false, prevRecall = false;
 
 // ============================== pools: bolts, plasma, missiles, enemies, asteroids, pickups, particles ==============================
@@ -1138,6 +1262,9 @@ function tick() {
 
   if (S.mode === 'play') {
     // --- steering (engine upgrades multiply speed, no cap) ---
+    // Rates retuned for the shrunk area: same time-to-cross as before
+    // (thumbstick X 0.63s, Y 0.42s; keyboard X 0.71s, Y 0.45s), so the
+    // smaller area feels precise, not twitchy.
     const sm = speedMul();
     let tx = px, ty = py;
     let kx = 0, ky = 0;
@@ -1145,10 +1272,10 @@ function tick() {
     if (keys['ArrowRight'] || keys['KeyD']) kx += 1;
     if (keys['ArrowUp'] || keys['KeyW']) ky += 1;
     if (keys['ArrowDown'] || keys['KeyS']) ky -= 1;
-    if (Math.abs(xr.sx) > 0 || Math.abs(xr.sy) > 0) { tx = px + xr.sx * 22 * sm * dt; ty = py + xr.sy * 14 * sm * dt; }
-    else if (kx !== 0 || ky !== 0) { tx = px + kx * 20 * sm * dt; ty = py + ky * 13 * sm * dt; }
+    if (Math.abs(xr.sx) > 0 || Math.abs(xr.sy) > 0) { tx = px + xr.sx * 8 * sm * dt; ty = py + xr.sy * 12 * sm * dt; }
+    else if (kx !== 0 || ky !== 0) { tx = px + kx * 7 * sm * dt; ty = py + ky * 11 * sm * dt; }
     else if (xr.aim) { tx = lerp(px, xr.aim.x, 1 - Math.pow(0.001, dt)); ty = lerp(py, xr.aim.y, 1 - Math.pow(0.001, dt)); }
-    else if (!renderer.xr.isPresenting) { tx = lerp(px, mouse.x * 7, 1 - Math.pow(0.001, dt)); ty = lerp(py, mouse.y * 3 + 0.5, 1 - Math.pow(0.001, dt)); }
+    else if (!renderer.xr.isPresenting) { tx = lerp(px, mouse.x * PX.max, 1 - Math.pow(0.001, dt)); ty = lerp(py, mouse.y * 2.5 + 1.0, 1 - Math.pow(0.001, dt)); }
     pvx = (tx - px) / Math.max(dt, 0.001); pvy = (ty - py) / Math.max(dt, 0.001);
     px = clamp(tx, PX.min, PX.max); py = clamp(ty, PY.min, PY.max);
     ship.position.set(px, py, 0);
@@ -1507,6 +1634,7 @@ function tick() {
   // Gentle nebula drift for speed sensation
   neb1.position.z += dt * 0.4; if (neb1.position.z > -60) neb1.position.z = -340;
   neb4.position.z += dt * 0.3; if (neb4.position.z > -60) neb4.position.z = -310;
+  updateShootingStar(dt);
   renderer.render(scene, camera);
 }
 renderer.setAnimationLoop(tick);
