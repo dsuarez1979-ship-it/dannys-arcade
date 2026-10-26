@@ -73,8 +73,8 @@
     <p>You hold a fixed firing position on a golden-hour mountain range. Steel plates at <b>100 / 300 / 600 yards</b>, sliding movers, pop-ups behind the berms, and drifting balloons — farther targets score more, and the wind pushes long shots sideways, so read the flags and compensate.</p>
     <p><b>Pick your rifle</b> (or cycle in-game with <b>B</b>):</p>
     <div class="wpnRow" id="wpnRow"></div>
-    <p><b>VR:</b> aim with the <b>right controller</b> &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Hold squeeze or A</b> = scope (aim snaps to scope center) &nbsp;·&nbsp; <b>Left trigger</b> reloads &nbsp;·&nbsp; <b>B</b> cycles rifles</p>
-    <p><b>Desktop:</b> mouse aims &nbsp;·&nbsp; click fires &nbsp;·&nbsp; hold right-click or Shift = scope &nbsp;·&nbsp; R reloads &nbsp;·&nbsp; 1–4 switch rifles &nbsp;·&nbsp; M mutes</p>
+    <p><b>VR:</b> aim with the <b>right controller</b> &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Hold squeeze or A</b> = scope (aim snaps to scope center) &nbsp;·&nbsp; guns are <b>always loaded — no reloading, ever</b> &nbsp;·&nbsp; <b>B</b> cycles rifles</p>
+    <p><b>Desktop:</b> mouse aims &nbsp;·&nbsp; click fires &nbsp;·&nbsp; hold right-click or Shift = scope &nbsp;·&nbsp; always loaded, no reloading &nbsp;·&nbsp; 1–4 switch rifles &nbsp;·&nbsp; M mutes</p>
     <p class="small">Targets respawn endlessly and your score only ever climbs. There is no fail screen and no end — shoot as long as you like.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -241,12 +241,12 @@ scene.add(flagGroup);
 // targets have 1–3 HP, so the big rifle drops anything in one shot while
 // the light rifles need follow-ups on the heavy 600-yard plate.
 const WEAPONS = [
-  { name: 'SCOUT .308', zoom: 4, dmg: 1, mag: 5, reload: 2.0, bolt: 0.9, rate: 0, kick: 0.012, crack: 0.5, barrel: 0.85, stock: 0x3a2a1a, metal: 0x22262c, scale: 1.0 },
-  { name: 'HUNTER 6.5', zoom: 6, dmg: 2, mag: 5, reload: 2.5, bolt: 1.1, rate: 0, kick: 0.018, crack: 0.6, barrel: 0.95, stock: 0x6b4226, metal: 0x1a1d22, scale: 1.05 },
-  { name: 'THUNDER .50', zoom: 10, dmg: 3, mag: 3, reload: 4.0, bolt: 2.0, rate: 0, kick: 0.045, crack: 1.0, barrel: 1.25, stock: 0x2a2018, metal: 0x14171c, scale: 1.25 },
-  { name: 'VIPER SEMI', zoom: 6, dmg: 1, mag: 10, reload: 2.8, bolt: 0, rate: 0.25, kick: 0.014, crack: 0.55, barrel: 0.9, stock: 0x1c2226, metal: 0x2a2f36, scale: 1.0 }
+  { name: 'SCOUT .308', zoom: 4, dmg: 1, bolt: 0.9, rate: 0, kick: 0.012, crack: 0.5, barrel: 0.85, stock: 0x3a2a1a, metal: 0x22262c, scale: 1.0 },
+  { name: 'HUNTER 6.5', zoom: 6, dmg: 2, bolt: 1.1, rate: 0, kick: 0.018, crack: 0.6, barrel: 0.95, stock: 0x6b4226, metal: 0x1a1d22, scale: 1.05 },
+  { name: 'THUNDER .50', zoom: 10, dmg: 3, bolt: 2.0, rate: 0, kick: 0.045, crack: 1.0, barrel: 1.25, stock: 0x2a2018, metal: 0x14171c, scale: 1.25 },
+  { name: 'VIPER SEMI', zoom: 6, dmg: 1, bolt: 0, rate: 0.25, kick: 0.014, crack: 0.55, barrel: 0.9, stock: 0x1c2226, metal: 0x2a2f36, scale: 1.0 }
 ];
-let wpnIdx = 0, ammo = WEAPONS[0].mag, reloading = false, reloadT = 0, boltT = 0, fireT = 0;
+let wpnIdx = 0, boltT = 0, fireT = 0;
 
 // Rifle model: realistic proportions — long barrel, receiver, tapered stock,
 // scope on mounts, magazine, grip. Dark metal + stock tones, one thin neon
@@ -326,6 +326,18 @@ const aimDot = new THREE.Mesh(
 );
 aimDot.renderOrder = 899; scene.add(aimDot);
 
+// VR laser sight: a thin red beam from the right controller along the true
+// shot line. It matters because the rifle viewmodel is head-attached while
+// the shot comes from the hand — without the beam, the player aims with the
+// rifle they see and the bullet goes where the hand points. The beam removes
+// that guesswork. Unscoped VR only; hidden while scoped or on desktop.
+const laser = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.008, 0.008, 1, 6),
+  new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.55, depthTest: false, fog: false })
+);
+laser.renderOrder = 898; laser.visible = false; scene.add(laser);
+const _laserD = new THREE.Vector3();
+
 // ============================== HUD (in-VR plane + desktop DOM) ==============================
 const hudCanvas = document.createElement('canvas'); hudCanvas.width = 640; hudCanvas.height = 260;
 const hctx = hudCanvas.getContext('2d');
@@ -344,8 +356,8 @@ function drawHud() {
   const lines = [
     'SCORE ' + S.score + '   HITS ' + S.hits,
     w.name + '  ·  ZOOM ' + w.zoom + '×  ·  DMG ' + w.dmg,
-    'AMMO ' + ammo + '/' + w.mag + (reloading ? '  RELOADING…' : ''),
-    'WIND ' + wind.mph.toFixed(0) + ' mph ' + windArrow + '  (pushes long shots ' + (wind.dir > 0 ? 'right' : 'left') + ')'
+    'ALWAYS LOADED  ·  ' + (w.bolt ? 'BOLT ' + w.bolt.toFixed(1) + 's CYCLE' : 'SEMI-AUTO'),
+    'WIND ' + wind.mph.toFixed(0) + ' mph ' + windArrow + '  ·  600-yd drift ' + Math.abs(windDriftAt(600)).toFixed(1) + ' — aim ' + (wind.dir > 0 ? 'left' : 'right')
   ];
   hctx.clearRect(0, 0, 640, 260);
   hctx.fillStyle = 'rgba(8,4,2,0.72)'; hctx.fillRect(0, 0, 640, 260);
@@ -353,7 +365,7 @@ function drawHud() {
   hctx.font = 'bold 30px Arial';
   hctx.fillStyle = '#ffd319'; hctx.fillText(lines[0], 20, 48);
   hctx.fillStyle = '#7df9ff'; hctx.fillText(lines[1], 20, 98);
-  hctx.fillStyle = reloading ? '#ff7e47' : '#bfe3ff'; hctx.fillText(lines[2], 20, 148);
+  hctx.fillStyle = '#bfe3ff'; hctx.fillText(lines[2], 20, 148);
   hctx.fillStyle = '#2bff88'; hctx.fillText(lines[3], 20, 198);
   hudTex.needsUpdate = true;
   hudEl.textContent = lines.join('\n');
@@ -379,22 +391,54 @@ function blip(freqA, freqB, dur, type, vol) {
   g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
   o.connect(g); g.connect(masterGain); o.start(); o.stop(actx.currentTime + dur);
 }
-// Rifle crack: a sharp noise-like burst scaled per weapon (bigger gun = deeper, louder).
+// Rifle crack: three-stage synthesized shot, scaled per weapon (bigger gun =
+// deeper, louder, longer tail) — a sharp crack, a deep boom body, and a short
+// mountain-range echo. No samples — pure WebAudio.
 function sfxShot(w) {
   if (!actx || muted) return;
-  const o = actx.createOscillator(), g = actx.createGain(), f = actx.createBiquadFilter();
-  o.type = 'sawtooth';
-  const base = 300 - w.crack * 180;
-  o.frequency.setValueAtTime(base + 900 * w.crack, actx.currentTime);
-  o.frequency.exponentialRampToValueAtTime(Math.max(30, base), actx.currentTime + 0.18);
-  f.type = 'lowpass'; f.frequency.value = 1200 + 2000 * w.crack;
-  g.gain.setValueAtTime(0.25 + 0.45 * w.crack, actx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.25);
-  o.connect(f); f.connect(g); g.connect(masterGain); o.start(); o.stop(actx.currentTime + 0.25);
+  const t0 = actx.currentTime;
+  const power = w.crack; // 0.5 Scout → 1.0 Thunder .50
+  // Stage 1: sharp broadband crack (noise burst through a highpass).
+  const nb = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.08), actx.sampleRate);
+  const nd = nb.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / nd.length);
+  const ns = actx.createBufferSource(); ns.buffer = nb;
+  const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1400;
+  const ng = actx.createGain();
+  ng.gain.setValueAtTime(0.55 + 0.45 * power, t0);
+  ng.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
+  ns.connect(hp); hp.connect(ng); ng.connect(masterGain); ns.start(t0);
+  // Stage 2: deep boom body — lowpassed noise + a falling sine thump.
+  const lb = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.3), actx.sampleRate);
+  const ld = lb.getChannelData(0);
+  for (let i = 0; i < ld.length; i++) ld[i] = (Math.random() * 2 - 1) * (1 - i / ld.length);
+  const ls = actx.createBufferSource(); ls.buffer = lb;
+  const lp = actx.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(900 - 300 * power, t0);
+  lp.frequency.exponentialRampToValueAtTime(120, t0 + 0.3);
+  const lg = actx.createGain();
+  lg.gain.setValueAtTime(0.35 + 0.45 * power, t0);
+  lg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.3);
+  ls.connect(lp); lp.connect(lg); lg.connect(masterGain); ls.start(t0);
+  const o = actx.createOscillator(), og = actx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(180 - 60 * power, t0);
+  o.frequency.exponentialRampToValueAtTime(40, t0 + 0.25);
+  og.gain.setValueAtTime(0.3 + 0.3 * power, t0);
+  og.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25);
+  o.connect(og); og.connect(masterGain); o.start(t0); o.stop(t0 + 0.25);
+  // Stage 3: short echoing tail, like a mountain-range echo.
+  [0.14, 0.28].forEach((delay, i) => {
+    const es = actx.createBufferSource(); es.buffer = lb;
+    const ef = actx.createBiquadFilter(); ef.type = 'lowpass'; ef.frequency.value = 500;
+    const eg = actx.createGain();
+    eg.gain.setValueAtTime((0.12 + 0.1 * power) / (i + 1), t0 + delay);
+    eg.gain.exponentialRampToValueAtTime(0.001, t0 + delay + 0.2);
+    es.connect(ef); ef.connect(eg); eg.connect(masterGain); es.start(t0 + delay);
+  });
 }
 const sfxPing = () => { blip(2400, 1900, 0.35, 'sine', 0.3); setTimeout(() => blip(3100, 2600, 0.2, 'sine', 0.15), 40); };
 const sfxPop = () => blip(900, 120, 0.15, 'triangle', 0.35);
-const sfxReload = () => { blip(700, 500, 0.08, 'square', 0.15); setTimeout(() => blip(500, 900, 0.08, 'square', 0.15), 160); setTimeout(() => blip(900, 600, 0.08, 'square', 0.15), 320); };
 const sfxCycle = () => { blip(500, 800, 0.1, 'sine', 0.2); setTimeout(() => blip(800, 1200, 0.1, 'sine', 0.2), 80); };
 const muteBtn = document.getElementById('muteBtn');
 function setMuted(m) {
@@ -544,7 +588,6 @@ window.addEventListener('mouseup', e => {
 window.addEventListener('contextmenu', e => e.preventDefault());
 window.addEventListener('keydown', e => {
   if (e.key === 'm' || e.key === 'M') { startAudio(); setMuted(!muted); }
-  if (e.key === 'r' || e.key === 'R') startReload();
   if (e.key >= '1' && e.key <= '4') selectWeapon(parseInt(e.key, 10) - 1);
   if (e.key === 'Shift') scopeMouse = true;
 });
@@ -552,11 +595,16 @@ window.addEventListener('keyup', e => { if (e.key === 'Shift') scopeMouse = fals
 
 const _rayO = new THREE.Vector3(), _rayD = new THREE.Vector3(), _ctrlPos = new THREE.Vector3(), _ctrlQuat = new THREE.Quaternion();
 function pollXR() {
-  const out = { fire: false, scope: false, reload: false, cycle: false, aim: null, cycleEdge: false };
+  const out = { fire: false, scope: false, cycle: false, aim: null, cycleEdge: false };
   if (!renderer.xr.isPresenting) return out;
   const session = renderer.xr.getSession();
   if (!session) return out;
-  for (const src of session.inputSources) {
+  // three.js maps getController(i) to inputSources[i] in order, so the
+  // controller object must be picked by the source's own index — a hardcoded
+  // index 1 silently reads the WRONG hand when the right controller is not
+  // second, which was one cause of the "aiming is off" reports.
+  for (let si = 0; si < session.inputSources.length; si++) {
+    const src = session.inputSources[si];
     const gp = src.gamepad;
     if (!gp) continue;
     const trig = (gp.buttons && gp.buttons[0]) ? (gp.buttons[0].value || 0) : 0;
@@ -565,7 +613,7 @@ function pollXR() {
     const bBtn = (gp.buttons && gp.buttons[5]) ? (gp.buttons[5].pressed || false) : false;
     if (src.handedness === 'right') {
       if (trig > 0.5) out.fire = true;
-      const ctrl = renderer.xr.getController(1);
+      const ctrl = renderer.xr.getController(si);
       if (ctrl) {
         ctrl.updateMatrixWorld();
         ctrl.getWorldPosition(_ctrlPos);
@@ -574,7 +622,6 @@ function pollXR() {
         out.aim = { o: _ctrlPos.clone(), d: _rayD.clone() };
       }
     }
-    if (src.handedness === 'left' && trig > 0.5) out.reload = true;
     if (squeeze > 0.5 || aBtn) out.scope = true;
     if (bBtn) out.cycle = true;
   }
@@ -586,30 +633,26 @@ const _hit = new THREE.Vector3(), _to = new THREE.Vector3(), _from = new THREE.V
 let kickT = 0, kickAmt = 0, prevCycle = false;
 function windDriftAt(distYd) {
   // Crosswind pushes the shot sideways; the effect grows with the square
-  // of distance, so 600-yard shots need real compensation.
-  return wind.dir * wind.mph * 0.006 * (distYd / 100) * (distYd / 100);
+  // of distance. Kept clearly inside the 600-yd plate (radius 3.2) even at
+  // max wind, so a reticle-on-target shot still hits — the drift is a
+  // nudge to compensate for, not a second lottery.
+  return wind.dir * wind.mph * 0.003 * (distYd / 100) * (distYd / 100);
 }
 function laneYdForZ(z) {
   let best = LANES[0], bd = 1e9;
   LANES.forEach(L => { const d = Math.abs(L.z - z); if (d < bd) { bd = d; best = L; } });
   return best.yd;
 }
-function startReload() {
-  const w = WEAPONS[wpnIdx];
-  if (reloading || ammo === w.mag) return;
-  reloading = true; reloadT = w.reload; sfxReload(); hudDirty = true;
-}
 function selectWeapon(i) {
   if (i < 0 || i >= WEAPONS.length || i === wpnIdx) return;
-  wpnIdx = i; ammo = WEAPONS[i].mag; reloading = false;
+  wpnIdx = i;
   buildRifle(WEAPONS[i]); sfxCycle(); hudDirty = true;
   showBanner(WEAPONS[i].name, 1.6);
   document.querySelectorAll('.wpnBtn').forEach((b, j) => b.classList.toggle('sel', j === wpnIdx));
 }
 function tryFire() {
-  if (S.mode !== 'play' || reloading) return;
+  if (S.mode !== 'play') return;
   const w = WEAPONS[wpnIdx];
-  if (ammo <= 0) { startReload(); return; }
   if (boltT > 0 || fireT > 0) return;
   // Aim ray: scoped = straight down the scope (camera forward); unscoped
   // VR = right-controller ray; desktop = mouse ray through the camera.
@@ -627,7 +670,6 @@ function tryFire() {
     _rayD.set(mouseNDC.x, mouseNDC.y, -1).unproject(camera).sub(_rayO).normalize();
     o = _rayO; d = _rayD;
   }
-  ammo--; hudDirty = true;
   sfxShot(w);
   boltT = w.bolt; fireT = w.rate;
   kickT = 0.12; kickAmt = w.kick;
@@ -657,8 +699,9 @@ function tryFire() {
     if (bestT.hp <= 0) onTargetDown(bestT);
     else sfxPing();
   } else {
-    // Miss: tracer runs out to the far berm line.
-    _to.set(o.x + d.x * 200, Math.max(-1, o.y + d.y * 200), -200);
+    // Miss: tracer runs out to the far berm line, carrying the same wind
+    // drift a real bullet would, so the tracer never lies about the shot.
+    _to.set(o.x + d.x * 200 + windDriftAt(600), Math.max(-1, o.y + d.y * 200), -200);
   }
   fireTracer(_from, _to);
   // Muzzle flash: brief scale pop on the accent is skipped; kick carries it.
@@ -670,7 +713,7 @@ WEAPONS.forEach((w, i) => {
   const b = document.createElement('button');
   b.className = 'wpnBtn' + (i === 0 ? ' sel' : '');
   b.innerHTML = '<b>' + w.name + '</b>Zoom ' + w.zoom + '× · DMG ' + w.dmg +
-    '<br>Mag ' + w.mag + ' · Reload ' + w.reload.toFixed(1) + 's' +
+    '<br>Always loaded — never reloads' +
     (w.bolt ? '<br>Bolt ' + w.bolt.toFixed(1) + 's' : '<br>Semi-auto');
   b.addEventListener('click', () => { startAudio(); selectWeapon(i); });
   wpnRow.appendChild(b);
@@ -698,7 +741,6 @@ if (navigator.xr && navigator.xr.isSessionSupported) {
 function beginGame() {
   if (S.mode === 'play') return;
   S.mode = 'play'; S.score = 0; S.hits = 0;
-  ammo = WEAPONS[wpnIdx].mag; reloading = false;
   hudDirty = true;
 }
 vrBtn.addEventListener('click', async () => {
@@ -710,6 +752,7 @@ vrBtn.addEventListener('click', async () => {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
     renderer.xr.setReferenceSpaceType('local-floor');
     await renderer.xr.setSession(session);
+    startAudio(); // resume the audio context inside the VR session if needed
     hidePanel();
     session.addEventListener('end', () => { showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
   } catch (err) {
@@ -717,6 +760,7 @@ vrBtn.addEventListener('click', async () => {
       const session = await navigator.xr.requestSession('immersive-vr');
       renderer.xr.setReferenceSpaceType('local');
       await renderer.xr.setSession(session);
+      startAudio(); // resume the audio context inside the VR session if needed
       hidePanel();
       session.addEventListener('end', () => { showPanel(); vrBtn.disabled = false; });
     } catch (err2) {
@@ -734,13 +778,9 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
   if (S.mode === 'play') {
-    // Timers.
+    // Timers (bolt cycle + semi-auto rate only — there is no reload).
     if (boltT > 0) boltT -= dt;
     if (fireT > 0) fireT -= dt;
-    if (reloading) {
-      reloadT -= dt;
-      if (reloadT <= 0) { reloading = false; ammo = WEAPONS[wpnIdx].mag; hudDirty = true; }
-    }
     // Wind rolls on its own schedule; flags follow it.
     wind.nextT -= dt;
     if (wind.nextT <= 0) rollWind();
@@ -782,11 +822,10 @@ function tick() {
       tr.t -= dt;
       if (tr.t <= 0) tr.line.visible = false;
     }
-    // VR input: fire on trigger press (edge), scope hold, reload, cycle.
+    // VR input: fire on trigger hold, scope hold, cycle.
     const xr = pollXR();
     scopeHeld = xr.scope || scopeMouse;
     if (xr.fire) tryFire();
-    if (xr.reload) startReload();
     if (xr.cycle && !prevCycle) selectWeapon((wpnIdx + 1) % WEAPONS.length);
     prevCycle = xr.cycle;
     if (mouseDown && !renderer.xr.isPresenting) { /* desktop fire is on mousedown */ }
@@ -801,12 +840,13 @@ function tick() {
       camera.updateProjectionMatrix();
       aimDot.visible = !scoped;
     }
-    // Aim dot follows the live aim ray (unscoped only).
+    // Aim dot + VR laser follow the live aim ray (unscoped only). The laser
+    // shows the true shot line from the hand in VR.
     if (!scoped) {
-      let o, d;
+      let o, d, vrAim = false;
       if (renderer.xr.isPresenting) {
         const xr2 = pollXR();
-        if (xr2.aim) { o = xr2.aim.o; d = xr2.aim.d; }
+        if (xr2.aim) { o = xr2.aim.o; d = xr2.aim.d; vrAim = true; }
       }
       if (!o) {
         camera.getWorldPosition(_rayO);
@@ -818,13 +858,27 @@ function tick() {
         aimDot.position.set(o.x + d.x * tt, o.y + d.y * tt, -30);
         aimDot.lookAt(camera.position);
         aimDot.visible = true;
-      } else aimDot.visible = false;
-    }
-    // Recoil kick: brief upward pitch that decays.
+        if (vrAim) {
+          laser.visible = true;
+          _mid.addVectors(o, aimDot.position).multiplyScalar(0.5);
+          laser.position.copy(_mid);
+          laser.scale.set(1, o.distanceTo(aimDot.position), 1);
+          laser.quaternion.setFromUnitVectors(_up, _laserD.copy(aimDot.position).sub(o).normalize());
+        } else laser.visible = false;
+      } else { aimDot.visible = false; laser.visible = false; }
+    } else laser.visible = false;
+    // Recoil kick on the rifle viewmodel. Kicking camera.rotation does
+    // nothing in VR — the headset pose overwrites the camera rotation every
+    // frame — so the kick lives on the rifle, where it reads in both modes.
     if (kickT > 0) {
       kickT -= dt;
-      camera.rotation.x = kickAmt * (kickT / 0.12);
-    } else camera.rotation.x = 0;
+      const k = kickT / 0.12;
+      rifleGroup.position.set(0.28, -0.26 + kickAmt * 2 * k, -0.55 + kickAmt * 6 * k);
+      rifleGroup.rotation.x = -kickAmt * 2 * k;
+    } else if (rifleGroup.position.y !== -0.26) {
+      rifleGroup.position.set(0.28, -0.26, -0.55);
+      rifleGroup.rotation.x = 0;
+    }
     if (hudDirty) { drawHud(); hudDirty = false; }
   }
   renderer.render(scene, camera);
