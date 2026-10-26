@@ -1091,15 +1091,20 @@ function dropBomb() {
 }
 
 // ============================== mothership ==============================
-const MOTHERSHIP_ENABLED = false; // DIAGNOSTIC (2026-10-25): saucer disabled to test whether it causes Danny's freezes — set true to restore
+const MOTHERSHIP_ENABLED = true; // Restored 2026-10-25: Danny's saucer-off test confirmed the saucer caused the freezes, so it was rebuilt with cheap unlit materials (see below) instead of being left off
 const mother = new THREE.Group();
 let motherActive = false, motherDir = 1, motherTimer = rand(14, 22);
 {
-  const hullMat = new THREE.MeshStandardMaterial({ color: 0x3a0f2a, emissive: 0xff2e88, emissiveIntensity: 0.5, roughness: 0.4, metalness: 0.4 });
+  // CHEAP REBUILD (2026-10-25): the original MeshStandardMaterial hull (emissive) and
+  // metalness dome compiled expensive shaders on first sight and froze VR — Danny's
+  // saucer-off test confirmed it. These MeshBasicMaterial equivalents look the same
+  // from the player's distance (hull color pre-blended toward its old emissive pink)
+  // but need no lighting and no expensive shader program. Same size, shape, path.
+  const hullMat = new THREE.MeshBasicMaterial({ color: 0xb9266e });
   const belt = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.6, 0.42, 20), hullMat);
   mother.add(belt);
   const dome = new THREE.Mesh(new THREE.SphereGeometry(0.75, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: 0x9fd8ff, roughness: 0.15, metalness: 0.7 }));
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff }));
   dome.scale.y = 0.8; dome.position.y = 0.18; mother.add(dome);
   const bandMat = new THREE.MeshBasicMaterial({ color: 0xffd319, toneMapped: false });
   for (let i = 0; i < 6; i++) {
@@ -1619,7 +1624,7 @@ function updateMother(dt) {
   if (!motherActive) {
     motherTimer -= dt;
     if (motherTimer <= 0) {
-      if (!MOTHERSHIP_ENABLED) { motherTimer = rand(25, 40); return; } // DIAGNOSTIC: saucer off — timer keeps cycling, nothing spawns
+      if (!MOTHERSHIP_ENABLED) { motherTimer = rand(25, 40); return; } // Saucer switch: false = off for freeze testing, true = normal (restored 2026-10-25 with cheap materials)
       motherActive = true;
       motherDir = Math.random() < 0.5 ? 1 : -1;
       mother.position.set(motherDir > 0 ? -18 : 18, 11.4, -17);
