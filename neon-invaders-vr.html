@@ -731,7 +731,7 @@ function updateInvaderDetails() {
   canopyMesh.instanceMatrix.needsUpdate = true;
   ringMesh.instanceMatrix.needsUpdate = true;
 }
-let formX = 0, formY = FORM_TOP_Y, marchDir = 1, aliveCount = COLS * ROWS;
+let formX = 0, formY = FORM_TOP_Y, formYTarget = FORM_TOP_Y, marchDir = 1, aliveCount = COLS * ROWS;
 formation.position.set(formX, formY, FORM_Z);
 
 // ============================== shield bunkers (one InstancedMesh) ==============================
@@ -1208,6 +1208,7 @@ let motherActive = false, motherDir = 1, motherTimer = rand(14, 22);
 
 // ============================== audio (WebAudio synth, gesture-started) ==============================
 let actx = null, masterGain = null, warbleOsc = null, warbleGain = null;
+let droneNodes = null; // danger-drone nodes, created once by startDrone()
 let muted = false;
 function startAudio() {
   if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
@@ -1216,6 +1217,35 @@ function startAudio() {
     masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.5;
     masterGain.connect(actx.destination);
   } catch (e) { /* audio unavailable — game still plays */ }
+  startDrone();
+}
+// DANGER DRONE (Danny 2026-10-27: background sound like danger / an imminent
+// attack): detuned low sines beating against each other through a dark
+// lowpass filter, plus a slow heartbeat pulse on the gain. Quiet bed, not a
+// melody — it just sits under the game and gets slightly louder every wave.
+// Runs through masterGain, so the SOUND button / M key mute it too.
+function startDrone() {
+  if (!actx || !masterGain || droneNodes) return;
+  try {
+    const g = actx.createGain(); g.gain.value = 0.05;
+    const filt = actx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 220; filt.Q.value = 0.8;
+    const o1 = actx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 55;
+    const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 55.7; // slow beat against o1
+    const o3 = actx.createOscillator(); o3.type = 'triangle'; o3.frequency.value = 110.3;
+    const g3 = actx.createGain(); g3.gain.value = 0.25;
+    o1.connect(filt); o2.connect(filt); o3.connect(g3); g3.connect(filt);
+    filt.connect(g); g.connect(masterGain);
+    const lfo = actx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.9;
+    const lfoGain = actx.createGain(); lfoGain.gain.value = 0.02;
+    lfo.connect(lfoGain); lfoGain.connect(g.gain);
+    o1.start(); o2.start(); o3.start(); lfo.start();
+    droneNodes = { gain: g };
+  } catch (e) { /* drone unavailable — game still plays */ }
+}
+function setDroneLevel(waveNum) {
+  if (!droneNodes || !actx) return;
+  const target = Math.min(0.05 + waveNum * 0.004, 0.10);
+  droneNodes.gain.gain.setTargetAtTime(target, actx.currentTime, 0.5);
 }
 function blip(freqA, freqB, dur, type, vol) {
   if (!actx || muted) return;
@@ -1430,6 +1460,7 @@ function resetFormation(fullRestore) {
   if (fullRestore) divers.length = 0;
   formX = 0; marchDir = 1;
   formY = Math.max(FORM_TOP_Y - (wave - 1) * 0.35, 7.0); // harder every level: later waves start lower, closer to you
+  formYTarget = formY;
   formation.position.set(formX, formY, FORM_Z);
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
   bombTimer = 1.4;
@@ -1446,6 +1477,7 @@ function startWave() {
   if (wave > 1) { // wave-clear bonus: 1 free upgrade pickup rains into the field
     spawnPickup(rand(-6, 6), rand(9, 11), FORM_Z, UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
   }
+  setDroneLevel(wave); // danger bed gets slightly louder every wave
 }
 function startGame() {
   if (started) return;
@@ -1513,8 +1545,12 @@ function updateFormation(dt) {
   formX += marchDir * marchSpeed * dt;
   // Side-bounce is silent now (Danny 2026-10-27: no sound when the formation
   // hits either side of the screen) — the march still turns and drops.
-  if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.45; }
-  else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.45; }
+  // SMOOTH MARCH (Danny 2026-10-27): wider sweep (±3.5 instead of ±2.3) so
+  // the side-to-side motion is unmistakable, and the drop eases down over
+  // ~0.3s instead of jumping 0.45 in one frame (that jump read as a glitch).
+  if (formX > 3.5) { formX = 3.5; marchDir = -1; formYTarget -= 0.45; }
+  else if (formX < -3.5) { formX = -3.5; marchDir = 1; formYTarget -= 0.45; }
+  formY += (formYTarget - formY) * Math.min(1, dt * 10);
   formation.position.set(formX, formY, FORM_Z);
   // Gentle bob + glow pulse per invader
   for (const v of invaders) {
@@ -1821,7 +1857,7 @@ function startDiver() {
   // tan(30°) × rail distance 1.6). Diving at an off-center cannon let the diver
   // slide out of the player's view sideways as it closed in — it "disappeared"
   // mid-dive. Arrival still counts exactly like a bomb hit.
-  v.diveX1 = clamp(cannonX + rand(-0.8, 0.8), -0.9, 0.9); v.diveY1 = 1.9;
+  v.diveX1 = clamp(cannonX + rand(-1.8, 1.8), -2.5, 2.5); v.diveY1 = 1.9; // wider fan: dives spread across the sky instead of stacking on one point
   // Brighter than formation invaders: oversized glow (pulsed per frame below).
   v.grp.children[v.grp.children.length - 1].scale.set(4.2, 4.2, 1);
   divers.push(v);
