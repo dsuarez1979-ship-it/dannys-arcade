@@ -57,11 +57,11 @@
 <div id="panel">
   <div class="box">
     <h1>NEON INVADERS VR</h1>
-    <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 3 weapon slots, Iron Man hand cannons</div>
+    <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 1 weapon at a time, Iron Man hand cannons</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
     <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
-    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Max 3 weapons at once — a 4th replaces the oldest. Upgrades stack forever, no caps. Divers come about every 2 seconds, and every wave gets harder.</p>
+    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. One weapon at a time — a new weapon replaces the one you have. Upgrades stack forever, no caps. Divers come about every 2 seconds, and every wave gets harder.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -509,28 +509,23 @@ function assignElites() {
 let drawnScore = -1, drawnWave = -1, drawnLost = -1;
 const hud = document.getElementById('hud');
 let hudText = '';
-// Weapons: PICKUPS ONLY, max 3 equipped at once (Danny's rule — the old
-// "everything at once" volley overwhelmed the frame budget and froze the
-// Quest). The base bolt always fires. Each weapon is a binary slot flag:
-// 0 = not equipped, 1 = equipped. `equipped` keeps insertion order (oldest
-// first); collecting a 4th weapon replaces the oldest equipped one.
+// Weapons: PICKUPS ONLY, ONE at a time (Danny 2026-10-27 — even when a
+// weapon pickup is collected, it replaces the one you have instead of
+// stacking). The base bolt always fires. Each weapon is a binary flag:
+// 0 = not equipped, 1 = equipped. `equipped` holds at most one key.
 // Upgrades (U) still stack WITHOUT a maximum — only weapons are capped.
 // Pools (below) are the only other physical limits, and they recycle the
 // oldest live item instead of failing.
 const W = { spread: 0, twin: 0, rail: 0, seeker: 0, bomb: 0 };
-const equipped = []; // weapon keys, oldest first, max 3
+const equipped = []; // weapon keys, at most one
 const WEAPON_LABELS = { spread: 'SPREAD SHOT', twin: 'TWIN LASER', rail: 'RAIL BEAM', seeker: 'SEEKER MISSILES', bomb: 'BOMB ORBS' };
 const WEAPON_SHORT = { spread: 'SPREAD', twin: 'TWIN', rail: 'RAIL', seeker: 'SEEKER', bomb: 'BOMB' };
 const U = { rate: 0, shield: 0, power: 0, speed: 0 };
 function slotString() {
-  const names = equipped.map(k => WEAPON_LABELS[k]);
-  while (names.length < 3) names.push('—');
-  return names.join(' · ');
+  return equipped.length ? WEAPON_LABELS[equipped[0]] : '—';
 }
 function slotShortString() {
-  const names = equipped.map(k => WEAPON_SHORT[k]);
-  while (names.length < 3) names.push('—');
-  return '[' + names.join('] [') + ']';
+  return equipped.length ? '[' + WEAPON_SHORT[equipped[0]] + ']' : '[—]';
 }
 function gearString() {
   return 'W[' + slotString() + '] | F' + U.rate + ' H' + U.shield + ' P' + U.power + ' V' + U.speed;
@@ -1099,13 +1094,12 @@ function applyPickup(type, bx, by, bz) {
     if (equipped.includes(key)) {
       score += 100;
       showAnnouncement(meta.label + ' — ALREADY EQUIPPED', 'Bonus +100 pts', 1.4);
-    } else if (equipped.length < 3) {
-      equipped.push(key); W[key] = 1;
-      showAnnouncement(meta.label, 'Weapon slot ' + equipped.length + ' of 3 — fires with every pull', 1.8);
     } else {
-      const old = equipped.shift(); W[old] = 0;
-      equipped.push(key); W[key] = 1;
-      showAnnouncement(meta.label, 'Replaces ' + WEAPON_LABELS[old] + ' — oldest weapon swapped out', 1.8);
+      // ONE WEAPON AT A TIME: a new weapon always replaces the one you have.
+      const old = equipped.length ? equipped[0] : null;
+      if (old) W[old] = 0;
+      equipped.length = 0; equipped.push(key); W[key] = 1;
+      showAnnouncement(meta.label, old ? 'Replaces ' + WEAPON_LABELS[old] + ' — one weapon at a time' : 'Weapon equipped — one at a time', 1.8);
     }
   } else {
     U[meta.upgrade]++;
@@ -1258,21 +1252,25 @@ function blip(freqA, freqB, dur, type, vol) {
   o.connect(g); g.connect(masterGain);
   o.start(); o.stop(actx.currentTime + dur + 0.02);
 }
-function laserSound() { blip(920, 180, 0.11, 'square', 0.16); }
-function invaderHitSound() { blip(340, 70, 0.14, 'square', 0.22); }
-function beamSound() { blip(1800, 120, 0.22, 'sawtooth', 0.2); }
-function missileSound() { blip(300, 900, 0.18, 'sine', 0.14); }
-function pickupSound() { blip(660, 1320, 0.16, 'sine', 0.22); blip(990, 1980, 0.2, 'sine', 0.14); }
-function shieldSound() { blip(520, 260, 0.25, 'triangle', 0.25); }
+// SOUND REDESIGN (Danny 2026-10-27: the old effects were annoying): every
+// effect is now softer, rounder and quieter — triangles and sines instead
+// of harsh squares and sawtooths, shorter, and roughly half the volume.
+// The ball-weapon (orb) explosions use the same softened boom below.
+function laserSound() { blip(700, 320, 0.08, 'triangle', 0.07); }
+function invaderHitSound() { blip(300, 130, 0.10, 'sine', 0.10); }
+function beamSound() { blip(1200, 300, 0.15, 'triangle', 0.08); }
+function missileSound() { blip(420, 800, 0.12, 'sine', 0.07); }
+function pickupSound() { blip(660, 1320, 0.14, 'sine', 0.12); blip(990, 1980, 0.18, 'sine', 0.08); }
+function shieldSound() { blip(520, 300, 0.20, 'triangle', 0.12); }
 function boomSound() {
   if (!actx || muted) return;
-  blip(120, 30, 0.4, 'sine', 0.65);
-  const len = actx.sampleRate * 0.3, buf = actx.createBuffer(1, len, actx.sampleRate);
+  blip(100, 40, 0.28, 'sine', 0.30);
+  const len = actx.sampleRate * 0.2, buf = actx.createBuffer(1, len, actx.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
   const src = actx.createBufferSource(); src.buffer = buf;
-  const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 420;
-  const g = actx.createGain(); g.gain.value = 0.5;
+  const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 300;
+  const g = actx.createGain(); g.gain.value = 0.20;
   src.connect(f); f.connect(g); g.connect(masterGain);
   src.start();
 }
@@ -1454,7 +1452,7 @@ function resetFormation(fullRestore) {
   // Only a full wave restore clears divers.
   for (const v of invaders) {
     if (v.diving && !fullRestore) continue;
-    if (v.diving || v.grp.parent !== formation) { formation.add(v.grp); v.grp.position.set(v.lx, v.ly, 0); v.grp.rotation.set(0, 0, 0); }
+    if (v.diving || v.grp.parent !== formation) { formation.add(v.grp); v.grp.position.set(v.lx, v.ly, 0); v.grp.rotation.set(0, 0, 0); v.grp.scale.set(1, 1, 1); }
     v.diving = false;
   }
   if (fullRestore) divers.length = 0;
@@ -1835,11 +1833,13 @@ function updateMother(dt) {
 // clearly. A diver that reaches the rail counts exactly like a bomb hit:
 // a shield layer absorbs it, otherwise one ship-lost stat — never a game over.
 const divers = []; // invaders currently diving (cap 4)
+const SCARY_RED = new THREE.Color(0xff2233); // flyers turn this red as they close in
 let diverTimer = 2;
+let lastDiverWarn = 0; // proximity-heartbeat timer, see updateDivers
 const DIVER_BONUS = 50;
 function maxDivers() { return wave >= 2 ? 4 : 2; } // cap raised so the ~2s cadence below is real, not queue-limited
 function nextDiverInterval() { return rand(1.9, 2.1); } // Danny 2026-10-27: a dive about every 2 seconds, all game long
-function diverSound() { blip(880, 240, 0.7, 'sawtooth', 0.28); blip(1320, 330, 0.6, 'square', 0.14); blip(660, 180, 0.6, 'triangle', 0.12); }
+function diverSound() { blip(880, 300, 0.5, 'triangle', 0.10); blip(1320, 400, 0.4, 'sine', 0.06); blip(660, 220, 0.4, 'triangle', 0.05); }
 function startDiver() {
   const candidates = [];
   for (const v of invaders) if (v.alive && !v.diving) candidates.push(v);
@@ -1859,7 +1859,13 @@ function startDiver() {
   // mid-dive. Arrival still counts exactly like a bomb hit.
   v.diveX1 = clamp(cannonX + rand(-1.8, 1.8), -2.5, 2.5); v.diveY1 = 1.9; // wider fan: dives spread across the sky instead of stacking on one point
   // Brighter than formation invaders: oversized glow (pulsed per frame below).
-  v.grp.children[v.grp.children.length - 1].scale.set(4.2, 4.2, 1);
+  // Each invader owns its glow sprite material, so tinting one diver red as
+  // it closes in never leaks into the rest of the formation (body/core
+  // materials are shared per row, so those are never tinted per diver).
+  const dGlow = v.grp.children[v.grp.children.length - 1];
+  dGlow.scale.set(4.2, 4.2, 1);
+  v.diveGlowBase = dGlow.material.color.clone();
+  v.grp.scale.set(1, 1, 1); // a previous dive's loom never carries over
   divers.push(v);
   diverSound();
   diveFlash = 0.5; // amber screen-edge warning flash
@@ -1889,8 +1895,14 @@ function updateDivers(dt) {
     v.grp.position.y = v.diveY0 + (v.diveY1 - v.diveY0) * ease + Math.sin(t * Math.PI) * 1.2;
     v.grp.position.z = diveZ;
     v.grp.rotation.z = Math.cos(t * Math.PI * 2 + v.phase) * 0.4;
-    const gs = 4.0 + Math.sin(elapsed * 10 + v.phase) * 0.8;
-    v.grp.children[v.grp.children.length - 1].scale.set(gs, gs, 1);
+    // SCARY APPROACH (Danny 2026-10-27): the closer a flyer gets, the bigger,
+    // redder and faster-pulsing it becomes — it looms at you.
+    const loom = 1 + t * 0.7;
+    v.grp.scale.set(loom, loom, loom);
+    const gs = (4.0 + t * 3.0) + Math.sin(elapsed * (10 + t * 14) + v.phase) * (0.8 + t * 1.2);
+    const dGlow = v.grp.children[v.grp.children.length - 1];
+    dGlow.scale.set(gs, gs, 1);
+    if (v.diveGlowBase) dGlow.material.color.copy(v.diveGlowBase).lerp(SCARY_RED, t * t);
     if (t >= 1) {
       // Reached the rail — but ONLY a hit if it actually arrives at the
       // player's cannon. The dive target was locked when the dive started,
@@ -1905,6 +1917,18 @@ function updateDivers(dt) {
       if (wave !== w0) break;
     }
   }
+  // Proximity heartbeat: the nearest flyer past halfway triggers a soft,
+  // rising pulse — faster as it closes in. Quiet by design (see the sound
+  // redesign): a low triangle blip, never a harsh alarm.
+  let closest = 0;
+  for (const v of divers) if (v.alive) closest = Math.max(closest, Math.min(v.diveT / v.diveDur, 1));
+  if (closest > 0.5) {
+    const interval = 0.5 - (closest - 0.5) * 0.76; // 0.5s at halfway → 0.12s at impact
+    if (elapsed - lastDiverWarn >= interval) {
+      lastDiverWarn = elapsed;
+      blip(170, 110, 0.12, 'triangle', 0.08);
+    }
+  } else lastDiverWarn = elapsed;
 }
 
 // ============================== ENTER VR flow (Rad VR pattern) ==============================
@@ -1998,12 +2022,11 @@ function tick() {
         if (fireHands.right && rightCtl) fireHand(rightCtl);
         if (!leftCtl && !rightCtl) fireWeapons();
       } else fireWeapons();
-      // WEAPON REWORK: at most 3 weapons equipped, each binary, so one pull
-      // launches at most 1 + 2 + 1 + 1 + 1 = 6 projectiles + 1 beam — the
-      // old "everything at once" volley was the freeze path. The interval
-      // still grows with volley size as a second bound, and upgrades
-      // (U.rate) still stack without limit — the rate floor is 0.02s, not a
-      // cap on the upgrade itself.
+      // ONE WEAPON (Danny 2026-10-27): a single equipped weapon, so one pull
+      // launches at most 3 bolts (spread) + 1 beam — the old "everything
+      // at once" volley was the freeze path. The interval still grows with
+      // volley size as a second bound, and upgrades (U.rate) still stack
+      // without limit — the rate floor is 0.02s, not a cap on the upgrade.
       const volley = 1 + 2 * W.spread + W.twin + W.seeker + W.bomb;
       fireCooldown = Math.max(0.02, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
     }
