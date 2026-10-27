@@ -61,7 +61,7 @@
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
     <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
-    <p class="small">Falling pickups — Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Collect weapons first: max 3 equipped at once — a 4th replaces the oldest. Upgrades stack forever, no caps.</p>
+    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Max 3 weapons at once — a 4th replaces the oldest. Upgrades stack forever, no caps. Divers come about every second, and every wave gets harder.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -329,22 +329,26 @@ const PLAT_R = 4.6;
   scene.add(rim);
   const under = glowSprite(0x27e8ff, 13, 0.16); under.position.y = -0.7; scene.add(under);
 }
-// Cannon rail: bar, end caps, support posts
+// Rail REMOVED 2026-10-27 (Danny: hands are the guns now) — meshes are built
+// into a hidden group instead of deleted, so restoring them is one line.
 const RAIL_Z = -1.6, RAIL_MIN = -5, RAIL_MAX = 5;
+const railGroup = new THREE.Group();
 {
   const railMat = new THREE.MeshStandardMaterial({ color: 0x39415e, roughness: 0.35, metalness: 0.85 });
   const rail = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.08, 0.14), railMat);
   rail.position.set(0, 0.78, RAIL_Z);
-  scene.add(rail);
+  railGroup.add(rail);
   const capMat = new THREE.MeshBasicMaterial({ color: 0x2bff88, toneMapped: false });
   [-5.65, 5.65].forEach(x => {
     const cap = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), capMat);
     cap.position.set(x, 0.78, RAIL_Z);
-    scene.add(cap);
+    railGroup.add(cap);
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.78, 8), railMat);
     post.position.set(x * 0.92, 0.39, RAIL_Z);
-    scene.add(post);
+    railGroup.add(post);
   });
+  railGroup.visible = false;
+  scene.add(railGroup);
 }
 
 // ============================== the cannon ==============================
@@ -377,14 +381,16 @@ let cannonX = 0;
   cannon.add(barrel);
   cannon.position.set(0, 0, RAIL_Z);
   scene.add(cannon);
+  cannon.visible = false; // CANNON REMOVED 2026-10-27 (Danny: hands are the guns now) — the group still tracks cannonX for hit logic, just never renders
 }
 const muzzleFlash = glowSprite(0xbffcff, 0.85, 0);
 muzzleFlash.position.set(0, 1.2, RAIL_Z - 0.9);
 scene.add(muzzleFlash);
 let flashT = 0;
-// Thruster glow under the cannon sled, pulsing gently
+// Thruster glow under the cannon sled, pulsing gently — hidden with the cannon
 const thruster = glowSprite(0x27e8ff, 0.7, 0.5);
 thruster.position.set(0, 0.72, RAIL_Z + 0.55);
+thruster.visible = false;
 scene.add(thruster);
 // Shield shimmer bubble: flashes after a hit, and stays faintly visible while
 // shield layers remain (opacity grows with layers).
@@ -922,6 +928,17 @@ function fireBeam() {
     const dx = wx - cx, dy = wy - cy, dz = wz - cz;
     if (dx * dx + dy * dy + dz * dz < 0.56) { killInvader(v); kills++; }
   }
+  // SHOOT-TO-COLLECT: the beam also collects floating pickups near its path.
+  for (const pk of pickups) {
+    if (!pk.active) continue;
+    const pp = pk.grp.position;
+    tmpA.set(pp.x - muzzlePos.x, pp.y - muzzlePos.y, pp.z - muzzlePos.z);
+    let t2 = segLenSq > 0 ? (tmpA.x * tmpB.x + tmpA.y * tmpB.y + tmpA.z * tmpB.z) / segLenSq : 0;
+    t2 = clamp(t2, 0, 1);
+    const cx2 = muzzlePos.x + tmpB.x * t2, cy2 = muzzlePos.y + tmpB.y * t2, cz2 = muzzlePos.z + tmpB.z * t2;
+    const dx2 = pp.x - cx2, dy2 = pp.y - cy2, dz2 = pp.z - cz2;
+    if (dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < 0.56) collectPickup(pk);
+  }
 }
 // Seeker missiles: homing cones, pooled.
 const missileGeo = new THREE.ConeGeometry(0.12, 0.5, 8);
@@ -984,6 +1001,13 @@ function explodeOrb(x, y, z) {
     if (!mb.active) continue;
     const dx = mb.grp.position.x - x, dy = mb.grp.position.y - y, dz = mb.grp.position.z - z;
     if (dx * dx + dy * dy + dz * dz < R2) { mb.active = false; mb.grp.visible = false; addScore(5); }
+  }
+  // SHOOT-TO-COLLECT: orb blasts collect floating pickups in their radius.
+  for (const pk of pickups) {
+    if (!pk.active) continue;
+    const pp = pk.grp.position;
+    const dx = pp.x - x, dy = pp.y - y, dz = pp.z - z;
+    if (dx * dx + dy * dy + dz * dz < R2) collectPickup(pk);
   }
   markScoreDirty();
 }
@@ -1066,8 +1090,9 @@ function spawnPickup(x, y, z, type) {
   p.core.material.color.setHex(meta.color);
   p.glow.material.color.setHex(meta.color);
   p.type = type; p.active = true; p.grp.visible = true;
+  p.baseY = y; p.life = 25; // hover life: unshot pickups fade out after 25s
 }
-function applyPickup(type) {
+function applyPickup(type, bx, by, bz) {
   const meta = PICKUP_TYPES[type];
   if (meta.weapon) {
     const key = meta.weapon;
@@ -1087,27 +1112,35 @@ function applyPickup(type) {
     showAnnouncement(meta.label + ' +1', 'Upgrade level ' + U[meta.upgrade] + ' — stacks forever', 1.4);
   }
   pickupSound();
-  spawnBurst(cannonX, 1.4, RAIL_Z, meta.color, 14, 3.5, 0.5);
+  spawnBurst(bx, by, bz, meta.color, 14, 3.5, 0.5);
   markScoreDirty();
 }
 function updatePickups(dt) {
+  // SHOOT-TO-COLLECT (Danny 2026-10-27): pickups hover where they spawn and
+  // bob gently — no more falling to the rail, no magnet, no walk-over
+  // collection. Shoot one to collect it (see the bolt/beam/missile/orb
+  // checks). Unshot pickups fade out after 25s, blinking in the last 3s.
   for (const p of pickups) {
     if (!p.active) continue;
     const pos = p.grp.position;
-    pos.y -= 2.2 * dt;
+    pos.y = p.baseY + Math.sin(elapsed * 2 + p.phase) * 0.3;
     pos.x += Math.sin(elapsed * 3 + p.phase) * 0.25 * dt;
-    if (pos.y < 5) pos.x += (cannonX - pos.x) * Math.min(1, 2.5 * dt); // magnet near the rail
     p.grp.rotation.y += dt * 2.2;
-    if (pos.y <= 1.7 && Math.abs(pos.x - cannonX) < 1.5) {
+    p.life -= dt;
+    if (p.life <= 0) {
+      spawnBurst(pos.x, pos.y, pos.z, 0x7d72a8, 6, 2, 0.4);
       p.active = false; p.grp.visible = false;
-      applyPickup(p.type);
       continue;
     }
-    if (pos.y < 0.25) {
-      spawnBurst(pos.x, 0.3, pos.z, 0x7d72a8, 6, 2, 0.4);
-      p.active = false; p.grp.visible = false;
-    }
+    p.grp.visible = p.life > 3 || Math.floor(elapsed * 6) % 2 === 0;
   }
+}
+// Shared by every shoot-to-collect check: burst at the pickup, then apply it.
+function collectPickup(pk) {
+  if (!pk.active) return;
+  const pp = pk.grp.position;
+  pk.active = false; pk.grp.visible = false;
+  applyPickup(pk.type, pp.x, pp.y, pp.z);
 }
 
 // ============================== enemy bombs (pooled) ==============================
@@ -1197,7 +1230,6 @@ function blip(freqA, freqB, dur, type, vol) {
 }
 function laserSound() { blip(920, 180, 0.11, 'square', 0.16); }
 function invaderHitSound() { blip(340, 70, 0.14, 'square', 0.22); }
-function stepThump() { blip(68, 45, 0.1, 'sine', 0.3); }
 function beamSound() { blip(1800, 120, 0.22, 'sawtooth', 0.2); }
 function missileSound() { blip(300, 900, 0.18, 'sine', 0.14); }
 function pickupSound() { blip(660, 1320, 0.16, 'sine', 0.22); blip(990, 1980, 0.2, 'sine', 0.14); }
@@ -1397,7 +1429,7 @@ function resetFormation(fullRestore) {
   }
   if (fullRestore) divers.length = 0;
   formX = 0; marchDir = 1;
-  formY = Math.max(FORM_TOP_Y - (wave - 1) * 0.3, 7.4);
+  formY = Math.max(FORM_TOP_Y - (wave - 1) * 0.35, 7.0); // harder every level: later waves start lower, closer to you
   formation.position.set(formX, formY, FORM_Z);
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
   bombTimer = 1.4;
@@ -1406,7 +1438,7 @@ function resetFormation(fullRestore) {
 function startWave() {
   surgeWave = (wave % 5 === 0);
   resetFormation(true);
-  diverTimer = rand(4, 6); // first dive ~5s into every wave (Danny: divers every 5 seconds)
+  diverTimer = 1; // first dive ~1s into every wave (Danny 2026-10-27: divers every second)
   resetShields();
   markScoreDirty();
   if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster march, double bombs!', 2.2);
@@ -1476,11 +1508,13 @@ let elapsed = 0;
 function updateFormation(dt) {
   const deadFrac = 1 - aliveCount / (COLS * ROWS);
   // FREEZE FIX: march speed is hard-capped at 6 so late waves can't spiral.
-  // STEEP RAMP (Danny 2026-10-25): +0.22/wave base, +8% per tier; SURGE waves +40%.
-  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.22) * (1 + deadFrac * 1.9) * (1 + tier * 0.08) * (surgeWave ? 1.4 : 1));
+  // STEEP RAMP (Danny 2026-10-27: harder every level beaten): +0.30/wave base, +8% per tier; SURGE waves +40%.
+  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.30) * (1 + deadFrac * 1.9) * (1 + tier * 0.08) * (surgeWave ? 1.4 : 1));
   formX += marchDir * marchSpeed * dt;
-  if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.45; stepThump(); }
-  else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.45; stepThump(); }
+  // Side-bounce is silent now (Danny 2026-10-27: no sound when the formation
+  // hits either side of the screen) — the march still turns and drops.
+  if (formX > 2.3) { formX = 2.3; marchDir = -1; formY -= 0.45; }
+  else if (formX < -2.3) { formX = -2.3; marchDir = 1; formY -= 0.45; }
   formation.position.set(formX, formY, FORM_Z);
   // Gentle bob + glow pulse per invader
   for (const v of invaders) {
@@ -1557,8 +1591,16 @@ function updateBolts(dt) {
         showAnnouncement('BONUS +' + bonus, 'Mothership down!', 1.5);
         b.active = false; break boltStep;
       }
+      // SHOOT-TO-COLLECT: bolts collect floating pickups on contact, and
+      // the bolt flies on — hitting a pickup never costs you the shot.
+      for (const pk of pickups) {
+        if (!pk.active) continue;
+        const pp = pk.grp.position;
+        const dx = p.x - pp.x, dy = p.y - pp.y, dz = p.z - pp.z;
+        if (dx * dx + dy * dy + dz * dz < 0.49) collectPickup(pk);
+      }
       // Divers (world-space box test — they fly in z, so the formation-plane
-      // test below can never hit them). The divers list is capped at 2, so
+      // test below can never hit them). The divers list is capped, so
       // this scan stays cheap even with a full volley in flight. The z
       // half-depth (1.2) exceeds one frame of bolt travel at the 0.05s dt
       // cap, so fast bolts cannot tunnel through a diver between frames.
@@ -1652,6 +1694,13 @@ function updateMissiles(dt) {
     m.grp.position.x += m.vx * dt;
     m.grp.position.y += m.vy * dt;
     m.grp.position.z += m.vz * dt;
+    // SHOOT-TO-COLLECT: missiles collect floating pickups they pass, and fly on.
+    for (const pk of pickups) {
+      if (!pk.active) continue;
+      const pp = pk.grp.position;
+      const dx = m.grp.position.x - pp.x, dy = m.grp.position.y - pp.y, dz = m.grp.position.z - pp.z;
+      if (dx * dx + dy * dy + dz * dz < 0.49) collectPickup(pk);
+    }
     m.life -= dt;
     if (m.life <= 0 || m.grp.position.z < FORM_Z - 2 || m.grp.position.y < -0.5 || m.grp.position.y > 16) {
       m.active = false; m.grp.visible = false;
@@ -1691,8 +1740,8 @@ function updateBombs(dt) {
   bombTimer -= dt;
   if (bombTimer <= 0) {
     dropBomb();
-    // STEEP RAMP (Danny 2026-10-25): -0.09/wave, interval x0.92^tier, SURGE x0.4; 0.38s floor kept so fire never becomes a wall.
-    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.09 - (1 - aliveCount / (COLS * ROWS)) * 0.3) * Math.pow(0.92, tier) * (surgeWave ? 0.4 : 1));
+    // STEEP RAMP (Danny 2026-10-27): -0.12/wave, interval x0.92^tier, SURGE x0.4; 0.38s floor kept so fire never becomes a wall.
+    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.12 - (1 - aliveCount / (COLS * ROWS)) * 0.3) * Math.pow(0.92, tier) * (surgeWave ? 0.4 : 1));
   }
   for (const b of bombs) {
     if (!b.active) continue;
@@ -1741,7 +1790,7 @@ function updateMother(dt) {
 
 // ============================== dive-attack invaders ==============================
 // The formation keeps marching side to side exactly as before. On top of that,
-// one living invader occasionally breaks away and swoops toward the rail.
+// living invaders break away about every second and swoop toward the player.
 // Divers reuse the existing invader pool — no new entities, no new geometry:
 // the diver's group is reparented from `formation` to `scene` so it can travel
 // in z, and put back by resetFormation. Its instanced eyes/canopy/ring details
@@ -1749,11 +1798,11 @@ function updateMother(dt) {
 // glow sprite travel with the group, and the glow is boosted so divers read
 // clearly. A diver that reaches the rail counts exactly like a bomb hit:
 // a shield layer absorbs it, otherwise one ship-lost stat — never a game over.
-const divers = []; // invaders currently diving (cap 2)
-let diverTimer = rand(4, 6);
+const divers = []; // invaders currently diving (cap 4)
+let diverTimer = 1;
 const DIVER_BONUS = 50;
-function maxDivers() { return wave >= 2 ? 2 : 1; }
-function nextDiverInterval() { return rand(4, 6); } // Danny: a dive every ~5 seconds, all game long
+function maxDivers() { return wave >= 2 ? 4 : 2; } // cap raised so the ~1s cadence below is real, not queue-limited
+function nextDiverInterval() { return rand(0.9, 1.1); } // Danny 2026-10-27: a dive about every second, all game long
 function diverSound() { blip(880, 240, 0.7, 'sawtooth', 0.28); blip(1320, 330, 0.6, 'square', 0.14); blip(660, 180, 0.6, 'triangle', 0.12); }
 function startDiver() {
   const candidates = [];
@@ -1766,7 +1815,7 @@ function startDiver() {
   v.grp.position.set(wx, wy, FORM_Z);
   v.grp.rotation.set(0, 0, 0);
   v.diving = true; v.diveT = 0;
-  v.diveDur = Math.max(2.6, 5.0 - wave * 0.25 - tier * 0.15); // STEEP RAMP: dives get faster every wave/tier; 2.6s floor keeps them dodgeable
+  v.diveDur = Math.max(2.4, 5.0 - wave * 0.3 - tier * 0.15); // STEEP RAMP: dives get faster every wave/tier; 2.4s floor keeps them dodgeable
   v.diveX0 = wx; v.diveY0 = wy;
   // DIVER FIX: the rail target is clamped to the forward view cone (±0.9 =
   // tan(30°) × rail distance 1.6). Diving at an off-center cannon let the diver
@@ -1900,6 +1949,10 @@ function tick() {
 
   if (mode === 'play') {
     const fire = pollInput(dt);
+    // NO RAIL CANNON (Danny 2026-10-27): in VR you ARE the target — the
+    // defended point follows your headset, so stepping aside dodges bombs
+    // and divers. Desktop keeps the sliding defended point from pollInput.
+    if (presenting) { camera.getWorldPosition(tmpA); cannonX = clamp(tmpA.x, RAIL_MIN, RAIL_MAX); }
     fireCooldown -= dt;
     if (fire && fireCooldown <= 0) {
       // IRON MAN HANDS: in VR each trigger-holding hand fires its own full
