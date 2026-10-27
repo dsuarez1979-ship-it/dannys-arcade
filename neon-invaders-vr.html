@@ -61,7 +61,7 @@
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
     <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
-    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Max 3 weapons at once — a 4th replaces the oldest. Upgrades stack forever, no caps. Divers come about every second, and every wave gets harder.</p>
+    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. Max 3 weapons at once — a 4th replaces the oldest. Upgrades stack forever, no caps. Divers come about every 2 seconds, and every wave gets harder.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -1469,7 +1469,7 @@ function resetFormation(fullRestore) {
 function startWave() {
   surgeWave = (wave % 5 === 0);
   resetFormation(true);
-  diverTimer = 1; // first dive ~1s into every wave (Danny 2026-10-27: divers every second)
+  diverTimer = 2; // first dive ~2s into every wave (Danny 2026-10-27: divers every 2 seconds)
   resetShields();
   markScoreDirty();
   if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster march, double bombs!', 2.2);
@@ -1826,7 +1826,7 @@ function updateMother(dt) {
 
 // ============================== dive-attack invaders ==============================
 // The formation keeps marching side to side exactly as before. On top of that,
-// living invaders break away about every second and swoop toward the player.
+// living invaders break away about every 2 seconds and swoop toward the player.
 // Divers reuse the existing invader pool — no new entities, no new geometry:
 // the diver's group is reparented from `formation` to `scene` so it can travel
 // in z, and put back by resetFormation. Its instanced eyes/canopy/ring details
@@ -1835,10 +1835,10 @@ function updateMother(dt) {
 // clearly. A diver that reaches the rail counts exactly like a bomb hit:
 // a shield layer absorbs it, otherwise one ship-lost stat — never a game over.
 const divers = []; // invaders currently diving (cap 4)
-let diverTimer = 1;
+let diverTimer = 2;
 const DIVER_BONUS = 50;
-function maxDivers() { return wave >= 2 ? 4 : 2; } // cap raised so the ~1s cadence below is real, not queue-limited
-function nextDiverInterval() { return rand(0.9, 1.1); } // Danny 2026-10-27: a dive about every second, all game long
+function maxDivers() { return wave >= 2 ? 4 : 2; } // cap raised so the ~2s cadence below is real, not queue-limited
+function nextDiverInterval() { return rand(1.9, 2.1); } // Danny 2026-10-27: a dive about every 2 seconds, all game long
 function diverSound() { blip(880, 240, 0.7, 'sawtooth', 0.28); blip(1320, 330, 0.6, 'square', 0.14); blip(660, 180, 0.6, 'triangle', 0.12); }
 function startDiver() {
   const candidates = [];
