@@ -57,7 +57,7 @@
 <div id="panel">
   <div class="box">
     <h1>NEON INVADERS VR</h1>
-    <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 3 weapon slots</div>
+    <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 3 weapon slots, Iron Man hand cannons</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
     <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
@@ -65,7 +65,7 @@
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
-    <p class="backlink"><a href="./">← Danny's Arcade</a></p>
+    <p class="backlink"><a href="../">← Danny's Arcade</a></p>
   </div>
 </div>
 
@@ -619,7 +619,10 @@ function invaderBodyGeo(kind) {
   }
 }
 const COLS = 10, ROWS = 5, DX = 1.35, DY = 1.15;
-const FORM_Z = -14, FORM_TOP_Y = 8.8, DEFENSE_Y = 2.05;
+// WIDE VIEW (Danny 2026-10-27: "see the whole thing"): the formation sits
+// farther out (-18 instead of -14) and a touch lower, so the full field —
+// formation, shields, rail and divers — fits in view without turning your head.
+const FORM_Z = -18, FORM_TOP_Y = 8.4, DEFENSE_Y = 2.05;
 const formation = new THREE.Group();
 scene.add(formation);
 const invaders = [];
@@ -986,10 +989,14 @@ function explodeOrb(x, y, z) {
 }
 // One trigger pull = the whole uncapped arsenal at once.
 let fireCooldown = 0;
-function fireWeapons() {
-  tmpV.set(0, 0.03, 0.85);
-  barrel.localToWorld(tmpV);
-  muzzlePos.copy(tmpV);
+function fireWeapons(ox, oy, oz) {
+  // IRON MAN HANDS: in VR the shots come from the firing hand (ox,oy,oz);
+  // on desktop ox/oy/oz are omitted and the rail barrel stays the muzzle.
+  if (ox === undefined) {
+    tmpV.set(0, 0.03, 0.85);
+    barrel.localToWorld(tmpV);
+    muzzlePos.copy(tmpV);
+  } else muzzlePos.set(ox, oy, oz);
   aimDir.copy(aimPoint).sub(muzzlePos).normalize();
   launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
   for (let i = 1; i <= W.spread; i++) { // fan pairs, ±i steps of ~3.2°
@@ -1008,6 +1015,14 @@ function fireWeapons() {
   muzzleFlash.position.copy(muzzlePos);
   flashT = 0.07;
   laserSound();
+}
+// Fire one full volley from a VR hand: origin just past the palm, aimed at
+// the same aim point the controller ray is pointing at.
+function fireHand(ctl) {
+  tmpV.setFromMatrixPosition(ctl.matrixWorld);
+  tmpV2.set(0, 0, -1).applyQuaternion(ctl.getWorldQuaternion(tmpQ));
+  tmpV.addScaledVector(tmpV2, 0.1);
+  fireWeapons(tmpV.x, tmpV.y, tmpV.z);
 }
 
 // ============================== pickups (pooled, recycle-oldest) ==============================
@@ -1249,15 +1264,44 @@ let rightCtl = null, leftCtl = null;
 [ctlL, ctlR].forEach(c => {
   c.addEventListener('connected', e => {
     c.userData.handedness = e.data.handedness;
+    c.userData.connected = true;
     if (e.data.handedness === 'right') rightCtl = c;
     if (e.data.handedness === 'left') leftCtl = c;
   });
   c.addEventListener('disconnected', () => {
+    c.userData.connected = false;
     if (rightCtl === c) rightCtl = null;
     if (leftCtl === c) leftCtl = null;
   });
   scene.add(c);
 });
+// IRON MAN HAND CANNONS (Danny 2026-10-27): a glowing palm cannon rides on
+// each controller. In VR the shots come from the firing hand, not the rail —
+// the rail base stays as the thing you defend (bombs/divers still attack it),
+// but your hands are the guns. Hidden whenever not presenting.
+function buildPalmCannon(color) {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.11, 0.06, 16),
+    new THREE.MeshBasicMaterial({ color, toneMapped: false })
+  );
+  disc.rotation.x = Math.PI / 2; // cylinder axis -> controller forward (-z)
+  disc.position.z = -0.04;
+  g.add(disc);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.13, 0.018, 8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false })
+  );
+  ring.position.z = -0.08;
+  g.add(ring);
+  const glow = glowSprite(color, 0.45, 0.85);
+  glow.position.z = -0.08;
+  g.add(glow);
+  g.visible = false;
+  return g;
+}
+const handL = buildPalmCannon(0x27e8ff), handR = buildPalmCannon(0x2bff88);
+ctlL.add(handL); ctlR.add(handR);
 // Aim laser from the right controller + aim dot on the formation plane
 const laserGeo = new THREE.BufferGeometry();
 laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
@@ -1273,8 +1317,10 @@ scene.add(aimDot);
 const raycaster = new THREE.Raycaster();
 const aimPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -FORM_Z); // plane z = FORM_Z
 const DEAD = 0.12;
+const fireHands = { left: false, right: false }; // which VR triggers are held, reset each poll
 function pollInput(dt) {
   let steer = 0, fire = false;
+  fireHands.left = fireHands.right = false;
   // Keyboard
   if (keys['ArrowLeft'] || keys['KeyA']) steer -= 1;
   if (keys['ArrowRight'] || keys['KeyD']) steer += 1;
@@ -1291,13 +1337,18 @@ function pollInput(dt) {
           const ax = gp.axes[2] || 0;
           if (Math.abs(ax) > DEAD && Math.abs(ax) > Math.abs(steer)) steer = ax;
         }
-        if (gp.buttons && gp.buttons[0] && gp.buttons[0].value > 0.35) fire = true;
+        if (gp.buttons && gp.buttons[0] && gp.buttons[0].value > 0.35) {
+          fire = true;
+          if (src.handedness === 'left') fireHands.left = true;
+          else if (src.handedness === 'right') fireHands.right = true;
+        }
       }
     }
   }
-  // Slide the cannon — Move Speed upgrade scales the slide, soft-capped at 2.5x
-  // for control. The level itself is uncapped; only the effect tapers.
-  const slideSpeed = 9.5 * Math.min(1 + U.speed * 0.08, 2.5);
+  // Slide the cannon — Move Speed upgrade scales the slide with NO cap
+  // (Danny 2026-10-27: upgrades keep working forever). Analog sticks still
+  // scale the input, so control stays in the player's hand.
+  const slideSpeed = 9.5 * (1 + U.speed * 0.08);
   cannonX = clamp(cannonX + steer * slideSpeed * dt, RAIL_MIN, RAIL_MAX);
   // Aim resolution
   let aimed = false;
@@ -1381,11 +1432,15 @@ function startGame() {
   startWave();
 }
 function playerHit() {
+  // PHANTOM-FEEDBACK FIX (Danny 2026-10-27): while invulnerable, a bomb or
+  // diver passing through the cannon must NOT flash red or shake the view —
+  // the shield shimmer already shows you are protected. Red + shake now fire
+  // ONLY on a real hit that actually costs a shield layer or a ship.
+  if (shimmerT > 0) return;
   spawnBurst(cannonX, 1.1, RAIL_Z, 0xff5533, 34, 5.5, 0.8);
   spawnBurst(cannonX, 1.1, RAIL_Z, 0xffd319, 18, 4, 0.6);
   boomSound();
   flash = 0.85; shakeT = 0.4;
-  if (shimmerT > 0) return;            // invulnerability window — explosion only
   if (U.shield > 0) {                  // a shield layer absorbs the hit, no ship lost
     U.shield--;
     shimmerT = 1.2;
@@ -1752,13 +1807,15 @@ function updateDivers(dt) {
     const gs = 4.0 + Math.sin(elapsed * 10 + v.phase) * 0.8;
     v.grp.children[v.grp.children.length - 1].scale.set(gs, gs, 1);
     if (t >= 1) {
-      // Reached the rail: exactly like a bomb hit — shield absorbs, else a
-      // ship-lost stat. Never a game over.
+      // Reached the rail — but ONLY a hit if it actually arrives at the
+      // player's cannon. The dive target was locked when the dive started,
+      // so sliding away dodges it: the diver fizzles harmlessly, no red
+      // flash, no shake, no penalty. Never a game over either way.
       divers.splice(i, 1);
       v.diving = false; v.alive = false; v.grp.visible = false;
       aliveCount--;
       spawnBurst(v.grp.position.x, 1.4, RAIL_Z, 0xff5533, 24, 5, 0.7);
-      playerHit();
+      if (Math.abs(v.grp.position.x - cannonX) < 1.0) playerHit();
       if (aliveCount <= 0) { wave++; startWave(); }
       if (wave !== w0) break;
     }
@@ -1835,6 +1892,9 @@ function tick() {
   // invisible inside an immersive session anyway; this keeps the two forms
   // from ever doubling up on desktop.)
   scoreMesh.visible = presenting;
+  // Palm cannons ride the controllers only while presenting and connected.
+  handL.visible = presenting && !!ctlL.userData.connected;
+  handR.visible = presenting && !!ctlR.userData.connected;
   if (mode === 'play') hud.style.display = presenting ? 'none' : 'block';
   else hud.style.display = 'none';
 
@@ -1842,14 +1902,21 @@ function tick() {
     const fire = pollInput(dt);
     fireCooldown -= dt;
     if (fire && fireCooldown <= 0) {
-      fireWeapons();
+      // IRON MAN HANDS: in VR each trigger-holding hand fires its own full
+      // volley from the palm; desktop/rail firing is unchanged.
+      if (presenting && (fireHands.left || fireHands.right)) {
+        if (fireHands.left && leftCtl) fireHand(leftCtl);
+        if (fireHands.right && rightCtl) fireHand(rightCtl);
+        if (!leftCtl && !rightCtl) fireWeapons();
+      } else fireWeapons();
       // WEAPON REWORK: at most 3 weapons equipped, each binary, so one pull
       // launches at most 1 + 2 + 1 + 1 + 1 = 6 projectiles + 1 beam — the
       // old "everything at once" volley was the freeze path. The interval
       // still grows with volley size as a second bound, and upgrades
-      // (U.rate) still stack without limit.
+      // (U.rate) still stack without limit — the rate floor is 0.02s, not a
+      // cap on the upgrade itself.
       const volley = 1 + 2 * W.spread + W.twin + W.seeker + W.bomb;
-      fireCooldown = Math.max(0.05, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
+      fireCooldown = Math.max(0.02, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
     }
     updateFormation(dt);
     updateDivers(dt);
@@ -1957,7 +2024,7 @@ function tick() {
 // wave-start announcements, so they need no warm-up.)
 if (MOTHERSHIP_ENABLED) { // Saucer REMOVED 2026-10-25: skip the warm-up render too — the saucer must never render at all while the flag is false
   const warmSavedPos = mother.position.clone();
-  mother.position.set(0, 4, -14); // dead-center in front of the menu camera
+  mother.position.set(0, 4, FORM_Z); // dead-center in front of the menu camera
   mother.visible = true;
   renderer.compile(scene, camera);
   renderer.render(scene, camera);
