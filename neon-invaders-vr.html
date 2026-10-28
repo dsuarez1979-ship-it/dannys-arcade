@@ -60,8 +60,8 @@
     <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 1 weapon at a time, Iron Man hand cannons</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
-    <p class="small">The formation marches on your position in deep space. Blast it before it lands — if it lands, or a bomb finds your cannon, you lose a ship… and get another. Forever. There is no game over.</p>
-    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Bomb Orbs, Fire Rate, Shield Layers, Cannon Power, Move Speed. One weapon at a time — a new weapon replaces the one you have. Upgrades stack forever, no caps. Divers come about every 2 seconds, and every wave gets harder.</p>
+    <p class="small">Invaders surround you from every angle in deep space. Blast them all — if a flyer reaches you, or a bomb finds you, you lose a ship… and get another. Forever. There is no game over.</p>
+    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Spartan Laser, Fire Rate, Shield Layers, Cannon Power, Move Speed. One weapon at a time — a new weapon replaces the one you have. Upgrades stack forever, no caps. Flyers lunge at you about every 2 seconds, and every wave gets harder. Asteroids drift around you and shooting stars cross the sky — pure scenery.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes.</p>
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
@@ -84,8 +84,8 @@ import * as THREE from 'three';
 // antialiasing while pushing ~250 draw calls in stereo — the Quest GPU choked
 // and the game froze. Fixes here: pixelRatio capped at 1.5 (1.25 while an XR
 // session is presenting), antialias OFF, every projectile/pickup/particle/
-// shockwave pooled with a hard cap and recycle-oldest overflow, formation
-// march speed capped, frame dt clamped, and zero allocation in the hot loop
+// shockwave pooled with a hard cap and recycle-oldest overflow, swarm
+// approach speed capped, frame dt clamped, and zero allocation in the hot loop
 // (all temps are module-level vectors reused every frame).
 // ROUND-2 FREEZE FIX (Danny: froze again after round 1): the remaining
 // culprits were (a) updateBolts ran a 2nd collision substep on slow frames,
@@ -221,8 +221,8 @@ function glowSprite(color, scale, opacity) {
   stars.frustumCulled = false;
   scene.add(stars);
 }
-// Nebula clouds: a handful of huge glow sprites — the three behind the
-// formation are bright enough to read in-frame, plus two framing the view.
+// Nebula clouds: a handful of huge glow sprites — the three in the main
+// view are bright enough to read in-frame, plus two framing the view.
 [[-120, 55, -230, 0xff2e88, 300, 0.22], [140, 35, -250, 0x1fb6d9, 260, 0.20],
  [0, 95, -270, 0x7b2d8b, 360, 0.24], [-190, -15, -130, 0xff7e47, 170, 0.08],
  [70, -50, 190, 0x5a3fbf, 210, 0.07], [190, 80, 120, 0x27e8ff, 150, 0.06],
@@ -276,14 +276,44 @@ const planetC = new THREE.Mesh(new THREE.SphereGeometry(14, 20, 14),
   new THREE.MeshBasicMaterial({ map: makeCraterTexture('#3d4a3a'), fog: false, toneMapped: false }));
 planetC.position.set(-8, 70, -170);
 scene.add(planetC);
-// Shooting star: occasional slow streak across the far background, far behind
-// the formation — pure scenery, no gameplay effect.
+// Shooting stars: frequent bright streaks across the far sky, all around you —
+// pure scenery, no gameplay effect. (Boosted 2026-10-27: the old one was a
+// rare slow streak straight ahead, easy to never notice mid-fight.)
 const shootStar = glowSprite(0xbfeaff, 1, 0);
-shootStar.scale.set(9, 0.8, 1);
+shootStar.scale.set(14, 1.0, 1);
 shootStar.material.rotation = -0.35;
 shootStar.position.set(0, 60, -200);
 scene.add(shootStar);
-let shootTimer = rand(15, 30), shootT = 0, shootX0 = 0, shootY0 = 60;
+let shootTimer = rand(6, 12), shootT = 0, shootX0 = 0, shootY0 = 60, shootZ0 = -200, shootDX = 1, shootDZ = 0;
+// Asteroids (Danny 2026-10-27): a belt of tumbling rocks on a far shell
+// (radius 28-45, always behind the swarm) — pure scenery, NO collision, so
+// your shots fly straight past them to the invaders. One instanced draw call.
+const AST_COUNT = 36;
+const astMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
+  new THREE.MeshStandardMaterial({ color: 0x6a6258, roughness: 1, metalness: 0, fog: false }), AST_COUNT);
+astMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+astMesh.frustumCulled = false;
+scene.add(astMesh);
+const astDummy = new THREE.Object3D();
+const asteroids = [];
+for (let i = 0; i < AST_COUNT; i++) {
+  asteroids.push({ a: Math.random() * Math.PI * 2, r: rand(28, 45), y: rand(-3, 30),
+    sx: rand(0.6, 2.4), sy: rand(0.6, 2.4), sz: rand(0.6, 2.4),
+    orbit: rand(0.005, 0.02) * (Math.random() < 0.5 ? 1 : -1),
+    tax: rand(-1, 1), tay: rand(-1, 1), taz: rand(-1, 1), tsp: rand(0.05, 0.3), ph: Math.random() * Math.PI * 2 });
+}
+function updateAsteroids(dt) {
+  for (let i = 0; i < asteroids.length; i++) {
+    const a = asteroids[i];
+    a.a += a.orbit * dt;
+    astDummy.position.set(Math.cos(a.a) * a.r, a.y + Math.sin(elapsed * 0.1 + a.ph) * 0.5, Math.sin(a.a) * a.r);
+    astDummy.rotation.set(a.tax * elapsed * a.tsp, a.tay * elapsed * a.tsp, a.taz * elapsed * a.tsp);
+    astDummy.scale.set(a.sx, a.sy, a.sz);
+    astDummy.updateMatrix();
+    astMesh.setMatrixAt(i, astDummy.matrix);
+  }
+  astMesh.instanceMatrix.needsUpdate = true;
+}
 { // Synthwave grid floor far below, faded by fog
   const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
   const g = cv.getContext('2d');
@@ -405,12 +435,12 @@ const flashQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), flashMat);
 flashQuad.position.z = -0.35; flashQuad.renderOrder = 999;
 camera.add(flashQuad);
 let flash = 0, shakeT = 0;
-// Amber dive-warning flash (camera-space quad, same trick as the hit flash)
-const diveFlashMat = new THREE.MeshBasicMaterial({ color: 0xffb02e, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
-const diveFlashQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), diveFlashMat);
-diveFlashQuad.position.z = -0.36; diveFlashQuad.renderOrder = 998;
-camera.add(diveFlashQuad);
-let diveFlash = 0;
+// Amber lunge-warning flash (camera-space quad, same trick as the hit flash)
+const lungeFlashMat = new THREE.MeshBasicMaterial({ color: 0xffb02e, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
+const lungeFlashQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), lungeFlashMat);
+lungeFlashQuad.position.z = -0.36; lungeFlashQuad.renderOrder = 998;
+camera.add(lungeFlashQuad);
+let lungeFlash = 0;
 
 // ============================== diegetic panels (canvas textures) ==============================
 function makePanel(w, h) {
@@ -438,7 +468,7 @@ scoreMesh.position.set(-0.55, 0.88, -1.5);
 scoreMesh.renderOrder = 997;
 scoreMesh.visible = false;
 camera.add(scoreMesh);
-// Announcement panel, centre above the formation (WAVE N / warnings / bonuses)
+// Announcement panel, centre above the action (WAVE N / warnings / bonuses)
 const annPanel = makePanel(7.2, 1.8);
 const annMesh = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 1.8),
   new THREE.MeshBasicMaterial({ map: annPanel.tex, transparent: true, opacity: 0, toneMapped: false, fog: false, depthWrite: false }));
@@ -475,10 +505,10 @@ let started = false;
 let score = 0, wave = 1, shipsLost = 0;
 // ============================== goal-based difficulty tiers ==============================
 // Every 2500 score = one tier up, on top of the existing per-wave escalation.
-// Tiers never decrease within a run. Each tier: formation march +4% (hard cap
-// 6 respected), enemy bomb rate +5% (0.38s floor respected). From tier 3, one
+// Tiers never decrease within a run. Each tier: swarm approach +4%,
+// enemy bomb rate +5% (0.38s floor respected). From tier 3, one
 // random invader per row becomes an elite: brighter core, 2 HP, double points.
-// Every 5th wave is a SURGE wave: faster march, double bomb rate, double points.
+// Every 5th wave is a SURGE wave: faster approach, double bomb rate, double points.
 // FREEZE GUARD: tiers add no entities and change no pools or caps; while the
 // adaptive valve reports degraded frames, new tier-ups pause until recovery.
 const TIER_POINTS = 2500;
@@ -493,7 +523,7 @@ function checkTierUp() {
   if (degraded) return; // pause escalation while frames degrade; retries on the next score gain
   tier = target;
   markScoreDirty();
-  showAnnouncement('TIER ' + tier, tier >= 3 ? 'Faster march - more bombs - ELITES inbound' : 'Faster march - more bombs', 1.8);
+  showAnnouncement('TIER ' + tier, tier >= 3 ? 'Faster approach - more bombs - ELITES inbound' : 'Faster approach - more bombs', 1.8);
   pickupSound();
   assignElites();
 }
@@ -516,10 +546,10 @@ let hudText = '';
 // Upgrades (U) still stack WITHOUT a maximum — only weapons are capped.
 // Pools (below) are the only other physical limits, and they recycle the
 // oldest live item instead of failing.
-const W = { spread: 0, twin: 0, rail: 0, seeker: 0, bomb: 0 };
+const W = { spread: 0, twin: 0, rail: 0, seeker: 0, spartan: 0 };
 const equipped = []; // weapon keys, at most one
-const WEAPON_LABELS = { spread: 'SPREAD SHOT', twin: 'TWIN LASER', rail: 'RAIL BEAM', seeker: 'SEEKER MISSILES', bomb: 'BOMB ORBS' };
-const WEAPON_SHORT = { spread: 'SPREAD', twin: 'TWIN', rail: 'RAIL', seeker: 'SEEKER', bomb: 'BOMB' };
+const WEAPON_LABELS = { spread: 'SPREAD SHOT', twin: 'TWIN LASER', rail: 'RAIL BEAM', seeker: 'SEEKER MISSILES', spartan: 'SPARTAN LASER' };
+const WEAPON_SHORT = { spread: 'SPREAD', twin: 'TWIN', rail: 'RAIL', seeker: 'SEEKER', spartan: 'SPARTAN' };
 const U = { rate: 0, shield: 0, power: 0, speed: 0 };
 function slotString() {
   return equipped.length ? WEAPON_LABELS[equipped[0]] : '—';
@@ -619,13 +649,10 @@ function invaderBodyGeo(kind) {
     default: return null; // saucer is built from primitives
   }
 }
-const COLS = 10, ROWS = 5, DX = 1.35, DY = 1.15;
-// WIDE VIEW (Danny 2026-10-27: "see the whole thing"): the formation sits
-// farther out (-18 instead of -14) and a touch lower, so the full field —
-// formation, shields, rail and divers — fits in view without turning your head.
-const FORM_Z = -18, FORM_TOP_Y = 8.4, DEFENSE_Y = 2.05;
-const formation = new THREE.Group();
-scene.add(formation);
+const COLS = 10, ROWS = 5; // pool size only now: 50 invaders, no grid — the
+// SURROUND SWARM (Danny 2026-10-27) replaces the flat formation entirely.
+// Invaders spawn on a shell around you and close in from every angle.
+const FORM_Z = -18; // kept only for the (disabled) mothership warm-up position
 const invaders = [];
 const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
 {
@@ -649,33 +676,36 @@ const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
       }
       const core = new THREE.Mesh(coreGeo, coreMat); core.position.z = 0.2; grp.add(core);
       const glow = glowSprite(def.color, 1.85, 0.34); glow.position.z = -0.1; grp.add(glow);
-      const lx = (col - (COLS - 1) / 2) * DX, ly = -row * DY;
-      grp.position.set(lx, ly, 0);
-      formation.add(grp);
-      invaders.push({ grp, core, row, col, lx, ly, alive: true, phase: Math.random() * Math.PI * 2, def, elite: false, hp: 1, points: def.points, diving: false, diveT: 0, diveDur: 0, diveX0: 0, diveY0: 0, diveX1: 0, diveY1: 0 });
+      // Menu-ring start position (the menu branch re-positions every frame);
+      // resetSwarm() re-spawns on the shell when a run starts.
+      const ringA = (row * COLS + col) / (COLS * ROWS) * Math.PI * 2;
+      grp.position.set(Math.cos(ringA) * 14, 5.5, Math.sin(ringA) * 14);
+      scene.add(grp);
+      invaders.push({ grp, core, row, col, alive: true, phase: Math.random() * Math.PI * 2, def, elite: false, hp: 1, points: def.points, lunging: false, lungeT: 0, lungeDur: 0, lungeX0: 0, lungeY0: 0, lungeZ0: 0, lungeX1: 0, lungeY1: 0, lungeZ1: 0, anchorX: 0, anchorY: 0, anchorZ: -1, hold: 8, speed: 0.7, strafe: 0.8, strafeDir: 1 });
     }
   });
 }
-// Instanced detail meshes — children of the formation, so they inherit its march.
+// Instanced detail meshes — children of the scene now (the swarm lives in
+// world space); updateInvaderDetails positions them from world coords + facing.
 const eyeGeo = new THREE.SphereGeometry(0.055, 8, 6);
 const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
 const eyeMesh = new THREE.InstancedMesh(eyeGeo, eyeMat, COLS * ROWS * 2);
 eyeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 eyeMesh.frustumCulled = false;
-formation.add(eyeMesh);
+scene.add(eyeMesh);
 const canopyGeo = new THREE.SphereGeometry(0.16, 10, 8);
 canopyGeo.scale(1, 0.55, 0.8);
 const canopyMesh = new THREE.InstancedMesh(canopyGeo,
   new THREE.MeshStandardMaterial({ color: 0x0a1428, roughness: 0.1, metalness: 0.9 }), COLS * ROWS);
 canopyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 canopyMesh.frustumCulled = false;
-formation.add(canopyMesh);
+scene.add(canopyMesh);
 const ringGeo = new THREE.TorusGeometry(0.3, 0.03, 6, 20);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 const ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, COLS * ROWS);
 ringMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 ringMesh.frustumCulled = false;
-formation.add(ringMesh);
+scene.add(ringMesh);
 {
   const c = new THREE.Color();
   invaders.forEach((v, i) => {
@@ -691,11 +721,13 @@ const detailDummy = new THREE.Object3D();
 const ZERO_SCALE = 0.0001;
 function updateInvaderDetails() {
   // Reuses one dummy object — no allocation per frame. Dead invaders collapse
-  // their instances to zero scale instead of being removed.
+  // their instances to zero scale instead of being removed. Details sit on
+  // the invader's front (facing you) in world space — there is no formation
+  // plane anymore. The dummy's quaternion comes from lookAt once per invader,
+  // so the ring faces you; eye positions use facing/side vectors directly.
   for (let i = 0; i < invaders.length; i++) {
     const v = invaders[i];
-    const gx = v.grp.position.x, gy = v.grp.position.y;
-    if (!v.alive || v.diving) {
+    if (!v.alive) {
       detailDummy.position.set(0, -999, 0);
       detailDummy.scale.setScalar(ZERO_SCALE);
       detailDummy.updateMatrix();
@@ -705,19 +737,28 @@ function updateInvaderDetails() {
       ringMesh.setMatrixAt(i, detailDummy.matrix);
       continue;
     }
+    const gp = v.grp.position;
+    tmpA.copy(playerPos).sub(gp);
+    if (tmpA.lengthSq() < 0.01) tmpA.set(0, 0, 1); else tmpA.normalize();
+    tmpB.crossVectors(UP_Y, tmpA);
+    if (tmpB.lengthSq() < 0.01) tmpB.set(1, 0, 0); else tmpB.normalize();
+    const fx = tmpA.x, fy = tmpA.y, fz = tmpA.z; // facing (toward you)
+    const sx = tmpB.x, sy = tmpB.y, sz = tmpB.z; // side
+    detailDummy.position.copy(gp);
+    detailDummy.lookAt(playerPos.x, playerPos.y, playerPos.z);
     const pulse = 1 + Math.sin(elapsed * 4 + v.phase) * 0.12;
-    detailDummy.position.set(gx - 0.14, gy + 0.12, 0.18);
+    detailDummy.position.set(gp.x - sx * 0.14 + fx * 0.18, gp.y + 0.12 + fy * 0.18, gp.z - sz * 0.14 + fz * 0.18);
     detailDummy.scale.setScalar(pulse);
     detailDummy.updateMatrix();
     eyeMesh.setMatrixAt(i * 2, detailDummy.matrix);
-    detailDummy.position.set(gx + 0.14, gy + 0.12, 0.18);
+    detailDummy.position.set(gp.x + sx * 0.14 + fx * 0.18, gp.y + 0.12 + fy * 0.18, gp.z + sz * 0.14 + fz * 0.18);
     detailDummy.updateMatrix();
     eyeMesh.setMatrixAt(i * 2 + 1, detailDummy.matrix);
-    detailDummy.position.set(gx, gy + 0.3, 0.05);
+    detailDummy.position.set(gp.x + fx * 0.05, gp.y + 0.3 + fy * 0.05, gp.z + fz * 0.05);
     detailDummy.scale.setScalar(1);
     detailDummy.updateMatrix();
     canopyMesh.setMatrixAt(i, detailDummy.matrix);
-    detailDummy.position.set(gx, gy, 0.22);
+    detailDummy.position.set(gp.x + fx * 0.22, gp.y + fy * 0.22, gp.z + fz * 0.22);
     detailDummy.scale.setScalar(pulse * (v.elite ? 1.6 : 1));
     detailDummy.updateMatrix();
     ringMesh.setMatrixAt(i, detailDummy.matrix);
@@ -726,8 +767,7 @@ function updateInvaderDetails() {
   canopyMesh.instanceMatrix.needsUpdate = true;
   ringMesh.instanceMatrix.needsUpdate = true;
 }
-let formX = 0, formY = FORM_TOP_Y, formYTarget = FORM_TOP_Y, marchDir = 1, aliveCount = COLS * ROWS;
-formation.position.set(formX, formY, FORM_Z);
+let aliveCount = COLS * ROWS;
 
 // ============================== shield bunkers (one InstancedMesh) ==============================
 const SHIELD_Z = -9;
@@ -849,6 +889,9 @@ function updateShockwaves(dt) {
 
 // ============================== player weapons (all pooled, recycle-oldest) ==============================
 const aimPoint = new THREE.Vector3(0, 6.2, FORM_Z);
+// YOU, the target: VR = headset world position, desktop = defended point.
+// The swarm, the bombs and the lunge targets all read this, never a rail.
+const playerPos = new THREE.Vector3(0, 1.1, RAIL_Z);
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 const muzzlePos = new THREE.Vector3(), aimDir = new THREE.Vector3();
@@ -882,7 +925,8 @@ function launchBolt(ox, oy, oz, dx, dy, dz) {
   b.vx = tmpA.x * 42; b.vy = tmpA.y * 42; b.vz = tmpA.z * 42;
   b.life = 1.1; b.pierce = U.power; b.active = true; b.grp.visible = true;
 }
-// Rail beams: one stretched additive box, pierces a column of invaders.
+// Beams: one stretched additive box, pierces invaders along its path.
+// Rail = yellow and narrow; Spartan Laser = thick crimson, more kills.
 const beamGeo = new THREE.BoxGeometry(1, 1, 1);
 const beams = [];
 for (let i = 0; i < 2; i++) {
@@ -893,7 +937,7 @@ for (let i = 0; i < 2; i++) {
   beams.push({ mesh, active: false, life: 0 });
 }
 let beamCursor = 0;
-function fireBeam() {
+function fireBeam(beamColor, beamWidth, beamKills, beamRadius) {
   let bm = beams.find(x => !x.active);
   if (!bm) { bm = beams[beamCursor]; beamCursor = (beamCursor + 1) % beams.length; }
   tmpA.copy(aimPoint).sub(muzzlePos);
@@ -903,25 +947,26 @@ function fireBeam() {
   bm.mesh.quaternion.copy(tmpQ);
   tmpB.copy(muzzlePos).addScaledVector(tmpA, len / 2);
   bm.mesh.position.copy(tmpB);
-  const w = Math.min(0.18 + W.rail * 0.02, 0.5);
-  bm.mesh.scale.set(w, w, len);
+  bm.mesh.scale.set(beamWidth, beamWidth, len);
   bm.life = 0.18; bm.active = true; bm.mesh.visible = true;
+  bm.mesh.material.color.setHex(beamColor);
   bm.mesh.material.opacity = 0.9;
-  // Hitscan: kill up to (2 + rail level) invaders near the beam segment.
-  const maxKills = 2 + W.rail, w0 = wave;
+  // Hitscan: kill up to beamKills invaders within beamRadius of the segment.
+  const maxKills = beamKills, w0 = wave;
+  const r2 = beamRadius * beamRadius;
   let kills = 0;
   tmpB.copy(aimPoint).sub(muzzlePos); // segment vector
   const segLenSq = tmpB.lengthSq();
   for (const v of invaders) {
     if (kills >= maxKills || wave !== w0) break;
     if (!v.alive) continue;
-    const wx = v.diving ? v.grp.position.x : formX + v.lx, wy = v.diving ? v.grp.position.y : formY + v.grp.position.y, wz = v.diving ? v.grp.position.z : FORM_Z;
+    const wx = v.grp.position.x, wy = v.grp.position.y, wz = v.grp.position.z;
     tmpA.set(wx - muzzlePos.x, wy - muzzlePos.y, wz - muzzlePos.z);
     let t = segLenSq > 0 ? (tmpA.x * tmpB.x + tmpA.y * tmpB.y + tmpA.z * tmpB.z) / segLenSq : 0;
     t = clamp(t, 0, 1);
     const cx = muzzlePos.x + tmpB.x * t, cy = muzzlePos.y + tmpB.y * t, cz = muzzlePos.z + tmpB.z * t;
     const dx = wx - cx, dy = wy - cy, dz = wz - cz;
-    if (dx * dx + dy * dy + dz * dz < 0.56) { killInvader(v); kills++; }
+    if (dx * dx + dy * dy + dz * dz < r2) { killInvader(v); kills++; }
   }
   // SHOOT-TO-COLLECT: the beam also collects floating pickups near its path.
   for (const pk of pickups) {
@@ -932,7 +977,7 @@ function fireBeam() {
     t2 = clamp(t2, 0, 1);
     const cx2 = muzzlePos.x + tmpB.x * t2, cy2 = muzzlePos.y + tmpB.y * t2, cz2 = muzzlePos.z + tmpB.z * t2;
     const dx2 = pp.x - cx2, dy2 = pp.y - cy2, dz2 = pp.z - cz2;
-    if (dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < 0.56) collectPickup(pk);
+    if (dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < r2) collectPickup(pk);
   }
 }
 // Seeker missiles: homing cones, pooled.
@@ -955,58 +1000,7 @@ function fireMissile(ox, oy, oz, dx, dy, dz) {
   m.vx = dx * 20; m.vy = dy * 20; m.vz = dz * 20;
   m.life = 4; m.active = true; m.grp.visible = true;
 }
-// Bomb orbs: slow, fat, AoE explosion.
-const orbGeo = new THREE.SphereGeometry(0.3, 14, 12);
-const orbMat = new THREE.MeshBasicMaterial({ color: 0xff7e47, toneMapped: false });
-const orbs = [];
-for (let i = 0; i < 6; i++) {
-  const grp = new THREE.Group();
-  grp.add(new THREE.Mesh(orbGeo, orbMat));
-  grp.add(glowSprite(0xff7e47, 1.7, 0.8));
-  grp.visible = false;
-  scene.add(grp);
-  orbs.push({ grp, active: false, vx: 0, vy: 0, vz: 0 });
-}
-let orbCursor = 0;
-function fireOrb(ox, oy, oz, dx, dy, dz) {
-  let o = orbs.find(x => !x.active);
-  if (!o) { o = orbs[orbCursor]; orbCursor = (orbCursor + 1) % orbs.length; }
-  o.grp.position.set(ox, oy, oz);
-  o.vx = dx * 13; o.vy = dy * 13; o.vz = dz * 13;
-  o.active = true; o.grp.visible = true;
-}
-function explodeOrb(x, y, z) {
-  spawnBurst(x, y, z, 0xff7e47, 30, 6, 0.8);
-  spawnBurst(x, y, z, 0xffd319, 16, 4.5, 0.6);
-  spawnShockwave(x, y, z, 0xff7e47);
-  boomSound();
-  const w0 = wave, R2 = 2.4 * 2.4;
-  for (const v of invaders) {
-    if (wave !== w0) break;
-    if (!v.alive) continue;
-    if (v.diving) {
-      const dx = v.grp.position.x - x, dy = v.grp.position.y - y, dz = v.grp.position.z - z;
-      if (dx * dx + dy * dy + dz * dz < R2) killInvader(v);
-    } else {
-      const dx = formX + v.lx - x, dy = formY + v.grp.position.y - y;
-      if (dx * dx + dy * dy < R2) killInvader(v);
-    }
-  }
-  for (const mb of bombs) {
-    if (!mb.active) continue;
-    const dx = mb.grp.position.x - x, dy = mb.grp.position.y - y, dz = mb.grp.position.z - z;
-    if (dx * dx + dy * dy + dz * dz < R2) { mb.active = false; mb.grp.visible = false; addScore(5); }
-  }
-  // SHOOT-TO-COLLECT: orb blasts collect floating pickups in their radius.
-  for (const pk of pickups) {
-    if (!pk.active) continue;
-    const pp = pk.grp.position;
-    const dx = pp.x - x, dy = pp.y - y, dz = pp.z - z;
-    if (dx * dx + dy * dy + dz * dz < R2) collectPickup(pk);
-  }
-  markScoreDirty();
-}
-// One trigger pull = the whole uncapped arsenal at once.
+// One trigger pull = base bolt + your one equipped weapon.
 let fireCooldown = 0;
 function fireWeapons(ox, oy, oz) {
   // IRON MAN HANDS: in VR the shots come from the firing hand (ox,oy,oz);
@@ -1027,9 +1021,13 @@ function fireWeapons(ox, oy, oz) {
     const off = (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 0.14;
     launchBolt(muzzlePos.x + off, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
   }
-  if (W.rail >= 1) { fireBeam(); beamSound(); }
+  if (W.rail >= 1) { fireBeam(0xffd319, Math.min(0.18 + W.rail * 0.02, 0.5), 2 + W.rail, 0.75); beamSound(); }
   for (let k = 0; k < W.seeker; k++) fireMissile(muzzlePos.x + (k - (W.seeker - 1) / 2) * 0.2, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
-  for (let k = 0; k < W.bomb; k++) fireOrb(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  // SPARTAN LASER (Danny 2026-10-27, Halo-style): a thick crimson beam that
+  // pierces a whole line of invaders — the famous-laser replacement for the
+  // removed orange bomb orbs. Heavier than the rail beam, so it also slows
+  // the repeat rate (see the volley formula in tick).
+  if (W.spartan >= 1) { fireBeam(0xff2233, 0.35, 8, 0.9); spartanSound(); }
   if (W.seeker >= 1) missileSound();
   muzzleFlash.position.copy(muzzlePos);
   flashT = 0.07;
@@ -1050,7 +1048,7 @@ const PICKUP_TYPES = {
   twin:   { label: 'TWIN LASER', color: 0x27e8ff, weapon: 'twin' },
   rail:   { label: 'RAIL BEAM', color: 0xffd319, weapon: 'rail' },
   seeker: { label: 'SEEKER MISSILES', color: 0x2bff88, weapon: 'seeker' },
-  bomb:   { label: 'BOMB ORBS', color: 0xff7e47, weapon: 'bomb' },
+  spartan: { label: 'SPARTAN LASER', color: 0xff2233, weapon: 'spartan' },
   rate:   { label: 'FIRE RATE', color: 0xff3355, upgrade: 'rate' },
   shield: { label: 'SHIELD LAYER', color: 0x4da6ff, upgrade: 'shield' },
   power:  { label: 'CANNON POWER', color: 0xffffff, upgrade: 'power' },
@@ -1151,21 +1149,25 @@ for (let i = 0; i < 20; i++) {
 }
 let bombTimer = 1.2;
 function dropBomb() {
-  // Pick a random column that still has invaders; the lowest one drops
-  const colsAlive = [];
-  for (let c = 0; c < COLS; c++) if (invaders.some(v => v.alive && !v.diving && v.col === c)) colsAlive.push(c);
-  if (!colsAlive.length) return;
-  const col = colsAlive[Math.floor(Math.random() * colsAlive.length)];
-  let lowest = null;
-  for (const v of invaders) if (v.alive && !v.diving && v.col === col && (!lowest || v.row > lowest.row)) lowest = v;
-  if (!lowest) return;
+  // Only an invader you can actually SEE shoots: within ~70° of where you're
+  // looking (VR: headset forward, desktop: straight ahead). What's behind
+  // you closes in and lunges instead — it never snipes you blind.
+  camera.getWorldDirection(tmpV);
+  const shooters = [];
+  for (const v of invaders) {
+    if (!v.alive || v.lunging) continue;
+    tmpA.copy(v.grp.position).sub(playerPos).normalize();
+    if (tmpA.dot(tmpV) > 0.34) shooters.push(v);
+  }
+  if (!shooters.length) return;
+  const shooter = shooters[Math.floor(Math.random() * shooters.length)];
   for (const b of bombs) {
     if (b.active) continue;
-    const sx = formX + lowest.lx, sy = formY + lowest.grp.position.y - 0.55, sz = FORM_Z;
-    b.grp.position.set(sx, sy, sz);
-    tmpV.set(cannonX + rand(-0.5, 0.5), 0.6, RAIL_Z).sub(b.grp.position).normalize();
-    const sp = Math.min(6.2 + wave * 0.35, 10);
+    b.grp.position.copy(shooter.grp.position);
+    tmpV.copy(playerPos).sub(b.grp.position).normalize();
+    const sp = Math.min(9 + wave * 0.4, 15);
     b.vx = tmpV.x * sp; b.vy = tmpV.y * sp; b.vz = tmpV.z * sp;
+    b.life = 6;
     b.active = true; b.grp.visible = true;
     return;
   }
@@ -1259,6 +1261,7 @@ function blip(freqA, freqB, dur, type, vol) {
 function laserSound() { blip(700, 320, 0.08, 'triangle', 0.07); }
 function invaderHitSound() { blip(300, 130, 0.10, 'sine', 0.10); }
 function beamSound() { blip(1200, 300, 0.15, 'triangle', 0.08); }
+function spartanSound() { blip(300, 80, 0.25, 'triangle', 0.15); } // Spartan Laser: low crimson thump, same soft family as the redesign
 function missileSound() { blip(420, 800, 0.12, 'sine', 0.07); }
 function pickupSound() { blip(660, 1320, 0.14, 'sine', 0.12); blip(990, 1980, 0.18, 'sine', 0.08); }
 function shieldSound() { blip(520, 300, 0.20, 'triangle', 0.12); }
@@ -1337,8 +1340,8 @@ let rightCtl = null, leftCtl = null;
 });
 // IRON MAN HAND CANNONS (Danny 2026-10-27): a glowing palm cannon rides on
 // each controller. In VR the shots come from the firing hand, not the rail —
-// the rail base stays as the thing you defend (bombs/divers still attack it),
-// but your hands are the guns. Hidden whenever not presenting.
+// YOU are the thing you defend now (bombs and lunging flyers come at your
+// position), but your hands are the guns. Hidden whenever not presenting.
 function buildPalmCannon(color) {
   const g = new THREE.Group();
   const disc = new THREE.Mesh(
@@ -1362,7 +1365,7 @@ function buildPalmCannon(color) {
 }
 const handL = buildPalmCannon(0x27e8ff), handR = buildPalmCannon(0x2bff88);
 ctlL.add(handL); ctlR.add(handR);
-// Aim laser from the right controller + aim dot on the formation plane
+// Aim laser from the right controller + aim dot at ray distance
 const laserGeo = new THREE.BufferGeometry();
 laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
 const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({
@@ -1375,7 +1378,6 @@ aimDot.position.copy(aimPoint);
 scene.add(aimDot);
 
 const raycaster = new THREE.Raycaster();
-const aimPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -FORM_Z); // plane z = FORM_Z
 const DEAD = 0.12;
 const fireHands = { left: false, right: false }; // which VR triggers are held, reset each poll
 function pollInput(dt) {
@@ -1410,13 +1412,17 @@ function pollInput(dt) {
   // scale the input, so control stays in the player's hand.
   const slideSpeed = 9.5 * (1 + U.speed * 0.08);
   cannonX = clamp(cannonX + steer * slideSpeed * dt, RAIL_MIN, RAIL_MAX);
-  // Aim resolution
+  // Aim resolution — SURROUND: the aim point is a point 14 units along the
+  // aim ray (controller ray in VR, mouse ray on desktop), so you can aim at
+  // invaders in ANY direction, not just at a flat plane in front of you.
+  // No x/y clamps anymore: clamping would make high, low and behind-you
+  // invaders unhittable in VR.
   let aimed = false;
   if (renderer.xr.isPresenting && rightCtl) {
     tmpV.setFromMatrixPosition(rightCtl.matrixWorld);
     tmpV2.set(0, 0, -1).applyQuaternion(rightCtl.getWorldQuaternion(tmpQ));
-    raycaster.set(tmpV, tmpV2);
-    if (raycaster.ray.intersectPlane(aimPlane, aimPoint)) aimed = true;
+    aimPoint.copy(tmpV).addScaledVector(tmpV2, 14);
+    aimed = true;
     // Laser from the controller to the aim point
     const lp = laserGeo.attributes.position.array;
     lp[0] = tmpV.x; lp[1] = tmpV.y; lp[2] = tmpV.z;
@@ -1427,53 +1433,65 @@ function pollInput(dt) {
     laser.visible = false;
     if (mouseSeen && !renderer.xr.isPresenting) {
       raycaster.setFromCamera(mouseNDC, camera);
-      if (raycaster.ray.intersectPlane(aimPlane, aimPoint)) aimed = true;
+      aimPoint.copy(raycaster.ray.origin).addScaledVector(raycaster.ray.direction, 14);
+      aimed = true;
       // Desktop: the cannon also eases toward the aim x when no key steering
       if (steer === 0) cannonX = clamp(lerp(cannonX, clamp(aimPoint.x, RAIL_MIN, RAIL_MAX), 1 - Math.pow(0.002, dt)), RAIL_MIN, RAIL_MAX);
     }
   }
-  if (!aimed) aimPoint.set(cannonX * 0.6, 6.2, FORM_Z);
-  aimPoint.y = clamp(aimPoint.y, 0.4, 12.5);
-  aimPoint.x = clamp(aimPoint.x, -11, 11);
+  if (!aimed) aimPoint.set(cannonX * 0.6, 6.2, -14);
   aimDot.position.copy(aimPoint);
   return fire;
 }
 
 // ============================== game flow ==============================
-function resetFormation(fullRestore) {
-  if (fullRestore) {
-    for (const v of invaders) { v.alive = true; v.grp.visible = true; v.elite = false; v.hp = 1; v.points = v.def.points; }
-    aliveCount = COLS * ROWS;
-  }
-  // Divers live in world space (children of scene); put every invader back
-  // into formation-local space so the next wave marches correctly.
-  // DIVER FIX: on a landing (fullRestore=false) an active diver keeps flying
-  // to the rail — yanking it back to the formation made divers vanish mid-dive.
-  // Only a full wave restore clears divers.
+function resetSwarm() {
+  // SURROUND SPAWN: every invader gets an anchor direction on a shell around
+  // you. VR: full sphere (every angle). Desktop: front cone only — a flat
+  // screen can't show what's behind you, so desktop anchors stay in view
+  // (within ~65° of straight ahead, y 1..13 at radius 15-17).
+  const presenting = renderer.xr.isPresenting;
   for (const v of invaders) {
-    if (v.diving && !fullRestore) continue;
-    if (v.diving || v.grp.parent !== formation) { formation.add(v.grp); v.grp.position.set(v.lx, v.ly, 0); v.grp.rotation.set(0, 0, 0); v.grp.scale.set(1, 1, 1); }
-    v.diving = false;
+    v.alive = true; v.grp.visible = true; v.elite = false; v.hp = 1; v.points = v.def.points;
+    v.lunging = false; v.grp.scale.set(1, 1, 1); v.grp.rotation.set(0, 0, 0);
+    let ax, ay, az;
+    if (presenting) {
+      do {
+        const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1));
+        ax = Math.sin(ph) * Math.cos(th); ay = Math.cos(ph); az = Math.sin(ph) * Math.sin(th);
+      } while (ay < 0.03);
+    } else {
+      ax = rand(-0.85, 0.85); ay = rand(0.05, 0.75); az = -Math.sqrt(Math.max(0.1, 1 - ax * ax - ay * ay));
+    }
+    const al = Math.hypot(ax, ay, az) || 1;
+    v.anchorX = ax / al; v.anchorY = ay / al; v.anchorZ = az / al;
+    v.hold = rand(7, 9);
+    v.strafe = rand(0.6, 1.4);
+    v.strafeDir = Math.random() < 0.5 ? 1 : -1;
+    const r = rand(15, 17);
+    v.grp.position.set(v.anchorX * r, Math.max(0.5, v.anchorY * r), v.anchorZ * r);
+    const glow = v.grp.children[v.grp.children.length - 1];
+    glow.material.color.setHex(v.def.color);
+    v.diveGlowBase = null;
   }
-  if (fullRestore) divers.length = 0;
-  formX = 0; marchDir = 1;
-  formY = Math.max(FORM_TOP_Y - (wave - 1) * 0.35, 7.0); // harder every level: later waves start lower, closer to you
-  formYTarget = formY;
-  formation.position.set(formX, formY, FORM_Z);
+  assignElites(); // elites must exist before speeds are set (elites are faster)
+  for (const v of invaders) {
+    v.speed = Math.min(1.6, (0.55 + (wave - 1) * 0.06 + tier * 0.04) * (surgeWave ? 1.4 : 1)) * (v.elite ? 1.25 : 1);
+  }
+  aliveCount = COLS * ROWS;
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
   bombTimer = 1.4;
-  assignElites();
+  lungeTimer = 2; // first lunge ~2s into every wave
 }
 function startWave() {
   surgeWave = (wave % 5 === 0);
-  resetFormation(true);
-  diverTimer = 2; // first dive ~2s into every wave (Danny 2026-10-27: divers every 2 seconds)
+  resetSwarm();
   resetShields();
   markScoreDirty();
-  if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster march, double bombs!', 2.2);
+  if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster approach, double bombs!', 2.2);
   else showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
-  if (wave > 1) { // wave-clear bonus: 1 free upgrade pickup rains into the field
-    spawnPickup(rand(-6, 6), rand(9, 11), FORM_Z, UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
+  if (wave > 1) { // wave-clear bonus: 1 free upgrade pickup rains into the front field
+    spawnPickup(rand(-6, 6), rand(3, 9), rand(-14, -8), UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
   }
   setDroneLevel(wave); // danger bed gets slightly louder every wave
 }
@@ -1482,14 +1500,13 @@ function startGame() {
   started = true;
   mode = 'play';
   score = 0; wave = 1; shipsLost = 0; tier = 0; surgeWave = false;
-  W.spread = W.twin = W.rail = W.seeker = W.bomb = 0;
+  W.spread = W.twin = W.rail = W.seeker = W.spartan = 0;
   equipped.length = 0;
   U.rate = U.shield = U.power = U.speed = 0;
   drawnScore = drawnWave = drawnLost = -1;
   cannonX = 0;
   for (const p of pickups) { p.active = false; p.grp.visible = false; }
   for (const m of missiles) { m.active = false; m.grp.visible = false; }
-  for (const o of orbs) { o.active = false; o.grp.visible = false; }
   for (const bm of beams) { bm.active = false; bm.mesh.visible = false; }
   startWave();
 }
@@ -1499,8 +1516,8 @@ function playerHit() {
   // the shield shimmer already shows you are protected. Red + shake now fire
   // ONLY on a real hit that actually costs a shield layer or a ship.
   if (shimmerT > 0) return;
-  spawnBurst(cannonX, 1.1, RAIL_Z, 0xff5533, 34, 5.5, 0.8);
-  spawnBurst(cannonX, 1.1, RAIL_Z, 0xffd319, 18, 4, 0.6);
+  spawnBurst(playerPos.x, playerPos.y, playerPos.z, 0xff5533, 34, 5.5, 0.8);
+  spawnBurst(playerPos.x, playerPos.y, playerPos.z, 0xffd319, 18, 4, 0.6);
   boomSound();
   flash = 0.85; shakeT = 0.4;
   if (U.shield > 0) {                  // a shield layer absorbs the hit, no ship lost
@@ -1516,17 +1533,6 @@ function playerHit() {
   markScoreDirty();
   showAnnouncement('SHIP HIT!', 'Ships lost: ' + shipsLost + ' — plenty more where that came from', 1.4);
 }
-function formationLanded() {
-  shipsLost++;
-  flash = 0.7; shakeT = 0.35;
-  boomSound();
-  markScoreDirty();
-  showAnnouncement('THEY LANDED!', 'Survivors return to the top — ships lost: ' + shipsLost, 1.8);
-  // Landing NO LONGER revives dead invaders: the survivors return to the top
-  // and keep marching, and the wave ends only when every invader is killed.
-  resetFormation(false);
-}
-
 // ============================== per-frame updates ==============================
 // ROUND-2 adaptive safety valve: rolling average frame time. When it exceeds
 // ~20ms the game automatically sheds load (halved particle spawns, shield
@@ -1535,38 +1541,8 @@ function formationLanded() {
 // uncapped throughout.
 let avgFrameMs = 16, degraded = false, frameNo = 0;
 let elapsed = 0;
-function updateFormation(dt) {
-  const deadFrac = 1 - aliveCount / (COLS * ROWS);
-  // FREEZE FIX: march speed is hard-capped at 6 so late waves can't spiral.
-  // STEEP RAMP (Danny 2026-10-27: harder every level beaten): +0.30/wave base, +8% per tier; SURGE waves +40%.
-  const marchSpeed = Math.min(6, (0.8 + (wave - 1) * 0.30) * (1 + deadFrac * 1.9) * (1 + tier * 0.08) * (surgeWave ? 1.4 : 1));
-  formX += marchDir * marchSpeed * dt;
-  // Side-bounce is silent now (Danny 2026-10-27: no sound when the formation
-  // hits either side of the screen) — the march still turns and drops.
-  // SMOOTH MARCH (Danny 2026-10-27): wider sweep (±3.5 instead of ±2.3) so
-  // the side-to-side motion is unmistakable, and the drop eases down over
-  // ~0.3s instead of jumping 0.45 in one frame (that jump read as a glitch).
-  if (formX > 3.5) { formX = 3.5; marchDir = -1; formYTarget -= 0.45; }
-  else if (formX < -3.5) { formX = -3.5; marchDir = 1; formYTarget -= 0.45; }
-  formY += (formYTarget - formY) * Math.min(1, dt * 10);
-  formation.position.set(formX, formY, FORM_Z);
-  // Gentle bob + glow pulse per invader
-  for (const v of invaders) {
-    if (!v.alive || v.diving) continue;
-    v.grp.position.y = v.ly + Math.sin(elapsed * 2.1 + v.phase + v.col * 0.35) * 0.05;
-    const s = (1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18) * (v.elite ? 1.4 : 1);
-    v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
-    if (v.core) v.core.scale.setScalar(v.elite ? 1.8 : 1); // elite: brighter, bigger core
-  }
-  updateInvaderDetails();
-  // Bottom row reached the defense line?
-  if (formY - (ROWS - 1) * DY <= DEFENSE_Y) formationLanded();
-}
 function killInvader(v) {
-  // Divers live in world space; formation members in formation space.
-  const kx = v.diving ? v.grp.position.x : formX + v.lx;
-  const ky = v.diving ? v.grp.position.y : formY + v.grp.position.y;
-  const kz = v.diving ? v.grp.position.z : FORM_Z;
+  const kx = v.grp.position.x, ky = v.grp.position.y, kz = v.grp.position.z;
   if (v.elite && v.hp > 1) { // elite absorbs the first hit — brighter core, 2 HP
     v.hp--;
     spawnBurst(kx, ky, kz, v.def.color, 10, 3.5, 0.4);
@@ -1574,19 +1550,19 @@ function killInvader(v) {
     markScoreDirty();
     return;
   }
-  const wasDiving = v.diving;
-  if (wasDiving) { v.diving = false; const di = divers.indexOf(v); if (di >= 0) divers.splice(di, 1); }
-  v.alive = false; v.grp.visible = false;
+  const wasLunging = v.lunging;
+  v.lunging = false;
+  v.alive = false; v.grp.visible = false; v.grp.scale.set(1, 1, 1);
   aliveCount--;
   addScore(v.points);
-  if (wasDiving) { addScore(DIVER_BONUS); showAnnouncement('DIVER DOWN!', '+' + DIVER_BONUS + ' bonus', 1.4); }
+  if (wasLunging) { addScore(LUNGE_BONUS); showAnnouncement('FLYER DOWN!', '+' + LUNGE_BONUS + ' bonus', 1.4); }
   spawnBurst(kx, ky, kz, v.def.color, 24, 4.6, 0.7);
   spawnShockwave(kx, ky, kz, v.def.color);
   invaderHitSound();
   // Pickup economy ("easy, but not that easy"): regular kills only rarely
   // drop an UPGRADE (5%); WEAPONS come only from hard kills — elites and
-  // divers at 50%, the mothership always (see the mothership hit block).
-  if (v.elite || wasDiving) { if (Math.random() < 0.50) spawnPickup(kx, ky, kz, WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)]); }
+  // lunging flyers at 50%, the mothership always (see the mothership hit block).
+  if (v.elite || wasLunging) { if (Math.random() < 0.50) spawnPickup(kx, ky, kz, WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)]); }
   else if (Math.random() < 0.05) spawnPickup(kx, ky, kz, UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
   markScoreDirty();
   if (aliveCount <= 0) {
@@ -1633,16 +1609,19 @@ function updateBolts(dt) {
         const dx = p.x - pp.x, dy = p.y - pp.y, dz = p.z - pp.z;
         if (dx * dx + dy * dy + dz * dz < 0.49) collectPickup(pk);
       }
-      // Divers (world-space box test — they fly in z, so the formation-plane
-      // test below can never hit them). The divers list is capped, so
-      // this scan stays cheap even with a full volley in flight. The z
-      // half-depth (1.2) exceeds one frame of bolt travel at the 0.05s dt
-      // cap, so fast bolts cannot tunnel through a diver between frames.
-      for (let di = divers.length - 1; di >= 0; di--) {
-        const v = divers[di];
+      // Swarm invaders (sphere test in world space — they come from every
+      // angle now, so there is no formation plane to test against). The
+      // radius grows with the invader's loom scale, so a lunging flyer that
+      // looks huge is just as huge a target. Cannon Power = pierce: the
+      // bolt keeps flying through up to `pierce` invaders instead of dying
+      // on one. Bolt speed 42 × dt cap 0.05 = 2.1/frame max, under the 0.85
+      // radius, so fast bolts cannot tunnel through between frames.
+      for (const v of invaders) {
         if (!v.alive) continue;
         const dp = v.grp.position;
-        if (Math.abs(p.x - dp.x) < 0.7 && Math.abs(p.y - dp.y) < 0.65 && Math.abs(p.z - dp.z) < 1.2) {
+        const dx = p.x - dp.x, dy = p.y - dp.y, dz = p.z - dp.z;
+        const rr = 0.85 * v.grp.scale.x;
+        if (dx * dx + dy * dy + dz * dz < rr * rr) {
           killInvader(v);
           if (b.pierce > 0) b.pierce--;
           else b.active = false;
@@ -1650,21 +1629,6 @@ function updateBolts(dt) {
         }
       }
       if (!b.active) break boltStep;
-      // Invaders (box test in formation space). Cannon Power = pierce: the bolt
-      // keeps flying through up to `pierce` invaders instead of dying on one.
-      const fx = p.x - formX, fy = p.y - formY;
-      if (Math.abs(p.z - FORM_Z) < 0.75) {
-        for (const v of invaders) {
-          if (!v.alive || v.diving) continue;
-          if (Math.abs(fx - v.lx) < 0.6 && Math.abs(fy - v.grp.position.y) < 0.55) {
-            killInvader(v);
-            if (b.pierce > 0) b.pierce--;
-            else b.active = false;
-            break;
-          }
-        }
-        if (!b.active) break boltStep;
-      }
       // Bombs can be shot down
       for (const mb of bombs) {
         if (!mb.active) continue;
@@ -1682,7 +1646,7 @@ function updateBolts(dt) {
     }
     if (b.active) {
       b.life -= dt;
-      if (b.life <= 0 || b.grp.position.y < -0.5 || b.grp.position.y > 16 || b.grp.position.z < -24) b.active = false;
+      if (b.life <= 0 || b.grp.position.y < -0.5 || b.grp.position.length() > 30) b.active = false;
     }
     b.grp.visible = b.active;
   }
@@ -1702,13 +1666,13 @@ function updateMissiles(dt) {
     let best = null, bestD2 = Infinity;
     for (const v of invaders) {
       if (!v.alive) continue;
-      const wx = v.diving ? v.grp.position.x : formX + v.lx, wy = v.diving ? v.grp.position.y : formY + v.grp.position.y, wz = v.diving ? v.grp.position.z : FORM_Z;
+      const wx = v.grp.position.x, wy = v.grp.position.y, wz = v.grp.position.z;
       const dx = wx - m.grp.position.x, dy = wy - m.grp.position.y, dz = wz - m.grp.position.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 < bestD2) { bestD2 = d2; best = v; }
     }
     if (best) {
-      tmpA.set((best.diving ? best.grp.position.x : formX + best.lx) - m.grp.position.x, (best.diving ? best.grp.position.y : formY + best.grp.position.y) - m.grp.position.y, (best.diving ? best.grp.position.z : FORM_Z) - m.grp.position.z).normalize();
+      tmpA.set(best.grp.position.x - m.grp.position.x, best.grp.position.y - m.grp.position.y, best.grp.position.z - m.grp.position.z).normalize();
       const k = 1 - Math.exp(-5 * dt);
       m.vx += (tmpA.x * 26 - m.vx) * k;
       m.vy += (tmpA.y * 26 - m.vy) * k;
@@ -1736,38 +1700,9 @@ function updateMissiles(dt) {
       if (dx * dx + dy * dy + dz * dz < 0.49) collectPickup(pk);
     }
     m.life -= dt;
-    if (m.life <= 0 || m.grp.position.z < FORM_Z - 2 || m.grp.position.y < -0.5 || m.grp.position.y > 16) {
+    if (m.life <= 0 || m.grp.position.y < -0.5 || m.grp.position.length() > 30) {
       m.active = false; m.grp.visible = false;
     }
-  }
-}
-function updateOrbs(dt) {
-  for (const o of orbs) {
-    if (!o.active) continue;
-    o.grp.position.x += o.vx * dt;
-    o.grp.position.y += o.vy * dt;
-    o.grp.position.z += o.vz * dt;
-    const p = o.grp.position;
-    let boom = false;
-    if (p.z <= FORM_Z + 0.6) boom = true;
-    else {
-      for (const v of invaders) {
-        if (!v.alive) continue;
-        if (v.diving) {
-          const dx = v.grp.position.x - p.x, dy = v.grp.position.y - p.y, dz = v.grp.position.z - p.z;
-          if (dx * dx + dy * dy + dz * dz < 1.0) { boom = true; break; }
-        } else {
-          const dx = formX + v.lx - p.x, dy = formY + v.grp.position.y - p.y;
-          if (dx * dx + dy * dy < 1.0) { boom = true; break; }
-        }
-      }
-    }
-    if (boom) {
-      o.active = false; o.grp.visible = false;
-      explodeOrb(p.x, p.y, p.z);
-      continue;
-    }
-    if (p.y < -0.5 || p.y > 16 || p.z < -26) { o.active = false; o.grp.visible = false; }
   }
 }
 function updateBombs(dt) {
@@ -1788,14 +1723,17 @@ function updateBombs(dt) {
       b.active = false; b.grp.visible = false;
       continue;
     }
-    // Cannon zone: a hit on the cannon/platform centre costs a ship (never the game)
-    if (p.y <= 1.25 && Math.abs(p.x - cannonX) < 1.05 && Math.abs(p.z - RAIL_Z) < 1.05) {
+    // Hit test is distance to YOU now (VR: headset, desktop: defended point) —
+    // bombs come from every angle, so the old rail-zone box can't work.
+    b.life -= dt;
+    const dx = p.x - playerPos.x, dy = p.y - playerPos.y, dz = p.z - playerPos.z;
+    if (dx * dx + dy * dy + dz * dz < 1.1) {
       b.active = false; b.grp.visible = false;
       playerHit();
       continue;
     }
-    if (p.y <= 0.22) {
-      spawnBurst(p.x, 0.3, p.z, 0xff5533, 10, 3, 0.5);
+    if (p.y <= 0.22 || b.life <= 0 || p.length() > 30) {
+      if (p.y <= 0.22) spawnBurst(p.x, 0.3, p.z, 0xff5533, 10, 3, 0.5);
       b.active = false; b.grp.visible = false;
     }
   }
@@ -1822,113 +1760,131 @@ function updateMother(dt) {
   }
 }
 
-// ============================== dive-attack invaders ==============================
-// The formation keeps marching side to side exactly as before. On top of that,
-// living invaders break away about every 2 seconds and swoop toward the player.
-// Divers reuse the existing invader pool — no new entities, no new geometry:
-// the diver's group is reparented from `formation` to `scene` so it can travel
-// in z, and put back by resetFormation. Its instanced eyes/canopy/ring details
-// are hidden while diving (they live in formation space); the body, core and
-// glow sprite travel with the group, and the glow is boosted so divers read
-// clearly. A diver that reaches the rail counts exactly like a bomb hit:
-// a shield layer absorbs it, otherwise one ship-lost stat — never a game over.
-const divers = []; // invaders currently diving (cap 4)
+// ============================== surround swarm ==============================
+// SURROUND SWARM (Danny 2026-10-27): no more flat formation. Invaders live
+// in world space all the time, spawn on a shell around you, hold station at
+// their anchor's range while strafing around you, and break off into lunges
+// that fly straight at you. A lunge target is locked at launch, so stepping
+// aside dodges it; a spent flyer bursts and leaves the wave either way.
+// The wave ends only when every invader is SHOT. The scary-approach work
+// (loom, redden, faster pulse, proximity heartbeat) now keys off lunge
+// progress instead of the old dive progress.
 const SCARY_RED = new THREE.Color(0xff2233); // flyers turn this red as they close in
-let diverTimer = 2;
-let lastDiverWarn = 0; // proximity-heartbeat timer, see updateDivers
-const DIVER_BONUS = 50;
-function maxDivers() { return wave >= 2 ? 4 : 2; } // cap raised so the ~2s cadence below is real, not queue-limited
-function nextDiverInterval() { return rand(1.9, 2.1); } // Danny 2026-10-27: a dive about every 2 seconds, all game long
-function diverSound() { blip(880, 300, 0.5, 'triangle', 0.10); blip(1320, 400, 0.4, 'sine', 0.06); blip(660, 220, 0.4, 'triangle', 0.05); }
-function startDiver() {
+let lungeTimer = 2;
+let lastLungeWarn = 0; // proximity-heartbeat timer, see updateSwarm
+const LUNGE_BONUS = 50;
+function maxLunges() { return wave >= 2 ? 4 : 2; }
+function nextLungeInterval() { return rand(1.9, 2.1); } // a lunge about every 2 seconds, all game long
+function lungeSound() { blip(880, 300, 0.5, 'triangle', 0.10); blip(1320, 400, 0.4, 'sine', 0.06); blip(660, 220, 0.4, 'triangle', 0.05); }
+function startLunge() {
   const candidates = [];
-  for (const v of invaders) if (v.alive && !v.diving) candidates.push(v);
+  for (const v of invaders) if (v.alive && !v.lunging) candidates.push(v);
   if (!candidates.length) return;
   const v = candidates[Math.floor(Math.random() * candidates.length)];
-  // World position right now, before leaving formation space.
-  const wx = formX + v.lx, wy = formY + v.grp.position.y;
-  scene.add(v.grp);
-  v.grp.position.set(wx, wy, FORM_Z);
-  v.grp.rotation.set(0, 0, 0);
-  v.diving = true; v.diveT = 0;
-  v.diveDur = Math.max(2.4, 5.0 - wave * 0.3 - tier * 0.15); // STEEP RAMP: dives get faster every wave/tier; 2.4s floor keeps them dodgeable
-  v.diveX0 = wx; v.diveY0 = wy;
-  // DIVER FIX: the rail target is clamped to the forward view cone (±0.9 =
-  // tan(30°) × rail distance 1.6). Diving at an off-center cannon let the diver
-  // slide out of the player's view sideways as it closed in — it "disappeared"
-  // mid-dive. Arrival still counts exactly like a bomb hit.
-  v.diveX1 = clamp(cannonX + rand(-1.8, 1.8), -2.5, 2.5); v.diveY1 = 1.9; // wider fan: dives spread across the sky instead of stacking on one point
-  // Brighter than formation invaders: oversized glow (pulsed per frame below).
-  // Each invader owns its glow sprite material, so tinting one diver red as
-  // it closes in never leaks into the rest of the formation (body/core
-  // materials are shared per row, so those are never tinted per diver).
-  const dGlow = v.grp.children[v.grp.children.length - 1];
-  dGlow.scale.set(4.2, 4.2, 1);
-  v.diveGlowBase = dGlow.material.color.clone();
-  v.grp.scale.set(1, 1, 1); // a previous dive's loom never carries over
-  divers.push(v);
-  diverSound();
-  diveFlash = 0.5; // amber screen-edge warning flash
-  showAnnouncement('DIVER INBOUND!', 'It broke from the formation — shoot it down!', 2.4);
+  v.lunging = true; v.lungeT = 0;
+  v.lungeDur = Math.max(2.4, 5.0 - wave * 0.3 - tier * 0.15); // lunges get faster every wave/tier; 2.4s floor keeps them dodgeable
+  v.lungeX0 = v.grp.position.x; v.lungeY0 = v.grp.position.y; v.lungeZ0 = v.grp.position.z;
+  v.lungeX1 = playerPos.x; v.lungeY1 = playerPos.y; v.lungeZ1 = playerPos.z;
+  // Brighter than swarm invaders: oversized glow (pulsed per frame below).
+  // Each invader owns its glow sprite material, so tinting one flyer red as
+  // it closes in never leaks into the rest of the swarm (body/core materials
+  // are shared per row, so those are never tinted per invader).
+  const lGlow = v.grp.children[v.grp.children.length - 1];
+  lGlow.scale.set(4.2, 4.2, 1);
+  v.diveGlowBase = lGlow.material.color.clone();
+  v.grp.scale.set(1, 1, 1); // a previous lunge's loom never carries over
+  lungeSound();
+  lungeFlash = 0.5; // amber screen-edge warning flash
+  showAnnouncement('FLYER INBOUND!', 'It broke from the swarm — shoot it down!', 2.4);
 }
-function updateDivers(dt) {
-  if (divers.length < maxDivers()) {
-    diverTimer -= dt;
-    if (diverTimer <= 0) { startDiver(); diverTimer = nextDiverInterval(); }
+function updateSwarm(dt) {
+  // Lunge spawner (same ~2s cadence the divers had).
+  let lunging = 0;
+  for (const v of invaders) if (v.alive && v.lunging) lunging++;
+  if (lunging < maxLunges()) {
+    lungeTimer -= dt;
+    if (lungeTimer <= 0) { startLunge(); lungeTimer = nextLungeInterval(); }
   }
   const w0 = wave;
-  for (let i = divers.length - 1; i >= 0; i--) {
-    const v = divers[i];
-    if (!v.alive) { divers.splice(i, 1); continue; }
-    v.diveT += dt;
-    const t = Math.min(v.diveT / v.diveDur, 1);
-    const ease = t * t * (3 - 2 * t);
-    // DIVER FIX: sway starts at zero (the old form was nonzero at t=0, which
-    // would teleport the diver on its first frame once the cone clamp applies).
-    const sway = Math.sin(t * Math.PI) * Math.sin(t * Math.PI * 2 + v.phase) * 1.2;
-    const diveZ = FORM_Z + (RAIL_Z - FORM_Z) * ease;
-    // DIVER FIX: keep the diver inside the forward view cone for the whole dive.
-    // At close range a fixed x subtends a huge angle (x=2 at z=-1.6 is 51° off
-    // axis, far outside the ~35° half-FOV), so clamp x to tan(30°) × distance.
-    const coneX = Math.abs(diveZ) * 0.577;
-    v.grp.position.x = clamp(v.diveX0 + (v.diveX1 - v.diveX0) * ease + sway, -coneX, coneX);
-    v.grp.position.y = v.diveY0 + (v.diveY1 - v.diveY0) * ease + Math.sin(t * Math.PI) * 1.2;
-    v.grp.position.z = diveZ;
-    v.grp.rotation.z = Math.cos(t * Math.PI * 2 + v.phase) * 0.4;
-    // SCARY APPROACH (Danny 2026-10-27): the closer a flyer gets, the bigger,
-    // redder and faster-pulsing it becomes — it looms at you.
-    const loom = 1 + t * 0.7;
-    v.grp.scale.set(loom, loom, loom);
-    const gs = (4.0 + t * 3.0) + Math.sin(elapsed * (10 + t * 14) + v.phase) * (0.8 + t * 1.2);
-    const dGlow = v.grp.children[v.grp.children.length - 1];
-    dGlow.scale.set(gs, gs, 1);
-    if (v.diveGlowBase) dGlow.material.color.copy(v.diveGlowBase).lerp(SCARY_RED, t * t);
-    if (t >= 1) {
-      // Reached the rail — but ONLY a hit if it actually arrives at the
-      // player's cannon. The dive target was locked when the dive started,
-      // so sliding away dodges it: the diver fizzles harmlessly, no red
-      // flash, no shake, no penalty. Never a game over either way.
-      divers.splice(i, 1);
-      v.diving = false; v.alive = false; v.grp.visible = false;
-      aliveCount--;
-      spawnBurst(v.grp.position.x, 1.4, RAIL_Z, 0xff5533, 24, 5, 0.7);
-      if (Math.abs(v.grp.position.x - cannonX) < 1.0) playerHit();
-      if (aliveCount <= 0) { wave++; startWave(); }
-      if (wave !== w0) break;
+  for (const v of invaders) {
+    if (!v.alive) continue;
+    const gp = v.grp.position;
+    if (v.lunging) {
+      v.lungeT += dt;
+      const t = Math.min(v.lungeT / v.lungeDur, 1);
+      const ease = t * t * (3 - 2 * t);
+      // Sway perpendicular to the lunge line, zero at both ends.
+      tmpA.set(v.lungeX1 - v.lungeX0, v.lungeY1 - v.lungeY0, v.lungeZ1 - v.lungeZ0);
+      const ll = tmpA.length() || 1; tmpA.divideScalar(ll);
+      tmpB.crossVectors(UP_Y, tmpA);
+      if (tmpB.lengthSq() < 0.01) tmpB.set(1, 0, 0); else tmpB.normalize();
+      const sway = Math.sin(t * Math.PI) * Math.sin(t * Math.PI * 2 + v.phase) * 1.2;
+      gp.set(
+        v.lungeX0 + (v.lungeX1 - v.lungeX0) * ease + tmpB.x * sway,
+        v.lungeY0 + (v.lungeY1 - v.lungeY0) * ease + Math.sin(t * Math.PI) * 1.2,
+        v.lungeZ0 + (v.lungeZ1 - v.lungeZ0) * ease + tmpB.z * sway
+      );
+      if (gp.y < 0.4) gp.y = 0.4;
+      v.grp.rotation.z = Math.cos(t * Math.PI * 2 + v.phase) * 0.4;
+      // SCARY APPROACH: the closer a flyer gets, the bigger, redder and
+      // faster-pulsing it becomes — it looms at you.
+      const loom = 1 + t * 0.7;
+      v.grp.scale.set(loom, loom, loom);
+      const gs = (4.0 + t * 3.0) + Math.sin(elapsed * (10 + t * 14) + v.phase) * (0.8 + t * 1.2);
+      const lGlow = v.grp.children[v.grp.children.length - 1];
+      lGlow.scale.set(gs, gs, 1);
+      if (v.diveGlowBase) lGlow.material.color.copy(v.diveGlowBase).lerp(SCARY_RED, t * t);
+      if (t >= 1) {
+        // Reached you — a hit only if it actually arrives at your position
+        // (the lunge target was locked at launch, so sidestepping dodges
+        // it). Either way the flyer is spent: it bursts and leaves the
+        // wave, exactly like the old divers. Never a game over.
+        v.lunging = false; v.alive = false; v.grp.visible = false; v.grp.scale.set(1, 1, 1);
+        aliveCount--;
+        spawnBurst(gp.x, gp.y, gp.z, 0xff5533, 24, 5, 0.7);
+        tmpA.copy(playerPos).sub(gp);
+        if (tmpA.length() < 1.2) playerHit();
+        if (aliveCount <= 0) { wave++; startWave(); }
+        if (wave !== w0) break;
+      }
+      continue;
     }
+    // Approach / orbit: hold station at your anchor's range, strafing around
+    // it so the swarm stays spread around you instead of clumping in front.
+    tmpA.copy(playerPos).sub(gp);
+    const dist = tmpA.length() || 1;
+    tmpA.divideScalar(dist);
+    const radial = clamp((dist - v.hold) * 1.0, -v.speed, v.speed);
+    let vx = tmpA.x * radial, vy = tmpA.y * radial, vz = tmpA.z * radial;
+    tmpB.crossVectors(UP_Y, tmpA);
+    if (tmpB.lengthSq() < 0.01) tmpB.set(1, 0, 0); else tmpB.normalize();
+    const strafeAmp = v.strafe * (0.5 + 0.5 * Math.sin(elapsed * 0.5 + v.phase)) * v.strafeDir;
+    vx += tmpB.x * strafeAmp; vy += tmpB.y * strafeAmp * 0.3; vz += tmpB.z * strafeAmp;
+    // Weak anchor pull keeps the angular spread (no clumping).
+    tmpB.set(playerPos.x + v.anchorX * v.hold - gp.x, playerPos.y + v.anchorY * v.hold - gp.y, playerPos.z + v.anchorZ * v.hold - gp.z);
+    const ad = tmpB.length() || 1; tmpB.divideScalar(ad);
+    vx += tmpB.x * 0.15; vy += tmpB.y * 0.15; vz += tmpB.z * 0.15;
+    gp.x += vx * dt; gp.y += vy * dt; gp.z += vz * dt;
+    if (gp.y < 0.5) gp.y = 0.5;
+    if (dist > 0.5) v.grp.lookAt(playerPos.x, playerPos.y, playerPos.z);
+    // Gentle glow pulse + elite core (same read as the old formation bob).
+    const s = (1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18) * (v.elite ? 1.4 : 1);
+    v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
+    if (v.core) v.core.scale.setScalar(v.elite ? 1.8 : 1);
   }
-  // Proximity heartbeat: the nearest flyer past halfway triggers a soft,
-  // rising pulse — faster as it closes in. Quiet by design (see the sound
-  // redesign): a low triangle blip, never a harsh alarm.
+  updateInvaderDetails();
+  // Proximity heartbeat: the nearest lunging flyer past halfway triggers a
+  // soft, rising pulse — faster as it closes in. Quiet by design (see the
+  // sound redesign): a low triangle blip, never a harsh alarm.
   let closest = 0;
-  for (const v of divers) if (v.alive) closest = Math.max(closest, Math.min(v.diveT / v.diveDur, 1));
+  for (const v of invaders) if (v.alive && v.lunging) closest = Math.max(closest, Math.min(v.lungeT / v.lungeDur, 1));
   if (closest > 0.5) {
     const interval = 0.5 - (closest - 0.5) * 0.76; // 0.5s at halfway → 0.12s at impact
-    if (elapsed - lastDiverWarn >= interval) {
-      lastDiverWarn = elapsed;
+    if (elapsed - lastLungeWarn >= interval) {
+      lastLungeWarn = elapsed;
       blip(170, 110, 0.12, 'triangle', 0.08);
     }
-  } else lastDiverWarn = elapsed;
+  } else lastLungeWarn = elapsed;
 }
 
 // ============================== ENTER VR flow (Rad VR pattern) ==============================
@@ -2011,8 +1967,10 @@ function tick() {
     const fire = pollInput(dt);
     // NO RAIL CANNON (Danny 2026-10-27): in VR you ARE the target — the
     // defended point follows your headset, so stepping aside dodges bombs
-    // and divers. Desktop keeps the sliding defended point from pollInput.
-    if (presenting) { camera.getWorldPosition(tmpA); cannonX = clamp(tmpA.x, RAIL_MIN, RAIL_MAX); }
+    // and lunges. Desktop keeps the sliding defended point from pollInput.
+    // playerPos is what the whole swarm aims at.
+    if (presenting) { camera.getWorldPosition(tmpA); cannonX = clamp(tmpA.x, RAIL_MIN, RAIL_MAX); playerPos.copy(tmpA); }
+    else playerPos.set(cannonX, 1.1, RAIL_Z);
     fireCooldown -= dt;
     if (fire && fireCooldown <= 0) {
       // IRON MAN HANDS: in VR each trigger-holding hand fires its own full
@@ -2023,28 +1981,32 @@ function tick() {
         if (!leftCtl && !rightCtl) fireWeapons();
       } else fireWeapons();
       // ONE WEAPON (Danny 2026-10-27): a single equipped weapon, so one pull
-      // launches at most 3 bolts (spread) + 1 beam — the old "everything
-      // at once" volley was the freeze path. The interval still grows with
-      // volley size as a second bound, and upgrades (U.rate) still stack
-      // without limit — the rate floor is 0.02s, not a cap on the upgrade.
-      const volley = 1 + 2 * W.spread + W.twin + W.seeker + W.bomb;
+      // launches at most 3 bolts (spread) + 1 beam (rail or Spartan) — the
+      // old "everything at once" volley was the freeze path. The interval
+      // still grows with volley size as a second bound, and upgrades
+      // (U.rate) still stack without limit — the rate floor is 0.02s, not
+      // a cap on the upgrade. The Spartan Laser counts triple (heavy weapon).
+      const volley = 1 + 2 * W.spread + W.twin + W.seeker + W.spartan * 3;
       fireCooldown = Math.max(0.02, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
     }
-    updateFormation(dt);
-    updateDivers(dt);
+    updateSwarm(dt);
     updateBolts(dt);
     updateBeams(dt);
     updateMissiles(dt);
-    updateOrbs(dt);
     updatePickups(dt);
     updateBombs(dt);
     updateMother(dt);
     flushScorePanel(dt);
   } else {
-    // Menu: formation idles in place as a backdrop
-    formation.position.set(Math.sin(elapsed * 0.24) * 0.8, FORM_TOP_Y, FORM_Z);
-    for (const v of invaders) {
-      v.grp.position.y = v.ly + Math.sin(elapsed * 2.1 + v.phase + v.col * 0.35) * 0.05;
+    // Menu: the swarm idles in a slow ring around you as a backdrop
+    playerPos.set(0, 1.6, 0);
+    for (let i = 0; i < invaders.length; i++) {
+      const v = invaders[i];
+      const a = i / invaders.length * Math.PI * 2 + elapsed * 0.05;
+      v.grp.position.set(Math.cos(a) * 14, 5.5 + Math.sin(a * 2 + elapsed * 0.7) * 1.2, Math.sin(a) * 14);
+      v.grp.lookAt(0, 1.6, 0);
+      const s = 1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18;
+      v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
     }
     updateInvaderDetails();
   }
@@ -2060,7 +2022,7 @@ function tick() {
   thruster.scale.set(tp, tp, 1);
   thruster.material.opacity = 0.4 + Math.sin(elapsed * 9) * 0.12;
 
-  // Rig: desktop sits at standing height and tilts up at the formation;
+  // Rig: desktop sits at standing height and tilts up at the swarm;
   // in VR the headset owns the pose (tilt zeroed, holder only lifts a
   // height-less local-space fallback — same rule as Rad VR).
   if (presenting) {
@@ -2077,8 +2039,8 @@ function tick() {
   } else shakeGroup.position.set(0, 0, 0);
   flash = Math.max(0, flash - dt * 1.7);
   flashMat.opacity = flash * 0.75;
-  diveFlash = Math.max(0, diveFlash - dt * 1.4);
-  diveFlashMat.opacity = diveFlash * 0.5;
+  lungeFlash = Math.max(0, lungeFlash - dt * 1.4);
+  lungeFlashMat.opacity = lungeFlash * 0.5;
 
   // Shield bubble: bright flash while invulnerable, else a faint persistent
   // shell while shield layers remain, stronger with more layers.
@@ -2099,18 +2061,22 @@ function tick() {
   planetA.rotation.y += dt * 0.008;
   planetB.rotation.y += dt * 0.012;
   planetC.rotation.y += dt * 0.02;
-  // Shooting star: idle countdown, then a ~2.4s streak across the far sky
+  // Shooting stars: idle countdown, then a ~1.8s streak across the far sky,
+  // starting at a random azimuth so they appear all around you, not just ahead
+  updateAsteroids(dt);
   if (shootT > 0) {
     shootT -= dt;
-    const p = 1 - Math.max(shootT, 0) / 2.4;
-    shootStar.position.set(shootX0 + p * 90, shootY0 - p * 18, -200);
-    shootStar.material.opacity = Math.sin(p * Math.PI) * 0.85;
+    const p = 1 - Math.max(shootT, 0) / 1.8;
+    shootStar.position.set(shootX0 + shootDX * p * 90, shootY0 - p * 18, shootZ0 + shootDZ * p * 90);
+    shootStar.material.opacity = Math.sin(p * Math.PI) * 1.0;
     if (shootT <= 0) shootStar.material.opacity = 0;
   } else {
     shootTimer -= dt;
     if (shootTimer <= 0) {
-      shootX0 = rand(-130, 20); shootY0 = rand(35, 95);
-      shootT = 2.4; shootTimer = rand(20, 40);
+      const th = Math.random() * Math.PI * 2;
+      shootX0 = Math.sin(th) * 200; shootZ0 = Math.cos(th) * 200; shootY0 = rand(25, 110);
+      shootDX = Math.cos(th); shootDZ = -Math.sin(th);
+      shootT = 1.8; shootTimer = rand(6, 12);
     }
   }
 
