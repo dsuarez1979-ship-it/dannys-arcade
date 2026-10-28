@@ -385,6 +385,7 @@ const railGroup = new THREE.Group();
 const cannon = new THREE.Group();          // slides along the rail (x only)
 const barrel = new THREE.Group();          // pivots to aim
 let cannonX = 0;
+let dodgeX = 0; // VR thumbstick sidestep offset, springs back to 0 in tick
 {
   const hullMat = new THREE.MeshStandardMaterial({ color: 0x1c2742, roughness: 0.35, metalness: 0.8 });
   const accentMat = new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false });
@@ -441,6 +442,46 @@ const lungeFlashQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), lungeFlashM
 lungeFlashQuad.position.z = -0.36; lungeFlashQuad.renderOrder = 998;
 camera.add(lungeFlashQuad);
 let lungeFlash = 0;
+// Direction indicators (Danny 2026-10-27): edge arrows in your view showing
+// which direction the swarm is coming from. White-drawn canvas textures,
+// tinted per frame: cyan for nearby invaders, red pulsing for a lunging
+// flyer in that direction, orange-red U-turn for threats behind you.
+function makeArrowTexture(draw) {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#ffffff'; g.strokeStyle = '#ffffff';
+  draw(g);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const chevronTex = makeArrowTexture(g => { g.beginPath(); g.moveTo(64, 8); g.lineTo(112, 104); g.lineTo(16, 104); g.closePath(); g.fill(); });
+const uturnTex = makeArrowTexture(g => {
+  g.lineWidth = 14; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(28, 96); g.quadraticCurveTo(28, 24, 64, 24); g.quadraticCurveTo(100, 24, 100, 62); g.stroke();
+  g.beginPath(); g.moveTo(84, 50); g.lineTo(114, 50); g.lineTo(99, 82); g.closePath(); g.fill();
+});
+function makeInd(tex, x, y, rot) {
+  const m = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthTest: false, toneMapped: false, fog: false });
+  m.rotation = rot;
+  const s = new THREE.Sprite(m);
+  s.scale.set(0.14, 0.14, 1);
+  s.position.set(x, y, -0.9);
+  s.renderOrder = 997;
+  camera.add(s);
+  return s;
+}
+const indL = makeInd(chevronTex, -0.62, 0, Math.PI / 2);
+const indR = makeInd(chevronTex, 0.62, 0, -Math.PI / 2);
+const indU = makeInd(chevronTex, 0, 0.42, 0);
+const indD = makeInd(chevronTex, 0, -0.38, Math.PI);
+const indB = makeInd(uturnTex, 0, -0.60, 0);
+const indQ = new THREE.Quaternion();
+function setInd(spr, strength, isLunge, pulse, baseColor) {
+  if (strength <= 0) { spr.material.opacity = 0; return; }
+  spr.material.opacity = Math.min(0.95, strength * 0.6) * (isLunge ? pulse : 1);
+  spr.material.color.setHex(isLunge ? 0xff2233 : baseColor);
+}
 
 // ============================== diegetic panels (canvas textures) ==============================
 function makePanel(w, h) {
@@ -529,7 +570,7 @@ function checkTierUp() {
 }
 function assignElites() {
   if (tier < 3) return;
-  for (let row = 0; row < ROWS; row++) {
+  for (let row = 0; row < ROW_DEFS.length; row++) {
     const alive = invaders.filter(v => v.row === row && v.alive);
     if (!alive.length || alive.some(v => v.elite)) continue;
     const pick = alive[Math.floor(Math.random() * alive.length)];
@@ -649,60 +690,63 @@ function invaderBodyGeo(kind) {
     default: return null; // saucer is built from primitives
   }
 }
-const COLS = 10, ROWS = 5; // pool size only now: 50 invaders, no grid — the
-// SURROUND SWARM (Danny 2026-10-27) replaces the flat formation entirely.
-// Invaders spawn on a shell around you and close in from every angle.
+const SWARM_COUNT = 24; // invaders at once (Danny 2026-10-27: cut from 50 —
+// 50 all around was visual overload). The SURROUND SWARM replaces the flat
+// formation entirely: invaders spawn on a shell around you and close in
+// from every angle.
 const FORM_Z = -18; // kept only for the (disabled) mothership warm-up position
 const invaders = [];
 const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
 {
   const saucerBeltGeo = new THREE.CylinderGeometry(0.47, 0.53, 0.15, 18);
   const saucerDomeGeo = new THREE.SphereGeometry(0.27, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
-  ROW_DEFS.forEach((def, row) => {
-    const bodyMat = new THREE.MeshStandardMaterial({
+  const mats = ROW_DEFS.map(def => ({
+    def,
+    bodyMat: new THREE.MeshStandardMaterial({
       color: new THREE.Color(def.color).multiplyScalar(0.35),
       emissive: def.color, emissiveIntensity: 0.55,
       roughness: 0.4, metalness: 0.3
-    });
-    const coreMat = new THREE.MeshBasicMaterial({ color: def.color, toneMapped: false });
-    const bodyGeo = invaderBodyGeo(def.kind);
-    for (let col = 0; col < COLS; col++) {
-      const grp = new THREE.Group();
-      if (def.kind === 'saucer') {
-        const belt = new THREE.Mesh(saucerBeltGeo, bodyMat); grp.add(belt);
-        const dome = new THREE.Mesh(saucerDomeGeo, bodyMat); dome.scale.y = 0.75; dome.position.y = 0.06; grp.add(dome);
-      } else {
-        grp.add(new THREE.Mesh(bodyGeo, bodyMat));
-      }
-      const core = new THREE.Mesh(coreGeo, coreMat); core.position.z = 0.2; grp.add(core);
-      const glow = glowSprite(def.color, 1.85, 0.34); glow.position.z = -0.1; grp.add(glow);
-      // Menu-ring start position (the menu branch re-positions every frame);
-      // resetSwarm() re-spawns on the shell when a run starts.
-      const ringA = (row * COLS + col) / (COLS * ROWS) * Math.PI * 2;
-      grp.position.set(Math.cos(ringA) * 14, 5.5, Math.sin(ringA) * 14);
-      scene.add(grp);
-      invaders.push({ grp, core, row, col, alive: true, phase: Math.random() * Math.PI * 2, def, elite: false, hp: 1, points: def.points, lunging: false, lungeT: 0, lungeDur: 0, lungeX0: 0, lungeY0: 0, lungeZ0: 0, lungeX1: 0, lungeY1: 0, lungeZ1: 0, anchorX: 0, anchorY: 0, anchorZ: -1, hold: 8, speed: 0.7, strafe: 0.8, strafeDir: 1 });
+    }),
+    coreMat: new THREE.MeshBasicMaterial({ color: def.color, toneMapped: false }),
+    bodyGeo: invaderBodyGeo(def.kind)
+  }));
+  for (let i = 0; i < SWARM_COUNT; i++) {
+    const m = mats[i % mats.length];
+    const grp = new THREE.Group();
+    if (m.def.kind === 'saucer') {
+      const belt = new THREE.Mesh(saucerBeltGeo, m.bodyMat); grp.add(belt);
+      const dome = new THREE.Mesh(saucerDomeGeo, m.bodyMat); dome.scale.y = 0.75; dome.position.y = 0.06; grp.add(dome);
+    } else {
+      grp.add(new THREE.Mesh(m.bodyGeo, m.bodyMat));
     }
-  });
+    const core = new THREE.Mesh(coreGeo, m.coreMat); core.position.z = 0.2; grp.add(core);
+    const glow = glowSprite(m.def.color, 1.85, 0.34); glow.position.z = -0.1; grp.add(glow);
+    // Menu-ring start position (the menu branch re-positions every frame);
+    // resetSwarm() re-spawns on the shell when a run starts.
+    const ringA = i / SWARM_COUNT * Math.PI * 2;
+    grp.position.set(Math.cos(ringA) * 14, 5.5, Math.sin(ringA) * 14);
+    scene.add(grp);
+    invaders.push({ grp, core, row: i % ROW_DEFS.length, alive: true, phase: Math.random() * Math.PI * 2, def: m.def, elite: false, hp: 1, points: m.def.points, lunging: false, lungeT: 0, lungeDur: 0, lungeX0: 0, lungeY0: 0, lungeZ0: 0, lungeX1: 0, lungeY1: 0, lungeZ1: 0, anchorX: 0, anchorY: 0, anchorZ: -1, hold: 8, speed: 0.7, strafe: 0.8, strafeDir: 1 });
+  }
 }
 // Instanced detail meshes — children of the scene now (the swarm lives in
 // world space); updateInvaderDetails positions them from world coords + facing.
 const eyeGeo = new THREE.SphereGeometry(0.055, 8, 6);
 const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
-const eyeMesh = new THREE.InstancedMesh(eyeGeo, eyeMat, COLS * ROWS * 2);
+const eyeMesh = new THREE.InstancedMesh(eyeGeo, eyeMat, SWARM_COUNT * 2);
 eyeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 eyeMesh.frustumCulled = false;
 scene.add(eyeMesh);
 const canopyGeo = new THREE.SphereGeometry(0.16, 10, 8);
 canopyGeo.scale(1, 0.55, 0.8);
 const canopyMesh = new THREE.InstancedMesh(canopyGeo,
-  new THREE.MeshStandardMaterial({ color: 0x0a1428, roughness: 0.1, metalness: 0.9 }), COLS * ROWS);
+  new THREE.MeshStandardMaterial({ color: 0x0a1428, roughness: 0.1, metalness: 0.9 }), SWARM_COUNT);
 canopyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 canopyMesh.frustumCulled = false;
 scene.add(canopyMesh);
 const ringGeo = new THREE.TorusGeometry(0.3, 0.03, 6, 20);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
-const ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, COLS * ROWS);
+const ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, SWARM_COUNT);
 ringMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 ringMesh.frustumCulled = false;
 scene.add(ringMesh);
@@ -767,7 +811,7 @@ function updateInvaderDetails() {
   canopyMesh.instanceMatrix.needsUpdate = true;
   ringMesh.instanceMatrix.needsUpdate = true;
 }
-let aliveCount = COLS * ROWS;
+let aliveCount = SWARM_COUNT;
 
 // ============================== shield bunkers (one InstancedMesh) ==============================
 const SHIELD_Z = -9;
@@ -895,6 +939,7 @@ const playerPos = new THREE.Vector3(0, 1.1, RAIL_Z);
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 const muzzlePos = new THREE.Vector3(), aimDir = new THREE.Vector3();
+const volleyAim = new THREE.Vector3(); // the aim this volley actually uses (per-hand in VR)
 const UP_Y = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
@@ -940,7 +985,7 @@ let beamCursor = 0;
 function fireBeam(beamColor, beamWidth, beamKills, beamRadius) {
   let bm = beams.find(x => !x.active);
   if (!bm) { bm = beams[beamCursor]; beamCursor = (beamCursor + 1) % beams.length; }
-  tmpA.copy(aimPoint).sub(muzzlePos);
+  tmpA.copy(volleyAim).sub(muzzlePos);
   const len = tmpA.length();
   tmpA.normalize();
   tmpQ.setFromUnitVectors(Z_AXIS, tmpA);
@@ -955,7 +1000,7 @@ function fireBeam(beamColor, beamWidth, beamKills, beamRadius) {
   const maxKills = beamKills, w0 = wave;
   const r2 = beamRadius * beamRadius;
   let kills = 0;
-  tmpB.copy(aimPoint).sub(muzzlePos); // segment vector
+  tmpB.copy(volleyAim).sub(muzzlePos); // segment vector
   const segLenSq = tmpB.lengthSq();
   for (const v of invaders) {
     if (kills >= maxKills || wave !== w0) break;
@@ -1002,15 +1047,20 @@ function fireMissile(ox, oy, oz, dx, dy, dz) {
 }
 // One trigger pull = base bolt + your one equipped weapon.
 let fireCooldown = 0;
-function fireWeapons(ox, oy, oz) {
+function fireWeapons(ox, oy, oz, tx, ty, tz) {
   // IRON MAN HANDS: in VR the shots come from the firing hand (ox,oy,oz);
   // on desktop ox/oy/oz are omitted and the rail barrel stays the muzzle.
+  // tx/ty/tz (VR hands only): that hand's OWN aim point — each hand fires
+  // where IT points, never slaved to the other controller. Desktop omits
+  // them and uses the shared mouse aim point.
   if (ox === undefined) {
     tmpV.set(0, 0.03, 0.85);
     barrel.localToWorld(tmpV);
     muzzlePos.copy(tmpV);
   } else muzzlePos.set(ox, oy, oz);
-  aimDir.copy(aimPoint).sub(muzzlePos).normalize();
+  if (tx === undefined) volleyAim.copy(aimPoint);
+  else volleyAim.set(tx, ty, tz);
+  aimDir.copy(volleyAim).sub(muzzlePos).normalize();
   launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
   for (let i = 1; i <= W.spread; i++) { // fan pairs, ±i steps of ~3.2°
     const a = i * 0.055, c = Math.cos(a), s = Math.sin(a);
@@ -1036,10 +1086,12 @@ function fireWeapons(ox, oy, oz) {
 // Fire one full volley from a VR hand: origin just past the palm, aimed at
 // the same aim point the controller ray is pointing at.
 function fireHand(ctl) {
+  // INDEPENDENT HANDS: this hand's palm is the muzzle AND its ray is the
+  // aim — the left hand no longer shoots where the right hand points.
   tmpV.setFromMatrixPosition(ctl.matrixWorld);
   tmpV2.set(0, 0, -1).applyQuaternion(ctl.getWorldQuaternion(tmpQ));
-  tmpV.addScaledVector(tmpV2, 0.1);
-  fireWeapons(tmpV.x, tmpV.y, tmpV.z);
+  const px = tmpV.x + tmpV2.x * 0.1, py = tmpV.y + tmpV2.y * 0.1, pz = tmpV.z + tmpV2.z * 0.1;
+  fireWeapons(px, py, pz, tmpV.x + tmpV2.x * 14, tmpV.y + tmpV2.y * 14, tmpV.z + tmpV2.z * 14);
 }
 
 // ============================== pickups (pooled, recycle-oldest) ==============================
@@ -1395,8 +1447,11 @@ function pollInput(dt) {
       for (const src of session.inputSources) {
         const gp = src.gamepad;
         if (!gp) continue;
-        if (gp.axes && gp.axes.length > 2) {
-          const ax = gp.axes[2] || 0;
+        // Quest thumbstick X is axes[0] (the old axes[2] never fired on
+        // Quest — its gamepads report only 2 axes — which is part of why
+        // the sticks felt dead). Either stick steers; strongest wins.
+        if (gp.axes && gp.axes.length > 0) {
+          const ax = gp.axes[0] || 0;
           if (Math.abs(ax) > DEAD && Math.abs(ax) > Math.abs(steer)) steer = ax;
         }
         if (gp.buttons && gp.buttons[0] && gp.buttons[0].value > 0.35) {
@@ -1412,23 +1467,38 @@ function pollInput(dt) {
   // scale the input, so control stays in the player's hand.
   const slideSpeed = 9.5 * (1 + U.speed * 0.08);
   cannonX = clamp(cannonX + steer * slideSpeed * dt, RAIL_MIN, RAIL_MAX);
+  // VR thumbstick dodge (either hand): a sidestep that springs back — the
+  // tick applies + decays it, so the sticks finally move you in VR.
+  if (renderer.xr.isPresenting) dodgeX = clamp(dodgeX + steer * 6 * dt, -2.5, 2.5);
   // Aim resolution — SURROUND: the aim point is a point 14 units along the
   // aim ray (controller ray in VR, mouse ray on desktop), so you can aim at
   // invaders in ANY direction, not just at a flat plane in front of you.
   // No x/y clamps anymore: clamping would make high, low and behind-you
   // invaders unhittable in VR.
   let aimed = false;
-  if (renderer.xr.isPresenting && rightCtl) {
-    tmpV.setFromMatrixPosition(rightCtl.matrixWorld);
-    tmpV2.set(0, 0, -1).applyQuaternion(rightCtl.getWorldQuaternion(tmpQ));
-    aimPoint.copy(tmpV).addScaledVector(tmpV2, 14);
-    aimed = true;
-    // Laser from the controller to the aim point
-    const lp = laserGeo.attributes.position.array;
-    lp[0] = tmpV.x; lp[1] = tmpV.y; lp[2] = tmpV.z;
-    lp[3] = aimPoint.x; lp[4] = aimPoint.y; lp[5] = aimPoint.z;
-    laserGeo.attributes.position.needsUpdate = true;
-    laser.visible = true;
+  if (renderer.xr.isPresenting) {
+    // Aim hand: right preferred for the guide laser/dot, left if the right
+    // isn't connected, headset forward if neither — firing itself is fully
+    // per-hand (see fireHand), this only drives the visual guide.
+    const aimCtl = rightCtl || leftCtl;
+    if (aimCtl) {
+      tmpV.setFromMatrixPosition(aimCtl.matrixWorld);
+      tmpV2.set(0, 0, -1).applyQuaternion(aimCtl.getWorldQuaternion(tmpQ));
+      aimPoint.copy(tmpV).addScaledVector(tmpV2, 14);
+      aimed = true;
+      // Laser from the aim hand to the aim point
+      const lp = laserGeo.attributes.position.array;
+      lp[0] = tmpV.x; lp[1] = tmpV.y; lp[2] = tmpV.z;
+      lp[3] = aimPoint.x; lp[4] = aimPoint.y; lp[5] = aimPoint.z;
+      laserGeo.attributes.position.needsUpdate = true;
+      laser.visible = true;
+    } else {
+      laser.visible = false;
+      camera.getWorldPosition(tmpV);
+      camera.getWorldDirection(tmpV2);
+      aimPoint.copy(tmpV).addScaledVector(tmpV2, 14);
+      aimed = true;
+    }
   } else {
     laser.visible = false;
     if (mouseSeen && !renderer.xr.isPresenting) {
@@ -1478,7 +1548,7 @@ function resetSwarm() {
   for (const v of invaders) {
     v.speed = Math.min(1.6, (0.55 + (wave - 1) * 0.06 + tier * 0.04) * (surgeWave ? 1.4 : 1)) * (v.elite ? 1.25 : 1);
   }
-  aliveCount = COLS * ROWS;
+  aliveCount = SWARM_COUNT;
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
   bombTimer = 1.4;
   lungeTimer = 2; // first lunge ~2s into every wave
@@ -1710,7 +1780,7 @@ function updateBombs(dt) {
   if (bombTimer <= 0) {
     dropBomb();
     // STEEP RAMP (Danny 2026-10-27): -0.12/wave, interval x0.92^tier, SURGE x0.4; 0.38s floor kept so fire never becomes a wall.
-    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.12 - (1 - aliveCount / (COLS * ROWS)) * 0.3) * Math.pow(0.92, tier) * (surgeWave ? 0.4 : 1));
+    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.12 - (1 - aliveCount / SWARM_COUNT) * 0.3) * Math.pow(0.92, tier) * (surgeWave ? 0.4 : 1));
   }
   for (const b of bombs) {
     if (!b.active) continue;
@@ -1967,14 +2037,21 @@ function tick() {
     const fire = pollInput(dt);
     // NO RAIL CANNON (Danny 2026-10-27): in VR you ARE the target — the
     // defended point follows your headset, so stepping aside dodges bombs
-    // and lunges. Desktop keeps the sliding defended point from pollInput.
+    // and lunges — plus either thumbstick adds a sidestep that springs
+    // back. Desktop keeps the sliding defended point from pollInput.
     // playerPos is what the whole swarm aims at.
-    if (presenting) { camera.getWorldPosition(tmpA); cannonX = clamp(tmpA.x, RAIL_MIN, RAIL_MAX); playerPos.copy(tmpA); }
+    if (presenting) {
+      camera.getWorldPosition(tmpA);
+      dodgeX *= Math.pow(0.02, dt); // sidestep springs back
+      cannonX = clamp(tmpA.x + dodgeX, RAIL_MIN, RAIL_MAX);
+      playerPos.copy(tmpA); playerPos.x = cannonX;
+    }
     else playerPos.set(cannonX, 1.1, RAIL_Z);
     fireCooldown -= dt;
     if (fire && fireCooldown <= 0) {
       // IRON MAN HANDS: in VR each trigger-holding hand fires its own full
-      // volley from the palm; desktop/rail firing is unchanged.
+      // volley from its own palm toward where THAT hand points;
+      // desktop/rail firing is unchanged.
       if (presenting && (fireHands.left || fireHands.right)) {
         if (fireHands.left && leftCtl) fireHand(leftCtl);
         if (fireHands.right && rightCtl) fireHand(rightCtl);
@@ -2009,6 +2086,39 @@ function tick() {
       v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
     }
     updateInvaderDetails();
+  }
+
+  // Direction indicators: which way is the swarm coming from? Each invader
+  // votes for its sector (camera space: +z is behind you), weighted by
+  // closeness, doubled for lunging flyers. Play mode only.
+  if (mode === 'play') {
+    camera.getWorldQuaternion(indQ).invert();
+    let sL = 0, sR = 0, sU = 0, sD = 0, sB = 0;
+    let lL = false, lR = false, lU = false, lD = false, lB = false;
+    for (const v of invaders) {
+      if (!v.alive) continue;
+      tmpA.copy(v.grp.position).sub(playerPos);
+      const d = tmpA.length() || 1; tmpA.divideScalar(d);
+      tmpA.applyQuaternion(indQ);
+      const w = v.lunging ? 2 : 1;
+      const str = w * clamp(1.6 - d / 20, 0.25, 1.2);
+      if (tmpA.z > 0.2) { if (str > sB) sB = str; if (v.lunging) lB = true; }
+      else if (Math.abs(tmpA.x) > Math.abs(tmpA.y)) {
+        if (tmpA.x < 0) { if (str > sL) sL = str; if (v.lunging) lL = true; }
+        else { if (str > sR) sR = str; if (v.lunging) lR = true; }
+      } else {
+        if (tmpA.y > 0) { if (str > sU) sU = str; if (v.lunging) lU = true; }
+        else { if (str > sD) sD = str; if (v.lunging) lD = true; }
+      }
+    }
+    const pulse = 0.75 + Math.sin(elapsed * 10) * 0.25;
+    setInd(indL, sL, lL, pulse, 0x27e8ff);
+    setInd(indR, sR, lR, pulse, 0x27e8ff);
+    setInd(indU, sU, lU, pulse, 0x27e8ff);
+    setInd(indD, sD, lD, pulse, 0x27e8ff);
+    setInd(indB, sB, lB, pulse, 0xff7e47);
+  } else {
+    indL.material.opacity = indR.material.opacity = indU.material.opacity = indD.material.opacity = indB.material.opacity = 0;
   }
 
   // Cannon + barrel follow
