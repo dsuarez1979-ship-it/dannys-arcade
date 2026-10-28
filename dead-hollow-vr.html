@@ -1175,17 +1175,18 @@ function tick() {
     playerGroup.position.x += (fx * inp.mz + rx * inp.mx) * sp * dt;
     playerGroup.position.z += (fz * inp.mz + rz * inp.mx) * sp * dt;
     playerGroup.rotation.y = yaw;
-    // headset capsule sync + collision (body can't pass walls/furniture)
-    camera.getWorldPosition(tmpV);
-    const des = { x: tmpV.x, z: tmpV.z };
-    collideCircle(des, 0.35, colliders);
-    collideCircle(des, 0.35, furniture);
-    const lx = camera.position.x, lz = camera.position.z;
-    const ox = lx * Math.cos(yaw) + lz * Math.sin(yaw);
-    const oz = -lx * Math.sin(yaw) + lz * Math.cos(yaw);
-    playerGroup.position.x = des.x - ox;
-    playerGroup.position.z = des.z - oz;
-    playerPos.set(des.x, 0, des.z);
+    // locomotion lives on the rig: the stick drives the group directly and
+    // collision runs on the group, so nothing can wipe the movement out.
+    // (The old per-frame headset re-anchor could reset the rig position,
+    // which is why the stick seemed dead while the trigger still worked.)
+    // The headset rides inside the group, so physical walking still moves
+    // the view on top of stick movement.
+    const g = { x: playerGroup.position.x, z: playerGroup.position.z };
+    collideCircle(g, 0.35, colliders);
+    collideCircle(g, 0.35, furniture);
+    playerGroup.position.x = g.x;
+    playerGroup.position.z = g.z;
+    playerPos.set(g.x, 0, g.z);
     // flashlight follows the head
     camera.getWorldPosition(tmpV);
     flash.position.copy(tmpV);
