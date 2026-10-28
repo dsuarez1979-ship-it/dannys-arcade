@@ -148,6 +148,155 @@ function glowTexture(inner, outer) {
   scene.add(moonSpr);
 }
 
+// ============ procedural surface textures (all original canvas art) ============
+function mkTex(w, h, draw, rx, ry) {
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  draw(cv.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(rx || 1, ry || 1);
+  return tex;
+}
+function speckle(g, w, h, n, colors, aMax, sMax) {
+  for (let i = 0; i < n; i++) {
+    g.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+    g.globalAlpha = Math.random() * aMax;
+    const s = 1 + Math.random() * sMax;
+    g.fillRect(Math.random() * w, Math.random() * h, s, s);
+  }
+  g.globalAlpha = 1;
+}
+const asphaltTex = mkTex(512, 128, (g, w, h) => {
+  g.fillStyle = '#191b21'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 2600, ['#22242c', '#121318', '#2a2d36', '#0e0f13'], 0.5, 2);
+  g.fillStyle = 'rgba(190,160,60,0.35)'; // faded double-yellow centerline, worn
+  for (let x = 0; x < w; x += 128) { g.fillRect(x, 56, 64, 4); g.fillRect(x, 68, 64, 4); }
+  g.fillStyle = 'rgba(220,220,220,0.13)'; g.fillRect(0, 6, w, 2); g.fillRect(0, 120, w, 2); // faint edge lines
+  g.strokeStyle = 'rgba(8,8,10,0.7)'; g.lineWidth = 2; // cracks
+  for (let i = 0; i < 7; i++) {
+    g.beginPath(); let x = Math.random() * w, y = Math.random() * h;
+    g.moveTo(x, y);
+    for (let j = 0; j < 4; j++) { x += (Math.random() - 0.5) * 90; y += (Math.random() - 0.5) * 30; g.lineTo(x, y); }
+    g.stroke();
+  }
+  for (let i = 0; i < 6; i++) { // dark patches + oil stains
+    g.fillStyle = 'rgba(10,10,12,0.35)';
+    g.fillRect(Math.random() * w, Math.random() * h, 30 + Math.random() * 70, 12 + Math.random() * 30);
+  }
+}, 16, 1);
+const grassTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#0e1c11'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 2400, ['#122614', '#0a150c', '#1a2e18', '#16240f'], 0.6, 3);
+  for (let i = 0; i < 10; i++) { // dirt / dead-grass patches
+    g.fillStyle = i % 2 ? 'rgba(46,38,22,0.4)' : 'rgba(30,34,14,0.45)';
+    g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, 14 + Math.random() * 30, 10 + Math.random() * 22, Math.random() * 3, 0, 7); g.fill();
+  }
+}, 20, 10);
+function drawConcrete(g, w, h) {
+  g.fillStyle = '#26282f'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 1400, ['#2e3038', '#1e2026', '#34363e'], 0.5, 2);
+  g.strokeStyle = 'rgba(10,10,12,0.55)'; g.lineWidth = 2;
+  for (let x = 0; x <= w; x += 85) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle = 'rgba(12,12,14,0.25)';
+    g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, 12 + Math.random() * 26, 8 + Math.random() * 18, Math.random() * 3, 0, 7); g.fill();
+  }
+}
+const concreteGroundTex = mkTex(256, 256, drawConcrete, 16, 1);
+const plazaTex = concreteGroundTex.clone(); plazaTex.repeat.set(2, 2); plazaTex.needsUpdate = true;
+const concreteWallTex = mkTex(256, 256, drawConcrete, 4, 2);
+const brickTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#3c3c40'; g.fillRect(0, 0, w, h); // mortar (light brick tinted by wall color)
+  const bh = 16, bw = 42;
+  for (let row = 0, y = 0; y < h; row++, y += bh) {
+    const off = row % 2 ? bw / 2 : 0;
+    for (let x = -bw; x < w + bw; x += bw) {
+      const v = 190 + Math.floor(Math.random() * 40);
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(x + off + 1.5, y + 1.5, bw - 3, bh - 3);
+      g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x + off + 1.5, y + bh - 5, bw - 3, 3.5);
+    }
+  }
+}, 5, 2);
+const sidingTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#cfcfcf'; g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 16) {
+    const v = 200 + Math.floor(Math.random() * 30);
+    g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(0, y, w, 14);
+    g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, y + 14, w, 2);
+    g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(0, y, w, 1.5);
+  }
+  speckle(g, w, h, 300, ['#9a9a9a'], 0.25, 2);
+}, 5, 2);
+const shingleTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#262932'; g.fillRect(0, 0, w, h);
+  for (let row = 0, y = 0; y < h; row++, y += 32) {
+    const off = row % 2 ? 21 : 0;
+    for (let x = -42; x < w + 42; x += 42) {
+      const v = 34 + Math.floor(Math.random() * 14);
+      g.fillStyle = `rgb(${v},${v + 2},${v + 6})`;
+      g.beginPath(); g.arc(x + off + 21, y + 32, 21, Math.PI, 0); g.fill();
+      g.fillRect(x + off, y + 4, 42, 28);
+      g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(x + off, y + 30, 42, 2);
+    }
+  }
+}, 1, 1);
+const paintWearTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#d2d2d2'; g.fillRect(0, 0, w, h); // light base so paint color multiplies cleanly
+  speckle(g, w, h, 900, ['#e2e2e2', '#b8b8b8'], 0.4, 2);
+  for (let i = 0; i < 26; i++) { // rust blotches
+    const x = Math.random() * w, y = Math.random() * h, r = 6 + Math.random() * 26;
+    const gr = g.createRadialGradient(x, y, 1, x, y, r);
+    gr.addColorStop(0, 'rgba(122,62,26,0.55)'); gr.addColorStop(0.6, 'rgba(96,50,22,0.28)'); gr.addColorStop(1, 'rgba(96,50,22,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  }
+  g.strokeStyle = 'rgba(60,60,60,0.35)'; g.lineWidth = 1; // scratches / grime streaks
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * w, y = Math.random() * h;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 60, y + (Math.random() - 0.5) * 20); g.stroke();
+  }
+}, 1, 1);
+function drawWinFrame(g, w, h, glass) {
+  g.fillStyle = '#14161c'; g.fillRect(0, 0, w, h); // frame
+  g.fillStyle = glass; g.fillRect(10, 10, w - 20, h - 20); // glass
+  g.fillStyle = '#14161c';
+  g.fillRect(w / 2 - 3, 10, 6, h - 20); // muntin vertical
+  g.fillRect(10, h / 2 - 3, w - 20, 6); // muntin horizontal
+  g.fillStyle = 'rgba(255,255,255,0.10)'; // faint reflection streak
+  g.beginPath(); g.moveTo(18, h - 14); g.lineTo(52, 14); g.lineTo(70, 14); g.lineTo(36, h - 14); g.fill();
+  g.fillStyle = '#2e323c'; g.fillRect(4, h - 12, w - 8, 8); // sill
+}
+const winDarkTex = mkTex(128, 160, (g, w, h) => drawWinFrame(g, w, h, '#0d1622'), 1, 1);
+const winLitTex = mkTex(128, 160, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, 0, h);
+  gr.addColorStop(0, '#ffd489'); gr.addColorStop(1, '#c07a2a');
+  drawWinFrame(g, w, h, gr);
+}, 1, 1);
+const winDarkMat = new THREE.MeshStandardMaterial({ map: winDarkTex, roughness: 0.4, metalness: 0.2 });
+const winLitMat = new THREE.MeshStandardMaterial({ map: winLitTex, emissive: 0xffb85c, emissiveMap: winLitTex, emissiveIntensity: 1.1, roughness: 0.6 });
+const doorTex = mkTex(128, 256, (g, w, h) => {
+  g.fillStyle = '#4a3520'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#2c1e10'; g.lineWidth = 5;
+  g.strokeRect(14, 16, w - 28, 92); g.strokeRect(14, 132, w - 28, 92);
+  g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(14, 16, w - 28, 10);
+  g.fillStyle = '#c8b060'; g.beginPath(); g.arc(w - 26, h / 2, 6, 0, 7); g.fill();
+}, 1, 1);
+const doorMat = new THREE.MeshStandardMaterial({ map: doorTex, roughness: 0.9 });
+const roofMat = new THREE.MeshStandardMaterial({ map: shingleTex, roughness: 1 });
+const porchGlowTex = glowTexture('rgba(255,190,90,0.9)', 'rgba(255,150,40,0)');
+const porchBulbMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.6 });
+const carGlassMat = new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.15, metalness: 0.5 });
+const headlightMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffe6a0, emissiveIntensity: 0.8 });
+const taillightMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2211, emissiveIntensity: 0.6 });
+function flatTex(w, d, x, z, y, tex, color) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: tex, color: color || 0xffffff, roughness: 1 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, y, z);
+  scene.add(m);
+  return m;
+}
+
 // ============ ground, road, sidewalks, plaza ============
 function flat(w, d, x, z, y, color) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color, roughness: 1 }));
@@ -156,13 +305,25 @@ function flat(w, d, x, z, y, color) {
   scene.add(m);
   return m;
 }
-flat(150, 70, 0, 0, 0, 0x0d1a10);            // dark grass base
-flat(132, 10, 0, 0, 0.02, 0x14161c);         // Main Street asphalt
-flat(132, 2.4, 0, -6.2, 0.04, 0x23252e);     // north sidewalk
-flat(132, 2.4, 0, 6.2, 0.04, 0x23252e);      // south sidewalk
-flat(16, 14, 0, 0, 0.03, 0x1d1f28);          // town square plaza
+flatTex(150, 70, 0, 0, 0, grassTex);                 // grass with variation
+flatTex(132, 10, 0, 0, 0.02, asphaltTex);            // Main Street asphalt w/ faded markings
+flatTex(132, 2.4, 0, -6.2, 0.04, concreteGroundTex); // north sidewalk
+flatTex(132, 2.4, 0, 6.2, 0.04, concreteGroundTex);  // south sidewalk
+flatTex(16, 14, 0, 0, 0.03, plazaTex);               // town square plaza
+// curbs along the street edges (visual only, no collider — ground stays flat)
+addBox(132, 0.14, 0.3, 0, 0.07, -5.0, 0x2a2c36);
+addBox(132, 0.14, 0.3, 0, 0.07, 5.0, 0x2a2c36);
 // crosswalk stripes
 for (let i = 0; i < 5; i++) flat(1.2, 8, -14 + i * 2.2, 0, 0.05, 0x3a3d48);
+// scattered grass / dirt patches off the road
+for (let i = 0; i < 22; i++) {
+  const patch = new THREE.Mesh(new THREE.CircleGeometry(rand(0.8, 2.2), 12),
+    new THREE.MeshStandardMaterial({ color: i % 2 ? 0x0a140c : 0x171208, roughness: 1 }));
+  patch.rotation.x = -Math.PI / 2;
+  const side = Math.random() < 0.5 ? -1 : 1;
+  patch.position.set(rand(-68, 68), 0.01, side * rand(8.5, 30));
+  scene.add(patch);
+}
 
 // ============ sign textures ============
 function signTexture(text, sub, bg, fg) {
@@ -259,33 +420,83 @@ function buildBuilding(b) {
   const zMin = Math.min(frontZ, backZ), zMax = Math.max(frontZ, backZ);
   const cx = (b.x0 + b.x1) / 2, doorW = 2.4, dL = cx - doorW / 2, dR = cx + doorW / 2;
   const dir = b.side === 'N' ? 1 : -1; // front faces the street (+z for N, -z for S)
+  const wallTex = b.kind === 'diner' || b.kind === 'gas' ? brickTex : b.kind === 'hardware' || b.kind === 'house' ? sidingTex : concreteWallTex;
+  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, color: b.color, roughness: 1 });
   function wall(x0, x1, z0, z1) {
     colliders.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), z0: Math.min(z0, z1), z1: Math.max(z0, z1), h: WALL_H });
     const w = Math.abs(x1 - x0) || WALL_T, d = Math.abs(z1 - z0) || WALL_T;
-    addBox(w, WALL_H, d, (x0 + x1) / 2, WALL_H / 2, (z0 + z1) / 2, b.color);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_H, d), wallMat);
+    m.position.set((x0 + x1) / 2, WALL_H / 2, (z0 + z1) / 2);
+    scene.add(m);
   }
   wall(b.x0, b.x1, backZ - dir * WALL_T / 2, backZ + dir * WALL_T / 2); // back
   wall(b.x0 - WALL_T / 2, b.x0 + WALL_T / 2, zMin, zMax); // left
   wall(b.x1 - WALL_T / 2, b.x1 + WALL_T / 2, zMin, zMax); // right
   wall(b.x0, dL, frontZ - WALL_T / 2, frontZ + WALL_T / 2); // front left of door
   wall(dR, b.x1, frontZ - WALL_T / 2, frontZ + WALL_T / 2); // front right of door
-  // roof + sign + windows
-  addBox(b.x1 - b.x0 + 0.8, 0.3, 10.8, cx, WALL_H + 0.15, (frontZ + backZ) / 2, 0x11131a);
+  // roof: pitched + shingled for houses + church, flat slab + parapet block for shops
+  const bw = b.x1 - b.x0 + 0.8;
+  const mid = (frontZ + backZ) / 2;
+  if (b.kind === 'house' || b.kind === 'church') {
+    const roofH = b.kind === 'church' ? 1.7 : 1.0;
+    const shape = new THREE.Shape();
+    shape.moveTo(-bw / 2, 0); shape.lineTo(bw / 2, 0); shape.lineTo(0, roofH); shape.closePath();
+    const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 10.8, bevelEnabled: false }), roofMat);
+    roof.position.set(cx, WALL_H, mid - 5.4);
+    scene.add(roof);
+    if (b.kind === 'house') {
+      // chimney sitting on the roof slope
+      const ox = bw * 0.3;
+      const slopeY = WALL_H + roofH * (1 - Math.abs(ox) / (bw / 2));
+      addBox(0.5, 0.9, 0.5, cx + ox, slopeY + 0.35, mid, 0x4a3330);
+    } else {
+      // cross on the front gable peak
+      const gz = frontZ + dir * 0.55;
+      addBox(0.09, 0.9, 0.09, cx, WALL_H + roofH + 0.35, gz, 0xd8d2c4);
+      addBox(0.55, 0.09, 0.09, cx, WALL_H + roofH + 0.55, gz, 0xd8d2c4);
+    }
+  } else {
+    addBox(bw, 0.3, 10.8, cx, WALL_H + 0.15, mid, 0x11131a);
+    addBox(bw + 0.2, 0.5, 11.0, cx, WALL_H + 0.55, mid, 0x9a928a); // parapet block (one mesh)
+  }
+  // sign (unchanged texture + street-facing orientation)
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(10, b.x1 - b.x0 - 2), 1.5),
     new THREE.MeshBasicMaterial({ map: signTexture(b.name, b.sub, b.bg, b.fg) }));
   sign.position.set(cx, 2.9, frontZ + dir * 0.25);
   if (b.side === 'S') sign.rotation.y = Math.PI;
   scene.add(sign);
+  // windows: framed canvas-texture planes (lit = warm glow), front + both side walls
+  function addWin(x, y, z, rotY) {
+    const lit = Math.random() < 0.4;
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 1.0), lit ? winLitMat : winDarkMat);
+    win.position.set(x, y, z); win.rotation.y = rotY; scene.add(win);
+  }
   for (let i = 0; i < 3; i++) {
     const wx = b.x0 + (i + 0.5) * (b.x1 - b.x0) / 3;
     if (Math.abs(wx - cx) < 1.6) continue;
-    const lit = Math.random() < 0.4;
-    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.9),
-      new THREE.MeshStandardMaterial({ color: 0x0a0c12, emissive: lit ? 0xffb85c : 0x000000, emissiveIntensity: lit ? 0.9 : 0 }));
-    win.position.set(wx, 1.8, frontZ + dir * 0.18);
-    if (b.side === 'S') win.rotation.y = Math.PI;
-    scene.add(win);
+    addWin(wx, 1.8, frontZ + dir * 0.17, b.side === 'S' ? Math.PI : 0);
   }
+  addWin(b.x0 - WALL_T / 2 - 0.02, 1.8, zMin + 2.5, -Math.PI / 2);
+  addWin(b.x0 - WALL_T / 2 - 0.02, 1.8, zMax - 2.5, -Math.PI / 2);
+  addWin(b.x1 + WALL_T / 2 + 0.02, 1.8, zMin + 2.5, Math.PI / 2);
+  addWin(b.x1 + WALL_T / 2 + 0.02, 1.8, zMax - 2.5, Math.PI / 2);
+  // door frame + open panels lying flat against the front wall (never block the gap)
+  addBox(0.18, 2.9, WALL_T + 0.2, dL, 1.45, frontZ, 0x2a2018);
+  addBox(0.18, 2.9, WALL_T + 0.2, dR, 1.45, frontZ, 0x2a2018);
+  addBox(doorW + 0.36, 0.25, WALL_T + 0.2, cx, 2.95, frontZ, 0x2a2018);
+  const panelGeo = new THREE.BoxGeometry(1.15, 2.6, 0.06);
+  for (const px of [dL - 0.62, dR + 0.62]) {
+    const p = new THREE.Mesh(panelGeo, doorMat);
+    p.position.set(px, 1.3, frontZ + dir * 0.19);
+    scene.add(p);
+  }
+  // porch light by the door (emissive bulb + warm glow sprite)
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), porchBulbMat);
+  bulb.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
+  scene.add(bulb);
+  const pglow = new THREE.Sprite(new THREE.SpriteMaterial({ map: porchGlowTex, transparent: true, opacity: 0.3, depthWrite: false }));
+  pglow.scale.set(1.1, 1.1, 1); pglow.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
+  scene.add(pglow);
   // interior furniture (player collision only — zombies shamble through it, v1 kink)
   const fz = (dz) => b.side === 'N' ? -7 - dz : 7 + dz;
   function furn(w, d, x, dz, color, h) {
@@ -330,19 +541,56 @@ const carColors = [0x5a2e22, 0x3a3d42, 0x22384a, 0x4a3b28, 0x1c1c20, 0x4a2020, 0
 const carSpots = [[-24, -2.5, 0.3], [-8, 2.8, -0.2], [14, -3, 0.5], [30, 2.5, -0.4], [-40, 3, 0.15], [44, -2, 0.9], [52, 3.2, -0.3], [-55, -1, 0.2]];
 const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 12);
 const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 });
+const hubGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.26, 10);
+const hubMat = new THREE.MeshStandardMaterial({ color: 0x8a8d92, roughness: 0.4, metalness: 0.6 });
+const bumperGeo = new THREE.BoxGeometry(0.14, 0.18, 1.72);
+const bumperMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5, metalness: 0.4 });
+// lower body: side profile with hood/trunk shaping + beveled edges (no more slab)
+const bodyShape = new THREE.Shape();
+bodyShape.moveTo(-2.15, 0.30); bodyShape.lineTo(-2.15, 0.66); bodyShape.lineTo(-1.20, 0.78);
+bodyShape.lineTo(1.15, 0.78); bodyShape.lineTo(2.15, 0.60); bodyShape.lineTo(2.15, 0.30);
+bodyShape.closePath();
+const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, { depth: 1.58, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 2 });
+bodyGeo.translate(0, 0, -0.79);
+// cabin: sloped windshield + rear-window profile, beveled edges
+const cabShape = new THREE.Shape();
+cabShape.moveTo(-1.15, 0.78); cabShape.lineTo(-0.82, 1.32); cabShape.lineTo(0.45, 1.32); cabShape.lineTo(0.88, 0.78);
+cabShape.closePath();
+const cabGeo = new THREE.ExtrudeGeometry(cabShape, { depth: 1.42, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2 });
+cabGeo.translate(0, 0, -0.71);
+const sideGlassGeo = new THREE.BoxGeometry(1.45, 0.34, 0.02);
+const shieldGeo = new THREE.BoxGeometry(0.69, 0.02, 1.30); // sloped windshield pane
+const rearGlassGeo = new THREE.BoxGeometry(0.63, 0.02, 1.30); // sloped rear pane
+const lampBoxGeo = new THREE.BoxGeometry(0.08, 0.16, 0.36);
 carSpots.forEach(([x, z, rot], i) => {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.7, 1.8), new THREE.MeshStandardMaterial({ color: carColors[i], roughness: 0.8 }));
-  body.position.y = 0.55; g.add(body);
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.6, 1.6), new THREE.MeshStandardMaterial({ color: carColors[i], roughness: 0.8 }));
-  cab.position.set(-0.2, 1.2, 0); g.add(cab);
+  const paintMat = new THREE.MeshStandardMaterial({ map: paintWearTex, color: carColors[i], roughness: 0.65, metalness: 0.25 });
+  g.add(new THREE.Mesh(bodyGeo, paintMat));
+  g.add(new THREE.Mesh(cabGeo, paintMat));
+  for (const sz of [1, -1]) { // dark side-window insets
+    const sg = new THREE.Mesh(sideGlassGeo, carGlassMat);
+    sg.position.set(-0.14, 1.08, sz * 0.77); g.add(sg);
+  }
+  const shield = new THREE.Mesh(shieldGeo, carGlassMat); // windshield on the front slope
+  shield.position.set(0.665, 1.05, 0); shield.rotation.z = 2.243; g.add(shield);
+  const rear = new THREE.Mesh(rearGlassGeo, carGlassMat); // rear window on the back slope
+  rear.position.set(-0.985, 1.05, 0); rear.rotation.z = 1.022; g.add(rear);
+  for (const sz of [1, -1]) { // headlights + taillights (dim emissive: readable at night)
+    const hl = new THREE.Mesh(lampBoxGeo, headlightMat); hl.position.set(2.22, 0.55, sz * 0.55); g.add(hl);
+    const tl = new THREE.Mesh(lampBoxGeo, taillightMat); tl.position.set(-2.22, 0.55, sz * 0.55); g.add(tl);
+  }
+  for (const sx of [1, -1]) {
+    const b1 = new THREE.Mesh(bumperGeo, bumperMat); b1.position.set(sx * 2.22, 0.38, 0); g.add(b1);
+  }
   [[1.35, 0.9], [1.35, -0.9], [-1.35, 0.9], [-1.35, -0.9]].forEach(([wx, wz]) => {
     const w = new THREE.Mesh(wheelGeo, wheelMat);
     w.rotation.x = Math.PI / 2; w.position.set(wx, 0.34, wz); g.add(w);
+    const hub = new THREE.Mesh(hubGeo, hubMat);
+    hub.rotation.x = Math.PI / 2; hub.position.set(wx, 0.34, wz); g.add(hub);
   });
   g.position.set(x, 0, z); g.rotation.y = rot;
   scene.add(g);
-  // axis-aligned bounds from rotated corners
+  // axis-aligned bounds from rotated corners (UNCHANGED footprint: 4.6 x 2.2, h 1.6)
   const c = Math.cos(rot), s = Math.sin(rot), hx = 2.3, hz = 1.1;
   const corners = [[hx, hz], [hx, -hz], [-hx, hz], [-hx, -hz]].map(([px, pz]) => [x + px * c + pz * s, z - px * s + pz * c]);
   colliders.push({ x0: Math.min(...corners.map(p => p[0])), x1: Math.max(...corners.map(p => p[0])), z0: Math.min(...corners.map(p => p[1])), z1: Math.max(...corners.map(p => p[1])), h: 1.6 });
@@ -357,7 +605,12 @@ const lamps = [];
   head.position.set(x, 4.45, z); scene.add(head);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, transparent: true, opacity: 0.55, depthWrite: false }));
   glow.scale.set(3.2, 3.2, 1); glow.position.set(x, 4.35, z); scene.add(glow);
-  lamps.push({ headMat, glow, flicker: i === 2, t: 0 });
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), porchBulbMat);
+  bulb.position.set(x, 4.32, z); scene.add(bulb);
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(3.4, 20),
+    new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0.18, depthWrite: false }));
+  pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.05, z); scene.add(pool);
+  lamps.push({ headMat, glow, pool, flicker: i === 2, t: 0 });
 });
 for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62, -12]]) {
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 3.4, 7), new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 }));
@@ -449,31 +702,60 @@ const ZTYPES = {
   runner: { hp: 2, speed: 2.6, scale: 0.95, skin: 0x8a7a6a, shirt: 0x4a2020 },
   brute: { hp: 10, speed: 0.85, scale: 1.35, skin: 0x5a6a5a, shirt: 0x1c1c24 },
 };
-const legGeo = new THREE.BoxGeometry(0.22, 0.7, 0.22);
-const torsoGeo = new THREE.BoxGeometry(0.62, 0.75, 0.32);
-const armGeo = new THREE.BoxGeometry(0.16, 0.7, 0.16);
-const headGeo = new THREE.BoxGeometry(0.34, 0.36, 0.34);
+// Human proportions: tapered limbs pivoted at hip/shoulder, elliptical torso.
+// Hitbox anchors are preserved exactly: head center y 1.68, body center y 1.1.
+const legGeo = new THREE.CylinderGeometry(0.11, 0.07, 0.72, 8); legGeo.translate(0, -0.36, 0);
+const shoeGeo = new THREE.BoxGeometry(0.13, 0.09, 0.26);
+const shoeMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
+const torsoGeo = new THREE.CylinderGeometry(0.30, 0.24, 0.78, 10); torsoGeo.scale(1, 1, 0.55);
+const neckGeo = new THREE.CylinderGeometry(0.09, 0.10, 0.14, 8);
+const headGeo = new THREE.SphereGeometry(0.19, 12, 10); headGeo.scale(1, 1.15, 0.95);
+const noseGeo = new THREE.BoxGeometry(0.07, 0.09, 0.08);
+const armUpGeo = new THREE.CylinderGeometry(0.085, 0.065, 0.34, 8); armUpGeo.translate(0, -0.17, 0);
+const armLoGeo = new THREE.CylinderGeometry(0.06, 0.05, 0.32, 8); armLoGeo.translate(0, -0.16, 0);
+const handGeo = new THREE.SphereGeometry(0.065, 8, 6);
 const eyeGeo = new THREE.SphereGeometry(0.035, 6, 5);
 const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2222, toneMapped: false });
+const skinPalette = [0x7a8a6a, 0x8a7a6a, 0x9a8a72, 0x6a7a5a, 0x8a6a5a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+const pantsPalette = [0x23262e, 0x2e2a26, 0x1e2a33, 0x33261e].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
 const typeMats = {};
 for (const k in ZTYPES) {
-  typeMats[k] = {
-    skin: new THREE.MeshStandardMaterial({ color: ZTYPES[k].skin, roughness: 1 }),
-    shirt: new THREE.MeshStandardMaterial({ color: ZTYPES[k].shirt, roughness: 1 }),
-  };
+  typeMats[k] = { shirt: new THREE.MeshStandardMaterial({ color: ZTYPES[k].shirt, roughness: 1 }) };
 }
 const zombies = [];
 function spawnZombie(type) {
   const t = ZTYPES[type];
   const grp = new THREE.Group();
-  const legL = new THREE.Mesh(legGeo, typeMats[type].shirt); legL.position.set(-0.15, 0.35, 0); grp.add(legL);
-  const legR = new THREE.Mesh(legGeo, typeMats[type].shirt); legR.position.set(0.15, 0.35, 0); grp.add(legR);
-  const torso = new THREE.Mesh(torsoGeo, typeMats[type].shirt); torso.position.y = 1.1; grp.add(torso);
-  const armL = new THREE.Mesh(armGeo, typeMats[type].skin); armL.position.set(-0.42, 1.3, 0.28); armL.rotation.x = -1.1; grp.add(armL);
-  const armR = new THREE.Mesh(armGeo, typeMats[type].skin); armR.position.set(0.42, 1.3, 0.28); armR.rotation.x = -1.1; grp.add(armR);
-  const head = new THREE.Mesh(headGeo, typeMats[type].skin); head.position.y = 1.68; grp.add(head);
-  const eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(-0.08, 1.7, 0.18); grp.add(eyeL);
-  const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(0.08, 1.7, 0.18); grp.add(eyeR);
+  const skinMat = skinPalette[Math.floor(Math.random() * skinPalette.length)];
+  const pantsMat = pantsPalette[Math.floor(Math.random() * pantsPalette.length)];
+  const shirtMat = typeMats[type].shirt;
+  function leg(side) { // hip-pivoted group: tapered pant leg + shoe
+    const lg = new THREE.Group();
+    lg.position.set(0.14 * side, 0.72, 0);
+    lg.add(new THREE.Mesh(legGeo, pantsMat));
+    const shoe = new THREE.Mesh(shoeGeo, shoeMat);
+    shoe.position.set(0, -0.70, 0.04);
+    lg.add(shoe);
+    grp.add(lg);
+    return lg;
+  }
+  function arm(side) { // shoulder-pivoted group: shirt sleeve + skin forearm + hand
+    const ag = new THREE.Group();
+    ag.position.set(0.36 * side, 1.40, 0);
+    ag.add(new THREE.Mesh(armUpGeo, shirtMat));
+    const fore = new THREE.Mesh(armLoGeo, skinMat); fore.position.y = -0.34; ag.add(fore);
+    const hand = new THREE.Mesh(handGeo, skinMat); hand.position.y = -0.68; ag.add(hand);
+    grp.add(ag);
+    return ag;
+  }
+  const legL = leg(-1), legR = leg(1);
+  const torso = new THREE.Mesh(torsoGeo, shirtMat); torso.position.y = 1.11; grp.add(torso);
+  const neck = new THREE.Mesh(neckGeo, skinMat); neck.position.y = 1.52; grp.add(neck);
+  const armL = arm(-1), armR = arm(1);
+  const head = new THREE.Mesh(headGeo, skinMat); head.position.y = 1.68; grp.add(head);
+  const nose = new THREE.Mesh(noseGeo, skinMat); nose.position.set(0, 1.65, 0.185); grp.add(nose);
+  const eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(-0.075, 1.71, 0.165); grp.add(eyeL);
+  const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(0.075, 1.71, 0.165); grp.add(eyeR);
   grp.scale.setScalar(t.scale);
   scene.add(grp);
   zombies.push({ grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL, legR, armL, armR, head });
@@ -820,9 +1102,9 @@ function updateZombies(dt) {
       z.grp.position.x = p.x; z.grp.position.z = p.z;
       z.phase += dt * z.speed * 3.4;
       const sw = Math.sin(z.phase);
-      z.legL.rotation.x = sw * 0.6; z.legR.rotation.x = -sw * 0.6;
-      z.armL.rotation.x = -1.1 + Math.sin(z.phase * 0.7) * 0.15;
-      z.armR.rotation.x = -1.1 + Math.cos(z.phase * 0.7) * 0.15;
+      z.legL.rotation.x = sw * 0.75; z.legR.rotation.x = -sw * 0.75;
+      z.armL.rotation.x = -1.05 - sw * 0.45; z.armR.rotation.x = -1.05 + sw * 0.45; // arms swing opposite their legs
+      z.head.rotation.x = 0.12; z.head.rotation.z = Math.sin(z.phase) * 0.08; // hunched tilt + head bob
       z.grp.position.y = Math.abs(Math.cos(z.phase)) * 0.06;
       z.grp.rotation.z = Math.sin(z.phase * 0.5) * 0.06;
     } else if (z.attackCd <= 0) {
@@ -957,6 +1239,7 @@ function tick() {
         const on = Math.sin(l.t * 37) > -0.6 && Math.random() > 0.12;
         l.headMat.emissiveIntensity = on ? 1.4 : 0.15;
         l.glow.material.opacity = on ? 0.55 : 0.06;
+        l.pool.material.opacity = on ? 0.18 : 0.02;
       }
     }
     if (hp <= 30 && hp > 0) {
