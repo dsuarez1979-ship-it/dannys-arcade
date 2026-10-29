@@ -841,7 +841,7 @@ debugSprite.position.set(0, -0.45, -1.1);
 debugSprite.renderOrder = 997;
 debugSprite.visible = false;
 camera.add(debugSprite);
-function updateDebugText(lx, ly, rx, ry, mx, mz) {
+function updateDebugText(lx, ly, rx, ry, mx, mz, camYawDeg, grpYawDeg) {
   if (debugDone) return;
   if (!renderer.xr.isPresenting) { debugSprite.visible = false; return; }
   if (movedTotal > 2) { debugSprite.visible = false; debugDone = true; return; }
@@ -854,7 +854,7 @@ function updateDebugText(lx, ly, rx, ry, mx, mz) {
   g.fillText('L axes: ' + lx.toFixed(2) + ' , ' + ly.toFixed(2), 16, 76);
   g.fillText('R axes: ' + rx.toFixed(2) + ' , ' + ry.toFixed(2), 16, 112);
   g.fillText('move: ' + mx.toFixed(2) + ' , ' + mz.toFixed(2), 16, 148);
-  g.fillText('pos: ' + playerGroup.position.x.toFixed(1) + ' , ' + playerGroup.position.z.toFixed(1), 16, 184);
+  g.fillText('pos: ' + playerGroup.position.x.toFixed(1) + ' , ' + playerGroup.position.z.toFixed(1) + ' | cam ' + (camYawDeg || 0).toFixed(0) + ' grp ' + (grpYawDeg || 0).toFixed(0), 16, 184);
   g.fillText('moved: ' + movedTotal.toFixed(2) + ' m', 16, 220);
   debugTex.needsUpdate = true;
 }
@@ -1166,7 +1166,13 @@ addEventListener('mousemove', e => {
     lastMX = e.clientX; lastMY = e.clientY;
   }
 });
+// MARKER-DH3-GUNSYNC: controllers ride INSIDE the moving rig (playerGroup),
+// so their pose — and any gun mounted on them — inherits rig movement + yaw.
+// Previously the guns were scene-root objects positioned from the controller's
+// reference-space matrixWorld each frame, so they stayed at spawn while the
+// player walked. Now each hand's gun mount is a child of its controller.
 const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
+playerGroup.add(ctlL, ctlR);
 let rightCtl = null, leftCtl = null;
 [ctlL, ctlR].forEach(c => {
   c.addEventListener('connected', e => { if (e.data.handedness === 'right') rightCtl = c; if (e.data.handedness === 'left') leftCtl = c; });
@@ -1470,12 +1476,22 @@ function tick() {
       yaw = snapTurn.from + (snapTurn.to - snapTurn.from) * e;
       if (snapTurn.t >= 1) snapTurn = null;
     }
+    // Movement is relative to where the HEAD is actually looking (group yaw +
+    // headset yaw), not group yaw alone — that was the wrong-direction bug:
+    // physically turning your head/body must turn stick-forward with you.
+    // Apply the (possibly easing) yaw to the rig FIRST, then read the camera's
+    // world direction, so a snap turn takes effect on the very next move.
+    playerGroup.rotation.y = yaw;
+    camera.getWorldDirection(camForward);
+    let fx = camForward.x, fz = camForward.z;
+    const fl = Math.hypot(fx, fz);
+    if (fl < 0.01) { fx = -Math.sin(yaw); fz = -Math.cos(yaw); } else { fx /= fl; fz /= fl; }
+    const rx = -fz, rz = fx; // camera-right, projected onto XZ: push right = move right
+    const camYawDeg = Math.atan2(-fx, -fz) * 180 / Math.PI;
+    const grpYawDeg = yaw * 180 / Math.PI;
     const sp = 4.2;
-    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    const rx = Math.cos(yaw), rz = -Math.sin(yaw);
     playerGroup.position.x += (fx * inp.mz + rx * inp.mx) * sp * dt;
     playerGroup.position.z += (fz * inp.mz + rz * inp.mx) * sp * dt;
-    playerGroup.rotation.y = yaw;
     // locomotion lives on the rig: the stick drives the group directly and
     // collision runs on the group, so nothing can wipe the movement out.
     // (The old per-frame headset re-anchor could reset the rig position,
@@ -1489,22 +1505,31 @@ function tick() {
     playerGroup.position.z = playerCollide.z;
     playerPos.set(playerCollide.x, 0, playerCollide.z);
     movedTotal += Math.hypot(playerCollide.x - prevPX, playerCollide.z - prevPZ);
-    updateDebugText(inp.lx, inp.ly, inp.rx, inp.ry, inp.mx, inp.mz);
+    updateDebugText(inp.lx, inp.ly, inp.rx, inp.ry, inp.mx, inp.mz, camYawDeg, grpYawDeg);
     // flashlight follows the head
     camera.getWorldPosition(tmpV);
     flash.position.copy(tmpV);
     camera.getWorldDirection(camForward);
     flashTarget.position.copy(tmpV).addScaledVector(camForward, 10);
-    // gun mounts: one per hand, each aimed by its own controller (or the head on desktop)
+    // gun mounts: one per hand. In VR each mount is a CHILD of its controller,
+    // and each controller is a child of playerGroup — so the gun inherits rig
+    // movement + yaw AND controller pose together, and can never be left at
+    // spawn while the player walks. The mount is rotated PI about Y so the
+    // gun model's +Z barrel points along the controller's -Z aim direction.
+    // (No code here sets a mount's world position from a reference-space
+    // matrixWorld — that was the DH2 desync bug, and it is gone.)
+    // On desktop (or if a controller disconnects) the mount falls back to a
+    // scene-root mount aimed by the head, as before.
     for (const hand of HANDS) {
       const mount = gunMounts[hand];
       const ctl = hand === 'right' ? rightCtl : leftCtl;
       if (renderer.xr.isPresenting && ctl) {
-        tmpV.setFromMatrixPosition(ctl.matrixWorld);
-        tmpV2.set(0, 0, -1).applyQuaternion(ctl.getWorldQuaternion(tmpQ));
-        mount.position.copy(tmpV).addScaledVector(tmpV2, 0.12);
-        aimPoints[hand].copy(tmpV).addScaledVector(tmpV2, 14);
+        if (mount.parent !== ctl) ctl.add(mount);
+        mount.position.set(0, -0.02, 0);
+        const sw = handSwing[hand] > 0 ? -Math.sin(handSwing[hand] / 0.28 * Math.PI) * 1.1 : 0;
+        mount.rotation.set(sw, Math.PI, 0);
       } else {
+        if (mount.parent !== scene) scene.add(mount);
         camera.getWorldPosition(tmpV);
         camera.getWorldDirection(camForward);
         camRight.crossVectors(camForward, camera.up).normalize();
@@ -1512,9 +1537,9 @@ function tick() {
         mount.position.copy(tmpV).addScaledVector(camForward, 0.45).addScaledVector(camRight, side);
         mount.position.y -= 0.22;
         aimPoints[hand].copy(tmpV).addScaledVector(camForward, 14);
+        mount.lookAt(aimPoints[hand]);
+        if (handSwing[hand] > 0) mount.rotateX(-Math.sin(handSwing[hand] / 0.28 * Math.PI) * 1.1);
       }
-      mount.lookAt(aimPoints[hand]);
-      if (handSwing[hand] > 0) mount.rotateX(-Math.sin(handSwing[hand] / 0.28 * Math.PI) * 1.1);
     }
     // firing: each trigger fires its own hand's weapon; no reloading, ammo is unlimited
     if (inp.fire.right) fireHand('right');
@@ -1577,13 +1602,13 @@ renderer.setAnimationLoop(tick);
 
 // ============ menu / start / VR ============
 const menuEl = document.getElementById('menu');
-document.getElementById('ctltext').textContent = 'VR: left stick moves · right stick Y also walks · right stick X turns · each trigger fires its own hand · A/X on a controller swaps THAT hand\'s weapon · unlimited ammo, no reloading. Desktop: WASD moves · mouse looks · click fires right hand · Q swaps right hand · E swaps left hand.';
+document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · right stick Y also walks · right stick X turns · each trigger fires its own hand · A/X on a controller swaps THAT hand\'s weapon · unlimited ammo, no reloading. Desktop: WASD moves · mouse looks · click fires right hand · Q swaps right hand · E swaps left hand.';
 function startGame() {
   startAudio();
   mode = 'play';
   menuEl.style.display = 'none';
   document.getElementById('hint').textContent = renderer.xr.isPresenting
-    ? 'Left stick move · right stick turn · each trigger fires its hand · A/X swaps that hand'
+    ? 'Left stick moves where you look · right stick turn · each trigger fires its hand · A/X swaps that hand'
     : 'WASD move · mouse look · click fires right hand · Q swaps right · E swaps left';
   showBanner('HOLLOW CREEK — find weapons. survive.', 3000);
   updateHUD();
