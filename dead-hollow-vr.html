@@ -61,8 +61,9 @@
 <div id="hud">
   <div class="row"><span class="label">HEALTH</span><span class="val" id="hptext">100</span></div>
   <div id="hpbar"><div id="hpfill"></div></div>
-  <div class="row" style="margin-top:6px"><span class="label">WEAPON</span><span class="val" id="weapontext">PISTOL</span></div>
-  <div class="row"><span class="label">AMMO</span><span class="val" id="ammotext">12 / 60</span></div>
+  <div class="row" style="margin-top:6px"><span class="label">RIGHT HAND</span><span class="val" id="weapontext">PISTOL</span></div>
+  <div class="row"><span class="label">LEFT HAND</span><span class="val" id="leftweapontext">EMPTY</span></div>
+  <div class="row"><span class="label">AMMO</span><span class="val">UNLIMITED</span></div>
   <div class="row"><span class="label">KILLS</span><span class="val" id="killtext">0</span></div>
 </div>
 <div id="dot"></div>
@@ -91,7 +92,7 @@ const randi = (a, b) => Math.floor(rand(a, b + 1));
 // ============ renderer / scene ============
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25)); // Quest perf: lower fill-rate cost
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
@@ -305,14 +306,22 @@ function flat(w, d, x, z, y, color) {
   scene.add(m);
   return m;
 }
-flatTex(150, 70, 0, 0, 0, grassTex);                 // grass with variation
-flatTex(132, 10, 0, 0, 0.02, asphaltTex);            // Main Street asphalt w/ faded markings
-flatTex(132, 2.4, 0, -6.2, 0.04, concreteGroundTex); // north sidewalk
-flatTex(132, 2.4, 0, 6.2, 0.04, concreteGroundTex);  // south sidewalk
+flatTex(240, 120, 0, 0, 0, grassTex);                 // grass with variation
+flatTex(224, 10, 0, 0, 0.02, asphaltTex);            // Main Street asphalt w/ faded markings
+flatTex(224, 2.4, 0, -6.2, 0.04, concreteGroundTex); // north sidewalk
+flatTex(224, 2.4, 0, 6.2, 0.04, concreteGroundTex);  // south sidewalk
 flatTex(16, 14, 0, 0, 0.03, plazaTex);               // town square plaza
 // curbs along the street edges (visual only, no collider — ground stays flat)
-addBox(132, 0.14, 0.3, 0, 0.07, -5.0, 0x2a2c36);
-addBox(132, 0.14, 0.3, 0, 0.07, 5.0, 0x2a2c36);
+addBox(224, 0.14, 0.3, 0, 0.07, -5.0, 0x2a2c36);
+addBox(224, 0.14, 0.3, 0, 0.07, 5.0, 0x2a2c36);
+// Cross street at x = 64: a second road running north-south across the whole town
+flatTex(10, 110, 64, 0, 0.02, asphaltTex);
+flatTex(2.4, 110, 57.8, 0, 0.04, concreteGroundTex);
+flatTex(2.4, 110, 70.2, 0, 0.04, concreteGroundTex);
+addBox(0.3, 0.14, 110, 58.8, 0.07, 0, 0x2a2c36);
+addBox(0.3, 0.14, 110, 69.2, 0.07, 0, 0x2a2c36);
+for (let i = 0; i < 5; i++) flat(8, 1.2, 64, -20 + i * 2.2, 0.05, 0x3a3d48);
+for (let i = 0; i < 5; i++) flat(1.2, 8, -30 + i * 2.2, 0, 0.05, 0x3a3d48);
 // crosswalk stripes
 for (let i = 0; i < 5; i++) flat(1.2, 8, -14 + i * 2.2, 0, 0.05, 0x3a3d48);
 // scattered grass / dirt patches off the road
@@ -321,7 +330,7 @@ for (let i = 0; i < 22; i++) {
     new THREE.MeshStandardMaterial({ color: i % 2 ? 0x0a140c : 0x171208, roughness: 1 }));
   patch.rotation.x = -Math.PI / 2;
   const side = Math.random() < 0.5 ? -1 : 1;
-  patch.position.set(rand(-68, 68), 0.01, side * rand(8.5, 30));
+  patch.position.set(rand(-108, 108), 0.01, side * rand(8.5, 52));
   scene.add(patch);
 }
 
@@ -412,6 +421,16 @@ const BUILDINGS = [
   { name: 'CREEK GAS', sub: 'MART', bg: '#40200a', fg: '#ffe0b0', x0: 8, x1: 24, side: 'S', color: 0x5d4630, kind: 'gas', weapon: null },
   { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 28, x1: 40, side: 'S', color: 0x4a5058, kind: 'house', weapon: null },
   { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 44, x1: 56, side: 'S', color: 0x54484a, kind: 'house', weapon: null },
+  { name: 'HOLLOW CREEK SCHOOL', sub: 'EST. 1962', bg: '#7a2a12', fg: '#ffe8c0', x0: 74, x1: 94, side: 'N', color: 0x6e4a30, kind: 'school', weapon: null },
+  { name: 'PUBLIC LIBRARY', sub: 'READ', bg: '#1a3a52', fg: '#d8ecff', x0: 98, x1: 110, side: 'N', color: 0x4a4a58, kind: 'library', weapon: null },
+  { name: 'HOLLOW CREEK MOTEL', sub: 'VACANCY', bg: '#2a4a3a', fg: '#d8ffe8', x0: -102, x1: -84, side: 'N', color: 0x5a5a48, kind: 'motel', weapon: null },
+  { name: 'POST OFFICE', sub: 'HOLLOW CREEK', bg: '#24344a', fg: '#e8ecff', x0: -80, x1: -66, side: 'N', color: 0x4a525e, kind: 'post', weapon: null },
+  { name: 'FIRST CREEK BANK', sub: '', bg: '#2a3a22', fg: '#e8ffd8', x0: 74, x1: 88, side: 'S', color: 0x4a5240, kind: 'bank', weapon: null },
+  { name: 'CREEK GROCERY', sub: 'FOOD · SUPPLIES', bg: '#5a2a1a', fg: '#ffe0c0', x0: 92, x1: 108, side: 'S', color: 0x5d4630, kind: 'grocery', weapon: null },
+  { name: 'FIRE STATION', sub: 'STATION 7', bg: '#6a1a12', fg: '#ffd8c8', x0: -102, x1: -86, side: 'S', color: 0x5a3830, kind: 'fire', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -82, x1: -70, side: 'S', color: 0x4e4a55, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -64, x1: -52, side: 'S', color: 0x55504a, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -62, x1: -50, side: 'N', color: 0x4a5058, kind: 'house', weapon: null },
 ];
 const WALL_H = 3.4, WALL_T = 0.3;
 function buildBuilding(b) {
@@ -494,9 +513,11 @@ function buildBuilding(b) {
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), porchBulbMat);
   bulb.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
   scene.add(bulb);
-  const pglow = new THREE.Sprite(new THREE.SpriteMaterial({ map: porchGlowTex, transparent: true, opacity: 0.3, depthWrite: false }));
-  pglow.scale.set(1.1, 1.1, 1); pglow.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
-  scene.add(pglow);
+  if (b.kind !== 'house') { // Quest perf: skip porch glow sprites on houses (bulbs stay)
+    const pglow = new THREE.Sprite(new THREE.SpriteMaterial({ map: porchGlowTex, transparent: true, opacity: 0.3, depthWrite: false }));
+    pglow.scale.set(1.1, 1.1, 1); pglow.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
+    scene.add(pglow);
+  }
   // interior furniture (player collision only — zombies shamble through it, v1 kink)
   const fz = (dz) => b.side === 'N' ? -7 - dz : 7 + dz;
   function furn(w, d, x, dz, color, h) {
@@ -525,15 +546,105 @@ function buildBuilding(b) {
 BUILDINGS.forEach(buildBuilding);
 
 // map bounds + street-end barricades
-colliders.push({ x0: -64, x1: 64, z0: -26.4, z1: -26, h: 3.4 });
-colliders.push({ x0: -64, x1: 64, z0: 26, z1: 26.4, h: 3.4 });
-colliders.push({ x0: -64.4, x1: -64, z0: -26, z1: 26, h: 3.4 });
-colliders.push({ x0: 64, x1: 64.4, z0: -26, z1: 26, h: 3.4 });
+colliders.push({ x0: -110, x1: 110, z0: -55.4, z1: -55, h: 3.4 });
+colliders.push({ x0: -110, x1: 110, z0: 55, z1: 55.4, h: 3.4 });
+colliders.push({ x0: -110.4, x1: -110, z0: -55, z1: 55, h: 3.4 });
+colliders.push({ x0: 110, x1: 110.4, z0: -55, z1: 55, h: 3.4 });
 for (const sx of [-1, 1]) {
-  addBox(0.4, 1.1, 9, sx * 58, 0.55, 0, 0x4a3b22);
-  addBox(0.3, 0.25, 9, sx * 58, 1.1, 0, 0xd8c840);
-  addBox(0.3, 0.25, 9, sx * 58, 0.45, 0, 0xd8c840);
-  colliders.push({ x0: sx * 58 - 0.3, x1: sx * 58 + 0.3, z0: -4.5, z1: 4.5, h: 1.2 });
+  addBox(0.4, 1.1, 9, sx * 104, 0.55, 0, 0x4a3b22);
+  addBox(0.3, 0.25, 9, sx * 104, 1.1, 0, 0xd8c840);
+  addBox(0.3, 0.25, 9, sx * 104, 0.45, 0, 0xd8c840);
+  colliders.push({ x0: sx * 104 - 0.3, x1: sx * 104 + 0.3, z0: -4.5, z1: 4.5, h: 1.2 });
+}
+
+
+// ============ lake, park, street furniture (bigger town) ============
+const waterTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#0d2a3a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 60; i++) {
+    g.strokeStyle = `rgba(140,200,230,${0.08 + Math.random() * 0.2})`; g.lineWidth = 1 + Math.random() * 2;
+    g.beginPath(); const y = Math.random() * h, x = Math.random() * w;
+    g.moveTo(x, y); g.bezierCurveTo(x + 20, y - 4, x + 40, y + 4, x + 70, y); g.stroke();
+  }
+  speckle(g, w, h, 500, ['#123a4e', '#0a2230'], 0.4, 2);
+}, 6, 4);
+const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25, metalness: 0.35 });
+{ // Hollow Lake, east side: water you cannot walk into (colliders leave a dock corridor)
+  const lake = new THREE.Mesh(new THREE.CircleGeometry(17, 28), waterMat);
+  lake.rotation.x = -Math.PI / 2; lake.position.set(93, 0.06, -25); lake.scale.set(1.25, 0.85, 1); scene.add(lake);
+  const shore = new THREE.Mesh(new THREE.CircleGeometry(18.5, 28), new THREE.MeshStandardMaterial({ color: 0x8a7a52, roughness: 1 }));
+  shore.rotation.x = -Math.PI / 2; shore.position.set(93, 0.03, -25); shore.scale.set(1.25, 0.85, 1); scene.add(shore);
+  lake.position.y = 0.06; // water sits just above the sand ring edge
+  colliders.push({ x0: 80, x1: 110, z0: -36, z1: -27, h: 1 });
+  colliders.push({ x0: 80, x1: 110, z0: -23, z1: -14, h: 1 });
+  const reedMat = new THREE.MeshStandardMaterial({ color: 0x2a4a22, roughness: 1 });
+  const reedGeo = new THREE.CylinderGeometry(0.02, 0.035, 1.1, 5);
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2, r = 19 + Math.random() * 2;
+    const rx = 93 + Math.cos(a) * r * 1.25, rz = -25 + Math.sin(a) * r * 0.85;
+    if (rx > 110 || rz < -55) continue;
+    const reed = new THREE.Mesh(reedGeo, reedMat);
+    reed.position.set(rx, 0.55, rz); reed.rotation.z = rand(-0.25, 0.25); scene.add(reed);
+  }
+  // small wooden dock reaching in from the west shore (walkable corridor z -27..-23)
+  for (let i = 0; i < 6; i++) addBox(1.6, 0.12, 2.6, 75 + i * 1.7, 0.12, -25, 0x5a4632);
+  addBox(0.18, 0.9, 0.18, 84, 0.45, -26.2, 0x3a2e22);
+  addBox(0.18, 0.9, 0.18, 84, 0.45, -23.8, 0x3a2e22);
+}
+{ // Creekside Park, north-west: grass, trees, benches, playground, paths
+  flatTex(34, 20, -78, -33, 0.03, grassTex);
+  flat(3, 20, -78, -33, 0.04, 0x2a2c36); // paths
+  flat(34, 2.5, -78, -33, 0.04, 0x2a2c36);
+  const benchGeo = new THREE.BoxGeometry(1.8, 0.1, 0.5);
+  const benchMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
+  for (const [bx, bz] of [[-88, -28], [-68, -28], [-78, -40]]) {
+    const b = new THREE.Mesh(benchGeo, benchMat); b.position.set(bx, 0.5, bz); scene.add(b);
+    furniture.push({ x0: bx - 0.9, x1: bx + 0.9, z0: bz - 0.25, z1: bz + 0.25 });
+  }
+  // playground: swing frame + two swings, slide with ladder
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a3a4a, roughness: 0.5, metalness: 0.4 });
+  const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 2.4, 8);
+  for (const px of [-86, -82]) { const p = new THREE.Mesh(postGeo, frameMat); p.position.set(px, 1.2, -38); scene.add(p); }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 4.4, 8), frameMat);
+  bar.rotation.z = Math.PI / 2; bar.position.set(-84, 2.4, -38); scene.add(bar);
+  for (const sx of [-85.5, -82.5]) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.3), benchMat);
+    seat.position.set(sx, 0.7, -38); scene.add(seat);
+  }
+  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 3.2), new THREE.MeshStandardMaterial({ color: 0xb03030, roughness: 0.6 }));
+  slide.position.set(-72, 0.9, -38); slide.rotation.x = -0.45; scene.add(slide);
+  addBox(0.5, 1.6, 0.5, -72, 0.8, -39.8, 0x2a3a4a);
+  // park trees (rounded foliage, reused geometry)
+  const parkTrunk = new THREE.CylinderGeometry(0.16, 0.26, 3.2, 8);
+  const parkTrunkMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
+  const parkLeaf = new THREE.SphereGeometry(1.9, 12, 10);
+  const parkLeafMat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
+  for (const [tx, tz] of [[-92, -42], [-64, -42], [-92, -24], [-64, -24], [-78, -44]]) {
+    const tr = new THREE.Mesh(parkTrunk, parkTrunkMat); tr.position.set(tx, 1.6, tz); scene.add(tr);
+    const lf = new THREE.Mesh(parkLeaf, parkLeafMat); lf.position.set(tx, 4.0, tz); lf.scale.y = 1.25; scene.add(lf);
+    const lf2 = new THREE.Mesh(parkLeaf, parkLeafMat); lf2.position.set(tx + 0.7, 3.2, tz); lf2.scale.setScalar(0.7); scene.add(lf2);
+  }
+  // low wooden fence along the park's south edge
+  for (let x = -94; x <= -62; x += 4) addBox(0.14, 0.9, 0.14, x, 0.45, -22.5, 0x6a5a40);
+  addBox(32, 0.1, 0.1, -78, 0.75, -22.5, 0x6a5a40);
+}
+// fire hydrants, mailboxes, fences (shared, cheap)
+{
+  const hydGeo = new THREE.CylinderGeometry(0.16, 0.18, 0.7, 10);
+  const hydMat = new THREE.MeshStandardMaterial({ color: 0xa02020, roughness: 0.6 });
+  const hydTop = new THREE.SphereGeometry(0.17, 10, 8);
+  for (const [hx, hz] of [[-8, 5.6], [24, -5.6], [58, 5.6], [-58, -5.6], [90, 5.6]]) {
+    const h = new THREE.Mesh(hydGeo, hydMat); h.position.set(hx, 0.35, hz); scene.add(h);
+    const t = new THREE.Mesh(hydTop, hydMat); t.position.set(hx, 0.75, hz); scene.add(t);
+  }
+  const mbGeo = new THREE.BoxGeometry(0.5, 0.3, 0.3);
+  const mbMat = new THREE.MeshStandardMaterial({ color: 0x2a4a6a, roughness: 0.6, metalness: 0.3 });
+  const postGeo2 = new THREE.BoxGeometry(0.1, 0.9, 0.1);
+  const postMat2 = new THREE.MeshStandardMaterial({ color: 0x4a3a28, roughness: 1 });
+  for (const [mx2, mz2] of [[12, -6.8], [30, 6.8], [-60, -6.8], [80, 6.8], [-90, -6.8]]) {
+    const p2 = new THREE.Mesh(postGeo2, postMat2); p2.position.set(mx2, 0.45, mz2); scene.add(p2);
+    const m2 = new THREE.Mesh(mbGeo, mbMat); m2.position.set(mx2, 0.95, mz2); scene.add(m2);
+  }
 }
 
 // ============ cars, lamps, trees, stains, square ============
@@ -596,11 +707,13 @@ carSpots.forEach(([x, z, rot], i) => {
   colliders.push({ x0: Math.min(...corners.map(p => p[0])), x1: Math.max(...corners.map(p => p[0])), z0: Math.min(...corners.map(p => p[1])), z1: Math.max(...corners.map(p => p[1])), h: 1.6 });
 });
 const lampGlowTex = glowTexture('rgba(255,190,90,0.9)', 'rgba(255,150,40,0)');
+const sharedLampPoleMat = new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 1 });
+const sharedLampHeadMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 });
 const lamps = [];
-[[-50, -5.2], [-25, 5.2], [0, -5.2], [25, 5.2], [50, -5.2]].forEach(([x, z], i) => {
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.4, 8), new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 1 }));
+[[-50, -5.2], [-25, 5.2], [0, -5.2], [25, 5.2], [50, -5.2], [-85, -5.2], [-85, 5.2], [85, -5.2], [85, 5.2], [64, -35], [64, 35], [-100, -5.2], [100, 5.2]].forEach(([x, z], i) => {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.4, 8), sharedLampPoleMat);
   pole.position.set(x, 2.2, z); scene.add(pole);
-  const headMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 });
+  const headMat = i === 2 ? new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 }) : sharedLampHeadMat; // only the flickering lamp needs its own material
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.3), headMat);
   head.position.set(x, 4.45, z); scene.add(head);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, transparent: true, opacity: 0.55, depthWrite: false }));
@@ -612,6 +725,8 @@ const lamps = [];
   pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.05, z); scene.add(pool);
   lamps.push({ headMat, glow, pool, flicker: i === 2, t: 0 });
 });
+const sharedLeafMat = new THREE.MeshStandardMaterial({ color: 0x16240f, roughness: 1 });
+const sharedLeaf2Mat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
 for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62, -12]]) {
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 3.4, 7), new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 }));
   trunk.position.set(x, 1.7, z); scene.add(trunk);
@@ -621,6 +736,10 @@ for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62
     br.rotation.z = rand(-0.9, 0.9); br.rotation.x = rand(-0.9, 0.9);
     scene.add(br);
   }
+  const leaf = new THREE.Mesh(new THREE.SphereGeometry(1.7, 12, 10), sharedLeafMat);
+  leaf.position.set(x, 4.6, z); leaf.scale.y = 1.3; scene.add(leaf);
+  const leaf2 = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), sharedLeaf2Mat);
+  leaf2.position.set(x + 0.6, 3.6, z + 0.4); scene.add(leaf2);
 }
 for (let i = 0; i < 7; i++) {
   const stain = new THREE.Mesh(new THREE.CircleGeometry(rand(0.5, 1.1), 10), new THREE.MeshStandardMaterial({ color: 0x2a0505, roughness: 1 }));
@@ -635,41 +754,116 @@ addBox(1.8, 0.45, 0.5, -3.5, 0.45, 2.5, 0x3a2e22);
 addBox(1.8, 0.45, 0.5, 3.5, 0.45, 2.5, 0x3a2e22);
 furniture.push({ x0: -0.7, x1: 0.7, z0: -3.2, z1: -1.8 }, { x0: -4.4, x1: -2.6, z0: 2.2, z1: 2.8 }, { x0: 2.6, x1: 4.4, z0: 2.2, z1: 2.8 });
 
-// ============ weapons ============
+// ============ weapons: dual wield, unlimited ammo, no reloading ============
+// MARKER-DH2-DUALWIELD-UNLIMITED
 const WEAPONS = {
-  pistol: { label: 'PISTOL', dmg: 1, magSize: 12, mag: 12, reserve: 60, rate: 0.28, spread: 0.012, pellets: 1, reload: 1.1 },
-  shotgun: { label: 'SHOTGUN', dmg: 1, magSize: 6, mag: 6, reserve: 24, rate: 0.9, spread: 0.085, pellets: 6, reload: 1.7 },
-  rifle: { label: 'RIFLE', dmg: 3, magSize: 10, mag: 10, reserve: 40, rate: 0.45, spread: 0.003, pellets: 1, reload: 1.4 },
+  pistol: { label: 'PISTOL', dmg: 1, rate: 0.28, spread: 0.012, pellets: 1, melee: false },
+  shotgun: { label: 'SHOTGUN', dmg: 1, rate: 0.9, spread: 0.085, pellets: 6, melee: false },
+  rifle: { label: 'RIFLE', dmg: 3, rate: 0.45, spread: 0.003, pellets: 1, melee: false },
+  axe: { label: 'AXE', dmg: 6, rate: 0.7, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  knife: { label: 'KNIFE', dmg: 2, rate: 0.35, spread: 0, pellets: 1, melee: true, range: 2.2 },
 };
-const owned = { pistol: true, shotgun: false, rifle: false };
-let curWeapon = 'pistol';
-let fireCooldown = 0, reloading = 0;
-const gunMount = new THREE.Group();
-scene.add(gunMount);
-let gunMesh = null, muzzleFlash = null;
-function buildGun() {
-  if (gunMesh) gunMount.remove(gunMesh);
-  const w = WEAPONS[curWeapon];
-  gunMesh = new THREE.Group();
-  const len = curWeapon === 'pistol' ? 0.28 : curWeapon === 'shotgun' ? 0.55 : 0.7;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, len), new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.6, metalness: 0.4 }));
-  gunMesh.add(body);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.22, 8), new THREE.MeshStandardMaterial({ color: 0x0c0c0e, roughness: 0.4, metalness: 0.6 }));
-  barrel.rotation.x = Math.PI / 2; barrel.position.z = len / 2 + 0.08;
-  gunMesh.add(barrel);
-  gunMount.add(gunMesh);
-  muzzleFlash = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(255,220,120,1)', 'rgba(255,120,0,0)'), transparent: true, opacity: 0, depthWrite: false }));
-  muzzleFlash.scale.set(0.4, 0.4, 1);
-  muzzleFlash.position.z = len / 2 + 0.22;
-  gunMesh.add(muzzleFlash);
+const WEAPON_ORDER = ['pistol', 'shotgun', 'rifle', 'axe', 'knife'];
+const owned = { pistol: true, shotgun: false, rifle: false, axe: false, knife: false };
+const handWeapon = { right: 'pistol', left: null };
+const handCooldown = { right: 0, left: 0 };
+const handSwing = { right: 0, left: 0 };
+const gunMounts = { right: new THREE.Group(), left: new THREE.Group() };
+const HANDS = ['right', 'left'];
+scene.add(gunMounts.right, gunMounts.left);
+const steelMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.35, metalness: 0.7 });
+const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x141418, roughness: 0.5, metalness: 0.5 });
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.9 });
+const gripMat = new THREE.MeshStandardMaterial({ color: 0x2e1c10, roughness: 0.95 });
+function buildHandWeapon(hand) {
+  const mount = gunMounts[hand];
+  while (mount.children.length) mount.remove(mount.children[0]);
+  mount.userData.flash = null;
+  const name = handWeapon[hand];
+  if (!name) return;
+  const g = new THREE.Group();
+  const box = (w, h, d, mat, x, y, z, rz) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); if (rz) m.rotation.z = rz; g.add(m); return m;
+  };
+  const cyl = (rt, rb, len, mat, x, y, z, rx) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, 12), mat);
+    m.position.set(x, y, z); if (rx) m.rotation.x = rx; g.add(m); return m;
+  };
+  if (name === 'pistol') {
+    box(0.07, 0.09, 0.24, darkMetalMat, 0, 0, 0); // frame
+    box(0.06, 0.05, 0.27, steelMat, 0, 0.055, 0.01); // slide
+    cyl(0.018, 0.018, 0.1, steelMat, 0, 0.02, 0.17, Math.PI / 2); // barrel
+    box(0.055, 0.14, 0.07, gripMat, 0, -0.09, -0.09, 0.25); // grip
+    box(0.05, 0.06, 0.02, darkMetalMat, 0, -0.055, 0.05); // trigger guard
+    box(0.02, 0.02, 0.03, steelMat, 0, 0.085, 0.12); // front sight
+  } else if (name === 'shotgun') {
+    cyl(0.024, 0.024, 0.55, steelMat, 0, 0.03, 0.22, Math.PI / 2); // long barrel
+    cyl(0.032, 0.032, 0.2, darkMetalMat, 0, -0.02, 0.12, Math.PI / 2); // pump
+    box(0.07, 0.09, 0.3, darkMetalMat, 0, 0, -0.08); // receiver
+    box(0.06, 0.12, 0.28, woodMat, 0, -0.01, -0.32); // wooden stock
+  } else if (name === 'rifle') {
+    cyl(0.02, 0.02, 0.6, steelMat, 0, 0.02, 0.28, Math.PI / 2); // barrel
+    box(0.07, 0.1, 0.34, darkMetalMat, 0, 0, -0.05); // receiver
+    cyl(0.025, 0.025, 0.14, darkMetalMat, 0, 0.08, 0.02, Math.PI / 2); // scope
+    box(0.05, 0.14, 0.06, darkMetalMat, 0, -0.1, -0.02, 0.2); // magazine
+    box(0.06, 0.11, 0.26, woodMat, 0, -0.01, -0.3); // stock
+  } else if (name === 'axe') {
+    cyl(0.022, 0.026, 0.55, woodMat, 0, 0, 0.05, Math.PI / 2); // wooden handle
+    box(0.03, 0.16, 0.2, steelMat, 0, 0.06, 0.3); // steel head
+    box(0.035, 0.1, 0.05, steelMat, 0, 0.06, 0.22); // head wedge
+  } else if (name === 'knife') {
+    box(0.015, 0.05, 0.34, steelMat, 0, 0, 0.22); // steel blade
+    box(0.05, 0.06, 0.04, darkMetalMat, 0, 0, 0.04); // guard
+    cyl(0.024, 0.024, 0.14, gripMat, 0, 0, -0.05, Math.PI / 2); // grip
+  }
+  mount.add(g);
+  if (!WEAPONS[name].melee) {
+    const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(255,220,120,1)', 'rgba(255,120,0,0)'), transparent: true, opacity: 0, depthWrite: false }));
+    flash.scale.set(0.4, 0.4, 1);
+    flash.position.set(0, 0.02, name === 'pistol' ? 0.3 : name === 'shotgun' ? 0.55 : 0.62);
+    g.add(flash);
+    mount.userData.flash = flash;
+  }
 }
-buildGun();
+buildHandWeapon('right');
+buildHandWeapon('left');
+
+// In-VR stick debug readout: attached to the camera, low in view, VR only.
+// Diagnostic only — it hides permanently once the player has moved > 2 metres.
+let movedTotal = 0, debugDone = false;
+const debugCanvas = document.createElement('canvas'); debugCanvas.width = 512; debugCanvas.height = 256;
+const debugCtx = debugCanvas.getContext('2d');
+const debugTex = new THREE.CanvasTexture(debugCanvas); debugTex.colorSpace = THREE.SRGBColorSpace;
+const debugSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: debugTex, transparent: true, depthTest: false }));
+debugSprite.scale.set(0.95, 0.48, 1);
+debugSprite.position.set(0, -0.45, -1.1);
+debugSprite.renderOrder = 997;
+debugSprite.visible = false;
+camera.add(debugSprite);
+function updateDebugText(lx, ly, rx, ry, mx, mz) {
+  if (debugDone) return;
+  if (!renderer.xr.isPresenting) { debugSprite.visible = false; return; }
+  if (movedTotal > 2) { debugSprite.visible = false; debugDone = true; return; }
+  debugSprite.visible = true;
+  const g = debugCtx;
+  g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, 512, 256);
+  g.fillStyle = '#eaffea'; g.font = '700 26px monospace'; g.textAlign = 'left';
+  g.fillText('STICK DEBUG (hides after 2m moved)', 16, 36);
+  g.font = '400 24px monospace';
+  g.fillText('L axes: ' + lx.toFixed(2) + ' , ' + ly.toFixed(2), 16, 76);
+  g.fillText('R axes: ' + rx.toFixed(2) + ' , ' + ry.toFixed(2), 16, 112);
+  g.fillText('move: ' + mx.toFixed(2) + ' , ' + mz.toFixed(2), 16, 148);
+  g.fillText('pos: ' + playerGroup.position.x.toFixed(1) + ' , ' + playerGroup.position.z.toFixed(1), 16, 184);
+  g.fillText('moved: ' + movedTotal.toFixed(2) + ' m', 16, 220);
+  debugTex.needsUpdate = true;
+}
 
 // ============ particles (pooled) ============
 const particles = [];
 {
   const pGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < 40; i++) {
     const m = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ color: 0x5a0a0a }));
     m.visible = false; scene.add(m);
     particles.push({ m, vel: new THREE.Vector3(), life: 0 });
@@ -760,8 +954,10 @@ function spawnZombie(type) {
   scene.add(grp);
   zombies.push({ grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL, legR, armL, armR, head });
 }
-const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [-20, -22], [20, 22], [-62, -10], [62, 12]];
+const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [-20, -22], [20, 22], [-62, -10], [62, 12], [-100, 0], [104, 0], [-90, -32], [90, 32], [-70, 40], [70, 40], [-20, -45], [20, 45], [-105, 25], [105, -45], [64, -40], [64, 42], [-40, -45], [40, -45]];
 const playerPos = new THREE.Vector3(0, 0, 0);
+const playerCollide = { x: 0, z: 0 }; // reused every frame: no per-frame object in tick()
+const zombieCollide = { x: 0, z: 0 };
 let spawnTimer = 4, kills = 0;
 function spawnDirector(dt) {
   spawnTimer -= dt;
@@ -790,9 +986,19 @@ function addPickup(kind, x, z) {
   } else if (kind === 'rifle') {
     const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.15), new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.5, metalness: 0.4 }));
     g.add(b); label = 'RIFLE';
+  } else if (kind === 'axe') {
+    const h = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.9 }));
+    h.rotation.x = Math.PI / 2; g.add(h);
+    const hd = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.26), new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.35, metalness: 0.7 }));
+    hd.position.set(0, 0.1, 0.32); g.add(hd); label = 'AXE';
+  } else if (kind === 'knife') {
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.45), new THREE.MeshStandardMaterial({ color: 0x9aa2ae, roughness: 0.25, metalness: 0.8 }));
+    bl.position.z = 0.25; g.add(bl);
+    const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.18, 8), new THREE.MeshStandardMaterial({ color: 0x2e1c10, roughness: 0.95 }));
+    gr.rotation.x = Math.PI / 2; gr.position.z = -0.05; g.add(gr); label = 'KNIFE';
   } else if (kind === 'ammo') {
     const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.24), new THREE.MeshStandardMaterial({ color: 0x2a4a22, roughness: 0.8 }));
-    g.add(b); label = 'AMMO';
+    g.add(b); label = 'SUPPLY';
   } else if (kind === 'medkit') {
     const b = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.26, 0.26), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.6 }));
     g.add(b);
@@ -815,6 +1021,8 @@ function addPickup(kind, x, z) {
 // weapons in their homes
 addPickup('shotgun', -2, -15.6);
 addPickup('rifle', -33, 15.6);
+addPickup('axe', 0, -9.5);
+addPickup('knife', -46.5, -13.5);
 // ammo / health / food scattered around town
 for (const [k, x, z] of [
   ['ammo', -40, -12], ['ammo', -20, -12], ['ammo', 16, 12], ['ammo', 16, -12], ['ammo', -10, 12], ['ammo', 50, 12],
@@ -867,9 +1075,17 @@ function noiseBurst(dur, vol, filterFreq) {
   src.connect(lp); lp.connect(g); g.connect(masterGain); src.start();
 }
 function shotSound(type) {
-  if (type === 'shotgun') { noiseBurst(0.35, 0.5, 900); blip(90, 0.25, 0.4, 'sine', 40); }
-  else if (type === 'rifle') { noiseBurst(0.18, 0.45, 2400); blip(220, 0.08, 0.25, 'square', 90); }
-  else { noiseBurst(0.12, 0.35, 3000); blip(300, 0.06, 0.2, 'square', 120); }
+  // Distinct per weapon, pitch varied slightly every shot so fire never sounds looped.
+  // Peak volumes are unchanged from before — no louder overall.
+  const v = rand(0.92, 1.08);
+  if (type === 'shotgun') { // deep boom: low body + long low noise tail
+    noiseBurst(0.4, 0.5, 700); blip(70 * v, 0.3, 0.4, 'sine', 35); blip(50, 0.2, 0.25, 'sine', 30, 0.05);
+  } else if (type === 'rifle') { // louder crack with more body than the pistol
+    noiseBurst(0.16, 0.45, 2600); blip(210 * v, 0.1, 0.28, 'square', 80); noiseBurst(0.08, 0.2, 1200);
+  } else { // pistol: sharp crack + short echo tail (two quiet delayed repeats)
+    noiseBurst(0.09, 0.35, 3400); blip(310 * v, 0.06, 0.2, 'square', 120);
+    blip(300 * v, 0.12, 0.08, 'sine', 140, 0.09); blip(300 * v, 0.12, 0.04, 'sine', 140, 0.18);
+  }
 }
 function groanSound(vol) {
   if (!AC) return;
@@ -885,21 +1101,20 @@ function groanSound(vol) {
 }
 function hitSound() { blip(120, 0.12, 0.25, 'sine', 60); noiseBurst(0.05, 0.15, 800); }
 function pickupSound() { blip(660, 0.1, 0.2, 'sine'); blip(990, 0.14, 0.2, 'sine', null, 0.09); }
-function reloadSound() { blip(1200, 0.03, 0.12, 'square'); blip(900, 0.03, 0.12, 'square', null, 0.3); blip(1400, 0.05, 0.15, 'square', null, 0.7); }
+// no reload: unlimited ammo, so no reload sound is used
 function thumpSound(delay) { blip(50, 0.16, 0.5, 'sine', 35, delay); }
 
 // ============ HUD / banner / damage ============
 const hptext = document.getElementById('hptext'), hpfill = document.getElementById('hpfill');
-const weapontext = document.getElementById('weapontext'), ammotext = document.getElementById('ammotext');
+const weapontext = document.getElementById('weapontext'), leftweapontext = document.getElementById('leftweapontext');
 const killtext = document.getElementById('killtext'), bannerEl = document.getElementById('banner');
 let bannerT = 0;
 function showBanner(text, ms) { bannerEl.textContent = text; bannerEl.style.opacity = 1; bannerT = (ms || 2200) / 1000; }
 function updateHUD() {
   hptext.textContent = Math.max(0, Math.ceil(hp));
   hpfill.style.width = Math.max(0, hp) + '%';
-  weapontext.textContent = WEAPONS[curWeapon].label;
-  const w = WEAPONS[curWeapon];
-  ammotext.textContent = w.mag + ' / ' + w.reserve;
+  weapontext.textContent = handWeapon.right ? WEAPONS[handWeapon.right].label : 'EMPTY';
+  leftweapontext.textContent = handWeapon.left ? WEAPONS[handWeapon.left].label : 'EMPTY';
   killtext.textContent = kills;
 }
 let hp = 100, hurtCd = 0, shakeT = 0, blackoutT = -1;
@@ -921,11 +1136,13 @@ function damagePlayer(d) {
 const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'KeyR') tryReload();
-  if (e.code === 'KeyQ') cycleWeapon();
-  if (e.code === 'Digit1') switchWeapon('pistol');
-  if (e.code === 'Digit2') switchWeapon('shotgun');
-  if (e.code === 'Digit3') switchWeapon('rifle');
+  if (e.code === 'KeyQ') cycleHandWeapon('right');
+  if (e.code === 'KeyE') cycleHandWeapon('left');
+  if (e.code === 'Digit1') switchHandWeapon('right', 'pistol');
+  if (e.code === 'Digit2') switchHandWeapon('right', 'shotgun');
+  if (e.code === 'Digit3') switchHandWeapon('right', 'rifle');
+  if (e.code === 'Digit4') switchHandWeapon('right', 'axe');
+  if (e.code === 'Digit5') switchHandWeapon('right', 'knife');
 });
 addEventListener('keyup', e => keys[e.code] = false);
 let mouseDown = false, dragging = false, lastMX = 0, lastMY = 0, pitch = 0;
@@ -955,71 +1172,100 @@ let rightCtl = null, leftCtl = null;
   c.addEventListener('connected', e => { if (e.data.handedness === 'right') rightCtl = c; if (e.data.handedness === 'left') leftCtl = c; });
   c.addEventListener('disconnected', () => { if (rightCtl === c) rightCtl = null; if (leftCtl === c) leftCtl = null; });
 });
-const fireHands = { left: false, right: false };
-let prevCycle = false, snapCd = 0, snapArm = true;
+let prevCycleL = false, prevCycleR = false, snapCd = 0, snapArm = true, snapTurn = null; // snapTurn: {from, to, t} eased over 0.15s
+// MARKER-DH2-MOVEFIX
+const pairBuf = { x: 0, y: 0 };
+function pickPair(axes) {
+  // Some Quest profiles report the thumbstick on axes (0,1), others on (2,3).
+  // Take whichever pair is being pushed harder; writes into pairBuf (no per-frame array).
+  const m1 = Math.hypot(axes[0] || 0, axes[1] || 0);
+  const m2 = axes.length > 3 ? Math.hypot(axes[2] || 0, axes[3] || 0) : 0;
+  if (m2 > m1) { pairBuf.x = axes[2] || 0; pairBuf.y = axes[3] || 0; }
+  else { pairBuf.x = axes[0] || 0; pairBuf.y = axes[1] || 0; }
+}
+function dead(v) { return Math.abs(v) < 0.15 ? 0 : v; }
 function pollInput(dt) {
-  let fire = false, mx = 0, mz = 0;
+  let fireL = false, fireR = false, mx = 0, mz = 0, lx = 0, ly = 0, rx = 0, ry = 0;
   if (keys['KeyW'] || keys['ArrowUp']) mz += 1;
   if (keys['KeyS'] || keys['ArrowDown']) mz -= 1;
   if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
   if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
-  if (mouseDown && !renderer.xr.isPresenting) fire = true;
-  fireHands.left = fireHands.right = false;
-  let cycle = false;
+  if (mouseDown && !renderer.xr.isPresenting) fireR = true;
+  let cycleL = false, cycleR = false, axisSeen = false;
+  const applyHand = (hand, axes, buttons) => {
+    pickPair(axes); const ax = pairBuf.x, ay = pairBuf.y;
+    const dx = dead(ax), dy = dead(ay);
+    if (dx !== 0 || dy !== 0) axisSeen = true;
+    if (hand === 'left') {
+      lx = dx; ly = dy;
+      mx = dx; mz += -dy; // left stick: strafe + forward/back
+    } else if (hand === 'right') {
+      rx = dx; ry = dy;
+      mz += -dy; // right stick Y ALSO walks forward/back (covers the wrong-stick case)
+      if (Math.abs(dx) > 0.7) {
+        if (snapArm && snapCd <= 0) { snapTurn = { from: yaw, to: yaw - Math.sign(dx) * Math.PI / 4, t: 0 }; snapCd = 0.25; snapArm = false; }
+      } else if (Math.abs(dx) < 0.3) snapArm = true;
+    }
+    if (buttons && buttons[0] && buttons[0].value > 0.35) {
+      if (hand === 'left') fireL = true; else fireR = true;
+    }
+    if (buttons && buttons[4] && buttons[4].pressed) {
+      if (hand === 'left') cycleL = true; else cycleR = true;
+    }
+  };
   if (renderer.xr.isPresenting) {
     const session = renderer.xr.getSession();
     if (session) {
       for (const src of session.inputSources) {
         const gp = src.gamepad; if (!gp) continue;
-        if (gp.axes && gp.axes.length > 1) {
-          const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
-          if (src.handedness === 'left') {
-            if (Math.abs(ax) > 0.2) mx = ax;
-            if (Math.abs(ay) > 0.2) mz = -ay;
-          }
-          if (src.handedness === 'right') {
-            if (Math.abs(ax) > 0.7) {
-              if (snapArm && snapCd <= 0) { yaw -= Math.sign(ax) * Math.PI / 4; snapCd = 0.25; snapArm = false; }
-            } else if (Math.abs(ax) < 0.3) snapArm = true;
-          }
-        }
-        if (gp.buttons && gp.buttons[0] && gp.buttons[0].value > 0.35) {
-          fire = true;
-          if (src.handedness === 'left') fireHands.left = true;
-          else if (src.handedness === 'right') fireHands.right = true;
-        }
-        if (gp.buttons && gp.buttons[1] && gp.buttons[1].pressed) tryReload();
-        if (gp.buttons && gp.buttons[4] && gp.buttons[4].pressed) cycle = true;
+        if (gp.axes && gp.axes.length > 1) applyHand(src.handedness, gp.axes, gp.buttons);
+      }
+    }
+    // Fallback: controller objects' gamepads, if the session sources gave nothing.
+    if (!axisSeen) {
+      for (const [c, hand] of [[leftCtl, 'left'], [rightCtl, 'right'], [ctlL, 'left'], [ctlR, 'right']]) {
+        if (!c) continue;
+        const gp = c.gamepad || (c.userData && c.userData.inputSource && c.userData.inputSource.gamepad);
+        if (gp && gp.axes && gp.axes.length > 1) applyHand(hand, gp.axes, gp.buttons);
       }
     }
     snapCd = Math.max(0, snapCd - dt);
   }
-  if (cycle && !prevCycle) cycleWeapon();
-  prevCycle = cycle;
+  if (cycleL && !prevCycleL) cycleHandWeapon('left');
+  if (cycleR && !prevCycleR) cycleHandWeapon('right');
+  prevCycleL = cycleL; prevCycleR = cycleR;
   const len = Math.hypot(mx, mz);
   if (len > 1) { mx /= len; mz /= len; }
-  return { fire, mx, mz };
+  return { fire: { left: fireL, right: fireR }, mx, mz, lx, ly, rx, ry };
 }
 
-// ============ weapons: switch / reload / fire ============
-function switchWeapon(name) {
-  if (!owned[name] || name === curWeapon) return;
-  curWeapon = name; reloading = 0; fireCooldown = 0.2; buildGun(); updateHUD();
-  showBanner(WEAPONS[name].label, 1200);
+// ============ weapons: switch ============
+function switchHandWeapon(hand, name) {
+  if (!owned[name]) return;
+  const other = hand === 'right' ? 'left' : 'right';
+  if (handWeapon[other] === name) { // same weapon on both hands: swap instead of duplicating
+    const cur = handWeapon[hand];
+    handWeapon[other] = cur; handWeapon[hand] = name;
+    buildHandWeapon('right'); buildHandWeapon('left');
+  } else {
+    handWeapon[hand] = name;
+    buildHandWeapon(hand);
+  }
+  handCooldown[hand] = 0.2;
+  showBanner(WEAPONS[name].label + (hand === 'left' ? ' — LEFT' : ' — RIGHT'), 1200);
+  updateHUD();
 }
-function cycleWeapon() {
-  const ownedList = ['pistol', 'shotgun', 'rifle'].filter(w => owned[w]);
-  if (ownedList.length < 2) return;
-  switchWeapon(ownedList[(ownedList.indexOf(curWeapon) + 1) % ownedList.length]);
+function cycleHandWeapon(hand) {
+  const other = hand === 'right' ? 'left' : 'right';
+  const list = WEAPON_ORDER.filter(w => owned[w] && w !== handWeapon[other]);
+  if (!list.length) return;
+  const cur = handWeapon[hand];
+  const next = cur === null || !list.includes(cur) ? list[0] : list[(list.indexOf(cur) + 1) % list.length];
+  switchHandWeapon(hand, next);
 }
-function tryReload() {
-  const w = WEAPONS[curWeapon];
-  if (reloading > 0 || w.mag >= w.magSize || w.reserve <= 0) return;
-  reloading = w.reload; reloadSound();
-}
-const aimPoint = new THREE.Vector3(0, 1.6, -14);
+const aimPoints = { right: new THREE.Vector3(0, 1.6, -14), left: new THREE.Vector3(0, 1.6, -14) };
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
-const tmpQ = new THREE.Quaternion();
+const tmpQ = new THREE.Quaternion(), tmpDir = new THREE.Vector3();
 const camForward = new THREE.Vector3(), camRight = new THREE.Vector3();
 function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
   const lx = cx - ox, ly = cy - oy, lz = cz - oz;
@@ -1032,46 +1278,91 @@ function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 function killZombie(z) {
   z.dead = true; z.deadT = 0; kills++;
   tmpB.copy(z.grp.position); tmpB.y += 1;
-  spawnBurst(tmpB, 16, 0x5a0a0a, 3);
+  spawnBurst(tmpB, 10, 0x5a0a0a, 3);
   updateHUD();
 }
-function fireWeapon() {
-  const w = WEAPONS[curWeapon];
-  if (reloading > 0 || fireCooldown > 0) return;
-  if (w.mag <= 0) { tryReload(); return; }
-  w.mag -= 1; fireCooldown = w.rate;
-  shotSound(curWeapon);
-  if (muzzleFlash) muzzleFlash.material.opacity = 1;
-  gunMount.getWorldPosition(tmpV);
-  const mx0 = tmpV.x, my0 = tmpV.y, mz0 = tmpV.z;
+function whooshSound(dur, vol) {
+  // Filtered-noise whoosh: bandpass sweeps up then down. Synthesized, no assets.
+  if (!AC) return;
+  const len = Math.floor(AC.sampleRate * dur);
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2;
+  const t = AC.currentTime;
+  bp.frequency.setValueAtTime(400, t);
+  bp.frequency.linearRampToValueAtTime(2000, t + dur * 0.5);
+  bp.frequency.linearRampToValueAtTime(500, t + dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + dur * 0.4); g.gain.linearRampToValueAtTime(0, t + dur);
+  src.connect(bp); bp.connect(g); g.connect(masterGain); src.start(t); src.stop(t + dur + 0.02);
+}
+function swingSound(kind) {
+  if (kind === 'knife') whooshSound(0.14, 0.16); // quick swish
+  else whooshSound(0.28, 0.22); // axe whoosh
+}
+function thudSound() { blip(70, 0.16, 0.4, 'sine', 38); noiseBurst(0.08, 0.25, 400); } // axe hit: solid thud
+function sliceSound() { noiseBurst(0.06, 0.2, 5200); blip(1400, 0.05, 0.08, 'sine', 900); } // knife hit: slice
+function fireHand(hand) {
+  const name = handWeapon[hand];
+  if (!name || handCooldown[hand] > 0) return;
+  const w = WEAPONS[name];
+  handCooldown[hand] = w.rate;
+  const mount = gunMounts[hand];
+  mount.getWorldPosition(tmpV);
+  mount.getWorldQuaternion(tmpQ);
+  tmpDir.set(0, 0, 1).applyQuaternion(tmpQ); // mount +z faces the aim point after lookAt
+  const ox = tmpV.x, oy = tmpV.y, oz = tmpV.z;
+  if (w.melee) {
+    handSwing[hand] = 0.28;
+    swingSound(name);
+    for (const z of zombies) {
+      if (z.dead) continue;
+      const gp = z.grp.position, s = z.scale;
+      const vx = gp.x - ox, vy = gp.y + 1.1 * s - oy, vz = gp.z - oz;
+      const dist = Math.hypot(vx, vy, vz);
+      if (dist > w.range + 0.6) continue;
+      const dot = (vx * tmpDir.x + vy * tmpDir.y + vz * tmpDir.z) / (dist || 0.001);
+      if (dot < 0.65) continue; // must be in front of that hand
+      tmpB.set(gp.x, gp.y + 1.1 * s, gp.z);
+      spawnBurst(tmpB, 5, 0x5a0a0a, 2.5);
+      z.hp -= w.dmg; if (name === 'axe') thudSound(); else if (name === 'knife') sliceSound(); else hitSound();
+      if (z.hp <= 0) killZombie(z);
+    }
+    return;
+  }
+  shotSound(name);
+  const flash = mount.userData.flash;
+  if (flash) flash.material.opacity = 1;
   for (let p = 0; p < w.pellets; p++) {
-    tmpA.copy(aimPoint).sub(tmpV).normalize();
+    tmpA.copy(tmpDir);
     tmpA.x += rand(-w.spread, w.spread); tmpA.y += rand(-w.spread, w.spread); tmpA.z += rand(-w.spread, w.spread);
     tmpA.normalize();
     let wallT = Infinity;
     for (const b of colliders) {
-      const t = rayVsBox(mx0, my0, mz0, tmpA.x, tmpA.y, tmpA.z, b, b.h || 3.4);
+      const t = rayVsBox(ox, oy, oz, tmpA.x, tmpA.y, tmpA.z, b, b.h || 3.4);
       if (t < wallT) wallT = t;
     }
     let bestT = Infinity, bestZ = null, headshot = false;
     for (const z of zombies) {
       if (z.dead) continue;
       const gp = z.grp.position, s = z.scale;
-      const th = raySphere(mx0, my0, mz0, tmpA.x, tmpA.y, tmpA.z, gp.x, gp.y + 1.68 * s, gp.z, 0.3 * s);
-      const tb = raySphere(mx0, my0, mz0, tmpA.x, tmpA.y, tmpA.z, gp.x, gp.y + 1.1 * s, gp.z, 0.55 * s);
+      const th = raySphere(ox, oy, oz, tmpA.x, tmpA.y, tmpA.z, gp.x, gp.y + 1.68 * s, gp.z, 0.3 * s);
+      const tb = raySphere(ox, oy, oz, tmpA.x, tmpA.y, tmpA.z, gp.x, gp.y + 1.1 * s, gp.z, 0.55 * s);
       const t = Math.min(th, tb);
       if (t < bestT) { bestT = t; bestZ = z; headshot = th < tb; }
     }
     if (bestZ && bestT < wallT && bestT < 60) {
-      tmpB.set(mx0 + tmpA.x * bestT, my0 + tmpA.y * bestT, mz0 + tmpA.z * bestT);
-      spawnBurst(tmpB, headshot ? 14 : 8, 0x5a0a0a, 2.5);
+      tmpB.set(ox + tmpA.x * bestT, oy + tmpA.y * bestT, oz + tmpA.z * bestT);
+      spawnBurst(tmpB, headshot ? 8 : 5, 0x5a0a0a, 2.5);
       if (headshot) { if (bestZ.type === 'brute') bestZ.hp -= 5; else bestZ.hp = 0; }
       else bestZ.hp -= w.dmg;
       hitSound();
       if (bestZ.hp <= 0 && !bestZ.dead) killZombie(bestZ);
     } else if (wallT < 60) {
-      tmpB.set(mx0 + tmpA.x * wallT, my0 + tmpA.y * wallT, mz0 + tmpA.z * wallT);
-      spawnBurst(tmpB, 4, 0xd8c840, 1.5);
+      tmpB.set(ox + tmpA.x * wallT, oy + tmpA.y * wallT, oz + tmpA.z * wallT);
+      spawnBurst(tmpB, 3, 0xd8c840, 1.5);
     }
   }
   updateHUD();
@@ -1097,7 +1388,8 @@ function updateZombies(dt) {
       z.grp.position.x += dx / dist * z.speed * dt;
       z.grp.position.z += dz / dist * z.speed * dt;
       z.grp.rotation.y = Math.atan2(dx, dz);
-      const p = { x: z.grp.position.x, z: z.grp.position.z };
+      zombieCollide.x = z.grp.position.x; zombieCollide.z = z.grp.position.z;
+      const p = zombieCollide;
       collideCircle(p, 0.4, colliders);
       z.grp.position.x = p.x; z.grp.position.z = p.z;
       z.phase += dt * z.speed * 3.4;
@@ -1142,12 +1434,14 @@ function updatePickups(dt, t) {
     if (d < 1.3) {
       p.taken = true; p.grp.visible = false;
       pickupSound();
-      if (p.kind === 'shotgun' || p.kind === 'rifle') {
-        if (!owned[p.kind]) { owned[p.kind] = true; switchWeapon(p.kind); showBanner(WEAPONS[p.kind].label + ' FOUND', 2000); }
-        else { WEAPONS[p.kind].reserve += p.kind === 'shotgun' ? 12 : 20; showBanner('AMMO FOR ' + WEAPONS[p.kind].label, 1200); }
+      if (p.kind === 'shotgun' || p.kind === 'rifle' || p.kind === 'axe' || p.kind === 'knife') {
+        if (!owned[p.kind]) {
+          owned[p.kind] = true;
+          if (handWeapon.left === null) { handWeapon.left = p.kind; buildHandWeapon('left'); showBanner(WEAPONS[p.kind].label + ' FOUND — LEFT HAND', 2000); }
+          else showBanner(WEAPONS[p.kind].label + ' FOUND — A/X TO EQUIP', 2000);
+        } else showBanner(WEAPONS[p.kind].label + ' ALREADY OWNED', 1200);
       } else if (p.kind === 'ammo') {
-        const w = WEAPONS[curWeapon];
-        w.reserve += curWeapon === 'shotgun' ? 12 : curWeapon === 'rifle' ? 20 : 24;
+        hp = Math.min(100, hp + 15); // supply crate: ammo is unlimited, so supplies top up health
       } else if (p.kind === 'medkit') { hp = Math.min(100, hp + 40); }
       else if (p.kind === 'food') { hp = Math.min(100, hp + 15); }
       updateHUD();
@@ -1168,7 +1462,14 @@ function tick() {
       camera.position.set(0, 1.6, 0);
       camera.rotation.order = 'YXZ'; camera.rotation.y = 0; camera.rotation.x = pitch;
     }
+    const prevPX = playerGroup.position.x, prevPZ = playerGroup.position.z;
     const inp = pollInput(dt);
+    if (snapTurn) { // ease the 45-degree snap over ~0.15s (smoothstep) instead of an instant jump
+      snapTurn.t += dt / 0.15;
+      const k = Math.min(1, snapTurn.t), e = k * k * (3 - 2 * k);
+      yaw = snapTurn.from + (snapTurn.to - snapTurn.from) * e;
+      if (snapTurn.t >= 1) snapTurn = null;
+    }
     const sp = 4.2;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
     const rx = Math.cos(yaw), rz = -Math.sin(yaw);
@@ -1181,46 +1482,51 @@ function tick() {
     // which is why the stick seemed dead while the trigger still worked.)
     // The headset rides inside the group, so physical walking still moves
     // the view on top of stick movement.
-    const g = { x: playerGroup.position.x, z: playerGroup.position.z };
-    collideCircle(g, 0.35, colliders);
-    collideCircle(g, 0.35, furniture);
-    playerGroup.position.x = g.x;
-    playerGroup.position.z = g.z;
-    playerPos.set(g.x, 0, g.z);
+    playerCollide.x = playerGroup.position.x; playerCollide.z = playerGroup.position.z;
+    collideCircle(playerCollide, 0.35, colliders);
+    collideCircle(playerCollide, 0.35, furniture);
+    playerGroup.position.x = playerCollide.x;
+    playerGroup.position.z = playerCollide.z;
+    playerPos.set(playerCollide.x, 0, playerCollide.z);
+    movedTotal += Math.hypot(playerCollide.x - prevPX, playerCollide.z - prevPZ);
+    updateDebugText(inp.lx, inp.ly, inp.rx, inp.ry, inp.mx, inp.mz);
     // flashlight follows the head
     camera.getWorldPosition(tmpV);
     flash.position.copy(tmpV);
     camera.getWorldDirection(camForward);
     flashTarget.position.copy(tmpV).addScaledVector(camForward, 10);
-    // gun mount + aim point
-    let aimCtl = null;
-    if (renderer.xr.isPresenting) aimCtl = rightCtl || leftCtl;
-    if (aimCtl) {
-      tmpV.setFromMatrixPosition(aimCtl.matrixWorld);
-      tmpV2.set(0, 0, -1).applyQuaternion(aimCtl.getWorldQuaternion(tmpQ));
-      gunMount.position.copy(tmpV).addScaledVector(tmpV2, 0.12);
-      aimPoint.copy(tmpV).addScaledVector(tmpV2, 14);
-    } else {
-      camera.getWorldPosition(tmpV);
-      camera.getWorldDirection(camForward);
-      camRight.crossVectors(camForward, camera.up).normalize();
-      gunMount.position.copy(tmpV).addScaledVector(camForward, 0.45).addScaledVector(camRight, 0.22);
-      gunMount.position.y -= 0.22;
-      aimPoint.copy(tmpV).addScaledVector(camForward, 14);
-    }
-    gunMount.lookAt(aimPoint);
-    // firing + reload + cooldowns
-    if (inp.fire) fireWeapon();
-    fireCooldown = Math.max(0, fireCooldown - dt);
-    if (reloading > 0) {
-      reloading -= dt;
-      if (reloading <= 0) {
-        const w = WEAPONS[curWeapon];
-        const take = Math.min(w.magSize - w.mag, w.reserve);
-        w.mag += take; w.reserve -= take; updateHUD();
+    // gun mounts: one per hand, each aimed by its own controller (or the head on desktop)
+    for (const hand of HANDS) {
+      const mount = gunMounts[hand];
+      const ctl = hand === 'right' ? rightCtl : leftCtl;
+      if (renderer.xr.isPresenting && ctl) {
+        tmpV.setFromMatrixPosition(ctl.matrixWorld);
+        tmpV2.set(0, 0, -1).applyQuaternion(ctl.getWorldQuaternion(tmpQ));
+        mount.position.copy(tmpV).addScaledVector(tmpV2, 0.12);
+        aimPoints[hand].copy(tmpV).addScaledVector(tmpV2, 14);
+      } else {
+        camera.getWorldPosition(tmpV);
+        camera.getWorldDirection(camForward);
+        camRight.crossVectors(camForward, camera.up).normalize();
+        const side = hand === 'right' ? 0.22 : -0.22;
+        mount.position.copy(tmpV).addScaledVector(camForward, 0.45).addScaledVector(camRight, side);
+        mount.position.y -= 0.22;
+        aimPoints[hand].copy(tmpV).addScaledVector(camForward, 14);
       }
+      mount.lookAt(aimPoints[hand]);
+      if (handSwing[hand] > 0) mount.rotateX(-Math.sin(handSwing[hand] / 0.28 * Math.PI) * 1.1);
     }
-    if (muzzleFlash) muzzleFlash.material.opacity = Math.max(0, muzzleFlash.material.opacity - dt * 18);
+    // firing: each trigger fires its own hand's weapon; no reloading, ammo is unlimited
+    if (inp.fire.right) fireHand('right');
+    if (inp.fire.left) fireHand('left');
+    handCooldown.right = Math.max(0, handCooldown.right - dt);
+    handCooldown.left = Math.max(0, handCooldown.left - dt);
+    handSwing.right = Math.max(0, handSwing.right - dt);
+    handSwing.left = Math.max(0, handSwing.left - dt);
+    for (const hand of HANDS) {
+      const fl = gunMounts[hand].userData.flash;
+      if (fl) fl.material.opacity = Math.max(0, fl.material.opacity - dt * 18);
+    }
     hurtMat.opacity = Math.max(0, hurtMat.opacity - dt * 1.6);
     hurtCd = Math.max(0, hurtCd - dt);
     if (shakeT > 0 && !renderer.xr.isPresenting) {
@@ -1252,7 +1558,7 @@ function tick() {
       if (blackoutT < 1.0) blackMat.opacity = Math.min(1, blackoutT);
       else if (blackoutT < 1.3) blackMat.opacity = 1;
       else {
-        playerGroup.position.set(0, 0, 0); yaw = 0; playerGroup.rotation.y = 0;
+        playerGroup.position.set(0, 0, 0); yaw = 0; snapTurn = null; playerGroup.rotation.y = 0;
         hp = 100; hurtCd = 0;
         for (const z of zombies) scene.remove(z.grp);
         zombies.length = 0; spawnTimer = 4;
@@ -1271,14 +1577,14 @@ renderer.setAnimationLoop(tick);
 
 // ============ menu / start / VR ============
 const menuEl = document.getElementById('menu');
-document.getElementById('ctltext').textContent = 'VR: left stick moves · right stick turns · trigger shoots · grip reloads · A/X swaps weapon. Desktop: WASD moves · mouse looks · click shoots · R reloads · Q swaps weapon.';
+document.getElementById('ctltext').textContent = 'VR: left stick moves · right stick Y also walks · right stick X turns · each trigger fires its own hand · A/X on a controller swaps THAT hand\'s weapon · unlimited ammo, no reloading. Desktop: WASD moves · mouse looks · click fires right hand · Q swaps right hand · E swaps left hand.';
 function startGame() {
   startAudio();
   mode = 'play';
   menuEl.style.display = 'none';
   document.getElementById('hint').textContent = renderer.xr.isPresenting
-    ? 'Left stick move · right stick turn · trigger shoot'
-    : 'WASD move · mouse look · click shoot · R reload · Q swap weapon';
+    ? 'Left stick move · right stick turn · each trigger fires its hand · A/X swaps that hand'
+    : 'WASD move · mouse look · click fires right hand · Q swaps right · E swaps left';
   showBanner('HOLLOW CREEK — find weapons. survive.', 3000);
   updateHUD();
 }
