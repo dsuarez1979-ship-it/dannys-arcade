@@ -77,6 +77,7 @@
 
 <script type="module">
 // MARKER: RHYTHM-SLICER-V1
+// MARKER: RHYTHM-SLICER-V2
 // Rhythm Slicer VR — original neon rhythm-slicing game for Danny's Arcade.
 // Everything here (art, music, names) is original: synth loops are generated
 // live with the Web Audio API, all meshes are procedural neon geometry.
@@ -119,6 +120,12 @@ const heightHolder = new THREE.Group();
 heightHolder.position.y = 1.6;
 dolly.add(heightHolder); heightHolder.add(camera);
 scene.add(dolly);
+// V2: live head-height tracking. In VR (local-floor) the HMD pose already IS
+// true head height, so the 1.6m rig offset must be zeroed while presenting —
+// leaving it on floated the camera ~1.6m above the player's real head, which
+// is why every note (spawned at a fixed 1.3m) looked like it was on the floor.
+const _headV = new THREE.Vector3();
+let smoothHeadY = 1.6;
 
 // Lights: hemisphere base + two colored stage lights that pulse on the beat
 scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.8));
@@ -219,24 +226,32 @@ const towerGlows = [];
 }
 
 // ============================== hit plane + lane guides ==============================
-const HIT_Z = -1.1, SPAWN_Z = -13, LANE_Y = 1.3;
+const HIT_Z = -1.1, SPAWN_Z = -13;
 const LANES = [-0.62, -0.21, 0.21, 0.62];
+// V2: per-lane height offsets around the player's LIVE head height (the old
+// fixed LANE_Y = 1.3 is gone — notes anchor to eye level at spawn time).
+const LANE_YOFFS = [-0.45, -0.15, 0.15, 0.45];
 function handOfLane(x) { return x < 0 ? 'left' : 'right'; }
+// V2: strike-zone frame + lane guides live in a group that rides the smoothed
+// head height, so the target zone is always at eye level.
+const strikeFrame = new THREE.Group();
+scene.add(strikeFrame);
 {
   // Neon frame around the strike zone
   const frameMat = new THREE.MeshBasicMaterial({ color: COL_CYAN, toneMapped: false });
   const mkBar = (w, h, x, y) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frameMat);
-    m.position.set(x, y, HIT_Z); scene.add(m);
+    m.position.set(x, y, HIT_Z); strikeFrame.add(m);
   };
   mkBar(1.9, 0.05, 0, 0.55); mkBar(1.9, 0.05, 0, 2.05);
   mkBar(0.05, 1.55, -0.93, 1.3); mkBar(0.05, 1.55, 0.93, 1.3);
   // Faint lane guide lines from spawn to hit plane (colored by hand)
-  for (const lx of LANES) {
+  for (let li = 0; li < LANES.length; li++) {
+    const lx = LANES[li];
     const col = handOfLane(lx) === 'left' ? COL_CYAN : COL_MAG;
     const g = new THREE.BufferGeometry().setFromPoints(
-      [new THREE.Vector3(lx, LANE_Y, SPAWN_Z), new THREE.Vector3(lx, LANE_Y, HIT_Z)]);
-    scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+      [new THREE.Vector3(lx, LANE_YOFFS[li], SPAWN_Z), new THREE.Vector3(lx, LANE_YOFFS[li], HIT_Z)]);
+    strikeFrame.add(new THREE.Line(g, new THREE.LineBasicMaterial({
       color: col, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false
     })));
   }
@@ -280,6 +295,51 @@ ctlL.add(bladeL); ctlR.add(bladeR);
 const tipPrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
 const tipCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
 const sliceCd = { left: 0, right: 0, desk: 0 };
+// V2: controller world-position tracking. Blade velocity comes from the
+// CONTROLLER's world translation (clean signal), not the amplified tip —
+// the tip still drives the slice proximity test and the visible trail.
+const ctlPrev = { left: new THREE.Vector3(), right: new THREE.Vector3() };
+const ctlCur  = { left: new THREE.Vector3(), right: new THREE.Vector3() };
+const ctlVel  = { left: new THREE.Vector3(), right: new THREE.Vector3() };
+const ctlInit = { left: false, right: false };
+function trackController(key, ctl, dt) {
+  ctlPrev[key].copy(ctlCur[key]);
+  ctlCur[key].setFromMatrixPosition(ctl.matrixWorld);
+  if (!ctlInit[key]) { ctlInit[key] = true; ctlVel[key].set(0, 0, 0); return; }
+  if (dt > 0) ctlVel[key].copy(ctlCur[key]).sub(ctlPrev[key]).divideScalar(dt);
+  else ctlVel[key].set(0, 0, 0);
+}
+// V2: per-hand VR blade trails (the old build only had a desktop trail, so in
+// VR there was no visible feedback of swing direction at all).
+const V_TRAIL_N = 18;
+function makeVrTrail(color) {
+  const geo = new THREE.BufferGeometry();
+  const arr = new Float32Array(V_TRAIL_N * 3);
+  for (let i = 0; i < V_TRAIL_N; i++) arr[i * 3 + 1] = -999;
+  geo.setAttribute('position', new THREE.BufferAttribute(arr, 3).setUsage(THREE.DynamicDrawUsage));
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+    color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+  }));
+  line.frustumCulled = false; line.visible = false;
+  scene.add(line);
+  return line;
+}
+const vrTrailL = makeVrTrail(COL_CYAN), vrTrailR = makeVrTrail(COL_MAG);
+function pushVrTrail(line, p) {
+  const a = line.geometry.attributes.position.array;
+  for (let i = V_TRAIL_N - 1; i > 0; i--) {
+    a[i * 3] = a[(i - 1) * 3]; a[i * 3 + 1] = a[(i - 1) * 3 + 1]; a[i * 3 + 2] = a[(i - 1) * 3 + 2];
+  }
+  a[0] = p.x; a[1] = p.y; a[2] = p.z;
+  line.geometry.attributes.position.needsUpdate = true;
+}
+function resetVrTrails() {
+  for (const line of [vrTrailL, vrTrailR]) {
+    const a = line.geometry.attributes.position.array;
+    for (let i = 0; i < V_TRAIL_N; i++) { a[i * 3] = 0; a[i * 3 + 1] = -999; a[i * 3 + 2] = 0; }
+    line.geometry.attributes.position.needsUpdate = true;
+  }
+}
 const _tipLocal = new THREE.Vector3(0, 0, -0.70);
 const _ctlQ = new THREE.Quaternion();
 function controllerTip(ctl, out) {
@@ -691,7 +751,7 @@ for (let i = 0; i < 26; i++) {
   arrow.position.z = 0.17; arrow.visible = false;
   grp.add(arrow);
   grp.visible = false; scene.add(grp);
-  notes.push({ grp, cube, arrow, active: false, x: 0, z: 0, vz: 0, hand: 'left', dir: -1, bomb: false, judged: false });
+  notes.push({ grp, cube, arrow, active: false, x: 0, y: 0, z: 0, vz: 0, hand: 'left', dir: -1, bomb: false, judged: false });
 }
 const bombGeo = new THREE.SphereGeometry(0.19, 14, 12);
 const bombMat = new THREE.MeshBasicMaterial({ color: 0x14141c });
@@ -706,7 +766,7 @@ for (let i = 0; i < 8; i++) {
   const glow = glowSprite(0xff2222, 0.7, 0.5);
   grp.add(glow);
   grp.visible = false; scene.add(grp);
-  bombs.push({ grp, ring, active: false, x: 0, z: 0, vz: 0, judged: false, spin: 0 });
+  bombs.push({ grp, ring, active: false, x: 0, y: 0, z: 0, vz: 0, judged: false, spin: 0 });
 }
 const orbGeo = new THREE.SphereGeometry(0.16, 14, 12);
 const ORB_COLORS = [0xffd319, 0xff71ce, 0x2bff88, 0x27e8ff, 0xff9e4f];
@@ -717,7 +777,7 @@ for (let i = 0; i < 6; i++) {
   const glow = glowSprite(ORB_COLORS[i % ORB_COLORS.length], 0.6, 0.7);
   m.add(glow);
   m.visible = false; scene.add(m);
-  orbs.push({ m, mat, active: false, t: 0, x0: 0, x1: 0, judged: false });
+  orbs.push({ m, mat, active: false, t: 0, x0: 0, x1: 0, y0: 1.6, judged: false });
 }
 // Particles (slice bursts): pooled additive sprites
 const PMAX = 64;
@@ -825,17 +885,20 @@ function spawnNote(e) {
   const diff = DIFFS[selDiff];
   const travel = diff.travel;
   const x = LANES[e.lane];
+  // V2: anchor each note's height to the player's LIVE head height at spawn
+  // time, so in-flight notes never jump if he crouches mid-run.
+  const y = smoothHeadY + LANE_YOFFS[e.lane];
   const vz = (HIT_Z - SPAWN_Z) / travel;
   if (e.kind === 'bomb') {
     const b = bombs.find(o => !o.active);
     if (!b) return;
-    b.active = true; b.judged = false; b.x = x; b.z = SPAWN_Z; b.vz = vz; b.spin = 0;
-    b.grp.position.set(x, LANE_Y, SPAWN_Z); b.grp.visible = true;
+    b.active = true; b.judged = false; b.x = x; b.y = y; b.z = SPAWN_Z; b.vz = vz; b.spin = 0;
+    b.grp.position.set(x, y, SPAWN_Z); b.grp.visible = true;
   } else {
     const n = notes.find(o => !o.active);
     if (!n) return;
     const hand = handOfLane(x);
-    n.active = true; n.judged = false; n.x = x; n.z = SPAWN_Z; n.vz = vz;
+    n.active = true; n.judged = false; n.x = x; n.y = y; n.z = SPAWN_Z; n.vz = vz;
     n.hand = hand; n.dir = e.dir; n.bomb = false;
     n.cube.material = noteMats[hand];
     if (e.dir >= 0) {
@@ -843,7 +906,7 @@ function spawnNote(e) {
       n.arrow.material.map = arrowTex[e.dir];
       n.arrow.material.needsUpdate = true;
     } else n.arrow.visible = false;
-    n.grp.position.set(x, LANE_Y, SPAWN_Z);
+    n.grp.position.set(x, y, SPAWN_Z);
     const s = 0.6; n.grp.scale.set(s, s, s);
     n.grp.visible = true;
     notesTotal++;
@@ -853,6 +916,7 @@ function spawnOrb(e) {
   const o = orbs.find(q => !q.active);
   if (!o) return;
   o.active = true; o.judged = false; o.t = 0; o.x0 = e.x0; o.x1 = e.x1;
+  o.y0 = smoothHeadY; // V2: arc origin anchored to eye level
   o.mat.color.setHex(e.color);
   o.m.children[0].material.color.setHex(e.color);
   o.m.visible = true;
@@ -861,7 +925,7 @@ function spawnOrb(e) {
 // ============================== slicing ==============================
 const _bd = new THREE.Vector3();
 function bladeDir(key, dt) {
-  // XY-plane blade direction (normalized), used for arrow judgment
+  // XY-plane blade direction (normalized) — desktop mouse path only in V2.
   _bd.set(tipCur[key].x - tipPrev[key].x, tipCur[key].y - tipPrev[key].y, 0);
   const len = _bd.length();
   if (len < 1e-5 || dt <= 0) { _bd.set(0, 0, 0); return _bd; }
@@ -871,23 +935,47 @@ function bladeSpeed(key, dt) {
   if (dt <= 0) return 0;
   return tipCur[key].distanceTo(tipPrev[key]) / dt;
 }
+// V2: VR slice direction = dominant axis of the controller's WORLD velocity,
+// projected onto the plane perpendicular to the player's view direction
+// (camera world quaternion). Returns 0=up,1=right,2=down,3=left, -1=indeterminate.
+const _sv = new THREE.Vector3(), _camQ = new THREE.Quaternion();
+const _vRight = new THREE.Vector3(), _vUp = new THREE.Vector3();
+function sliceDirIndex(key) {
+  camera.getWorldQuaternion(_camQ);
+  _vRight.set(1, 0, 0).applyQuaternion(_camQ);
+  _vUp.set(0, 1, 0).applyQuaternion(_camQ);
+  _sv.copy(ctlVel[key]);
+  const px = _sv.dot(_vRight), py = _sv.dot(_vUp);
+  const ax = Math.abs(px), ay = Math.abs(py);
+  if (Math.max(ax, ay) < 0.4) return -1; // straight thrust: no clear direction
+  if (ax > ay) return px > 0 ? 1 : 3;
+  return py > 0 ? 0 : 2;
+}
+function vrBladeSpeed(key) { return ctlVel[key].length(); }
+// Snap a 2D direction vector to the dominant axis (desktop path).
+function snapDir2D(bdir) {
+  const ax = Math.abs(bdir.x), ay = Math.abs(bdir.y);
+  if (Math.max(ax, ay) < 1e-3) return -1;
+  if (ax > ay) return bdir.x > 0 ? 1 : 3;
+  return bdir.y > 0 ? 0 : 2;
+}
 function applyMult() {
   mult = combo >= 50 ? 8 : combo >= 25 ? 4 : combo >= 10 ? 2 : 1;
 }
-function resolveNoteSlice(n, hand, bdir) {
+function resolveNoteSlice(n, hand, dirIdx) {
   const diff = DIFFS[selDiff];
   n.active = false; n.grp.visible = false;
   if (hand !== 'both' && hand !== n.hand) {
     // Wrong blade: note consumed, combo kept, no points — clear feedback
-    floatText('WRONG BLADE', '#9aa0ac', n.x, LANE_Y + 0.35, n.z);
+    floatText('WRONG BLADE', '#9aa0ac', n.x, n.y + 0.35, n.z);
     sfxThud();
     return;
   }
   let pts = 0, tag = '', dirOk = true;
   if (diff.dirStrict && n.dir >= 0) {
-    const need = DIR_VECS[n.dir];
-    const dot = bdir.x * need.x + bdir.y * need.y;
-    if (dot < 0.5) {
+    // V2: snapped dominant-axis direction vs the chevron (replaces the old
+    // world-XY dot product, which misjudged every non-downward swing).
+    if (dirIdx < 0 || dirIdx !== n.dir) {
       dirOk = false;
       if (diff.wrongDirReset) {
         combo = 0; tag = 'WRONG WAY';
@@ -909,11 +997,11 @@ function resolveNoteSlice(n, hand, bdir) {
     score += gained;
     notesHit++;
     const col = n.hand === 'left' ? '#27e8ff' : '#ff3df0';
-    floatText('+' + gained, col, n.x, LANE_Y + 0.35, n.z);
-    burst(n.x, LANE_Y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, 8, 2.2);
+    floatText('+' + gained, col, n.x, n.y + 0.35, n.z);
+    burst(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, 8, 2.2);
     sfxSlice(combo);
   } else if (tag) {
-    floatText(tag, '#ffd319', n.x, LANE_Y + 0.35, n.z);
+    floatText(tag, '#ffd319', n.x, n.y + 0.35, n.z);
   }
   updateScoreboard();
 }
@@ -921,8 +1009,8 @@ function resolveBombHit(b) {
   b.active = false; b.grp.visible = false;
   combo = 0; applyMult();
   score = Math.max(0, score - 50);
-  burst(b.x, LANE_Y, b.z, 0xff2222, 16, 3.5);
-  floatText('-50', '#ff5555', b.x, LANE_Y + 0.4, b.z);
+  burst(b.x, b.y, b.z, 0xff2222, 16, 3.5);
+  floatText('-50', '#ff5555', b.x, b.y + 0.4, b.z);
   doFlash(0.75);
   sfxBomb();
   updateScoreboard();
@@ -939,21 +1027,24 @@ function resolveOrbSlice(o) {
 }
 const SLICE_R2 = 0.34 * 0.34;
 function trySlice(key, hand, dt) {
-  const spd = bladeSpeed(key, dt);
-  if (spd < 1.4 || sliceCd[key] > 0) return;
-  const bdir = bladeDir(key, dt).clone();
+  // V2: VR uses controller world velocity (speed gate ~1.5 m/s so drifting
+  // through a stationary blade never counts); desktop keeps its tip path.
+  const isDesk = key === 'desk';
+  const spd = isDesk ? bladeSpeed(key, dt) : vrBladeSpeed(key);
+  if (spd < 1.5 || sliceCd[key] > 0) return;
+  const dirIdx = isDesk ? snapDir2D(bladeDir(key, dt)) : sliceDirIndex(key);
   const tx = tipCur[key].x, ty = tipCur[key].y, tz = tipCur[key].z;
   // Notes + bombs near the hit plane
   for (const n of notes) {
     if (!n.active || n.judged) continue;
     if (Math.abs(n.z - HIT_Z) > 0.5) continue;
-    const dx = tx - n.x, dy = ty - LANE_Y;
-    if (dx * dx + dy * dy < SLICE_R2) { n.judged = true; sliceCd[key] = 0.08; resolveNoteSlice(n, hand, bdir); return; }
+    const dx = tx - n.x, dy = ty - n.y;
+    if (dx * dx + dy * dy < SLICE_R2) { n.judged = true; sliceCd[key] = 0.08; resolveNoteSlice(n, hand, dirIdx); return; }
   }
   for (const b of bombs) {
     if (!b.active || b.judged) continue;
     if (Math.abs(b.z - HIT_Z) > 0.5) continue;
-    const dx = tx - b.x, dy = ty - LANE_Y;
+    const dx = tx - b.x, dy = ty - b.y;
     if (dx * dx + dy * dy < SLICE_R2) { b.judged = true; sliceCd[key] = 0.08; resolveBombHit(b); return; }
   }
   // Orbs anywhere along their arc
@@ -975,6 +1066,8 @@ function startLevel() {
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
   for (const o of orbs) { o.active = false; o.m.visible = false; }
   for (const t of texts) { t.life = 0; t.sp.visible = false; }
+  resetVrTrails();
+  ctlInit.left = false; ctlInit.right = false;
   audioSys.startLevel(lv);
   const built = buildChart(lv, selDiff, audioSys.baseTime);
   chart = built.evts; orbEvents = built.orbsE;
@@ -1140,6 +1233,13 @@ function tick() {
   audioSys.tick();
   beatPulse = Math.max(0, beatPulse - dt * 2.2);
 
+  // V2: zero the rig height offset in VR (local-floor already reports true
+  // head height); ride the strike zone on the smoothed live head Y.
+  heightHolder.position.y = presenting ? 0 : 1.6;
+  camera.getWorldPosition(_headV);
+  smoothHeadY += (_headV.y - smoothHeadY) * Math.min(1, dt * 5);
+  strikeFrame.position.y = smoothHeadY - 1.3;
+
   // Beat-reactive stage
   grid.material.opacity = 0.3 + 0.45 * beatPulse;
   stageL.intensity = 20 + 45 * beatPulse;
@@ -1156,8 +1256,18 @@ function tick() {
   bladeL.visible = presenting && !!leftCtl;
   bladeR.visible = presenting && !!rightCtl;
   if (presenting) {
-    if (leftCtl) { tipPrev.left.copy(tipCur.left); controllerTip(leftCtl, tipCur.left); }
-    if (rightCtl) { tipPrev.right.copy(tipCur.right); controllerTip(rightCtl, tipCur.right); }
+    if (leftCtl) {
+      tipPrev.left.copy(tipCur.left); controllerTip(leftCtl, tipCur.left);
+      trackController('left', leftCtl, dt);
+      pushVrTrail(vrTrailL, tipCur.left);
+    }
+    if (rightCtl) {
+      tipPrev.right.copy(tipCur.right); controllerTip(rightCtl, tipCur.right);
+      trackController('right', rightCtl, dt);
+      pushVrTrail(vrTrailR, tipCur.right);
+    }
+    vrTrailL.visible = screen === 'playing' && !!leftCtl;
+    vrTrailR.visible = screen === 'playing' && !!rightCtl;
     if (screen === 'playing') {
       if (leftCtl) trySlice('left', 'left', dt);
       if (rightCtl) trySlice('right', 'right', dt);
@@ -1207,7 +1317,7 @@ function tick() {
       if (n.z >= HIT_Z + 0.45) {
         n.active = false; n.grp.visible = false;
         combo = 0; applyMult();
-        floatText('MISS', '#8a8f9e', n.x, LANE_Y + 0.35, HIT_Z);
+        floatText('MISS', '#8a8f9e', n.x, n.y + 0.35, HIT_Z);
         sfxMiss();
         updateScoreboard();
       }
@@ -1230,7 +1340,7 @@ function tick() {
       const t = o.t;
       o.m.position.set(
         lerp(o.x0, o.x1, t),
-        -1.2 + 2.8 * Math.sin(Math.PI * t),
+        o.y0 - 1.3 + 1.9 * Math.sin(Math.PI * t),
         -2.2 + 1.0 * Math.sin(Math.PI * t)
       );
     }
