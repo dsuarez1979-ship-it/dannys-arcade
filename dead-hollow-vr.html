@@ -1828,8 +1828,8 @@ function tick() {
     const rx = -fz, rz = fx; // camera-right, projected onto XZ: push right = move right
     const camYawDeg = Math.atan2(-fx, -fz) * 180 / Math.PI;
     const grpYawDeg = yaw * 180 / Math.PI;
-    const isRunning = !!inp.running; // DH4 run: 7.5 m/s only while the left stick click (or Shift) is held
-    const sp = isRunning ? 7.5 : 4.2;
+    const isRunning = !!inp.running; // DH5.1 run: 8.5 m/s only while the left stick click (or Shift) is held
+    const sp = isRunning ? 8.5 : 4.2;
     playerGroup.position.x += (fx * inp.mz + rx * inp.mx) * sp * dt;
     playerGroup.position.z += (fz * inp.mz + rz * inp.mx) * sp * dt;
     // locomotion lives on the rig: the stick drives the group directly and
