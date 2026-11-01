@@ -94,6 +94,8 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
 // MARKER-DH5-HAPTICS-WAVES: gun haptics, laser sights, katana/machete/sniper,
 // zombie waves, dual-wield clarity, grip-button scope.
+// MARKER-DH5-ONEHIT-MELEE: all melee weapons (axe/knife/katana/machete) deal
+// 99 dmg — one melee hit kills any zombie; guns unchanged.
 
 // ============ renderer / scene ============
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -891,10 +893,10 @@ const WEAPONS = {
   pistol: { label: 'PISTOL', dmg: 1, rate: 0.28, spread: 0.012, pellets: 1, melee: false },
   shotgun: { label: 'SHOTGUN', dmg: 1, rate: 0.9, spread: 0.085, pellets: 6, melee: false },
   rifle: { label: 'RIFLE', dmg: 3, rate: 0.45, spread: 0.003, pellets: 1, melee: false },
-  axe: { label: 'AXE', dmg: 6, rate: 0.7, spread: 0, pellets: 1, melee: true, range: 2.2 },
-  knife: { label: 'KNIFE', dmg: 2, rate: 0.35, spread: 0, pellets: 1, melee: true, range: 2.2 },
-  katana: { label: 'KATANA', dmg: 8, rate: 0.85, spread: 0, pellets: 1, melee: true, range: 2.6 },
-  machete: { label: 'MACHETE', dmg: 5, rate: 0.4, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  axe: { label: 'AXE', dmg: 99, rate: 0.7, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  knife: { label: 'KNIFE', dmg: 99, rate: 0.35, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  katana: { label: 'KATANA', dmg: 99, rate: 0.85, spread: 0, pellets: 1, melee: true, range: 2.6 },
+  machete: { label: 'MACHETE', dmg: 99, rate: 0.4, spread: 0, pellets: 1, melee: true, range: 2.2 },
   sniper: { label: 'SNIPER', dmg: 8, rate: 1.2, spread: 0.001, pellets: 1, melee: false },
 };
 const WEAPON_ORDER = ['pistol', 'shotgun', 'rifle', 'axe', 'knife', 'katana', 'machete', 'sniper'];
