@@ -78,6 +78,7 @@
 <script type="module">
 // MARKER: RHYTHM-SLICER-V1
 // MARKER: RHYTHM-SLICER-V2
+// MARKER: RHYTHM-SLICER-V3
 // Rhythm Slicer VR — original neon rhythm-slicing game for Danny's Arcade.
 // Everything here (art, music, names) is original: synth loops are generated
 // live with the Web Audio API, all meshes are procedural neon geometry.
@@ -295,6 +296,11 @@ ctlL.add(bladeL); ctlR.add(bladeR);
 const tipPrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
 const tipCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
 const sliceCd = { left: 0, right: 0, desk: 0 };
+// V3: blade base trackers (world position of the blade base this/prev frame).
+// The hit volume is a capsule from base to tip, using the exact same world
+// transform as the rendered blade mesh — no offset between seen and colliding.
+const basePrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
+const baseCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
 // V2: controller world-position tracking. Blade velocity comes from the
 // CONTROLLER's world translation (clean signal), not the amplified tip —
 // the tip still drives the slice proximity test and the visible trail.
@@ -347,6 +353,17 @@ function controllerTip(ctl, out) {
   out.setFromMatrixPosition(ctl.matrixWorld);
   _tipLocal.set(0, 0, -0.70).applyQuaternion(_ctlQ);
   out.add(_tipLocal);
+  return out;
+}
+// V3: world position of the blade BASE (local z=-0.07, where the visible
+// blade box starts). Same transform chain as controllerTip — the capsule
+// base->tip matches the rendered mesh exactly.
+const _baseLocal = new THREE.Vector3(0, 0, -0.07);
+function controllerBase(ctl, out) {
+  ctl.getWorldQuaternion(_ctlQ);
+  out.setFromMatrixPosition(ctl.matrixWorld);
+  _baseLocal.set(0, 0, -0.07).applyQuaternion(_ctlQ);
+  out.add(_baseLocal);
   return out;
 }
 
@@ -1025,7 +1042,35 @@ function resolveOrbSlice(o) {
   sfxOrb();
   updateScoreboard();
 }
-const SLICE_R2 = 0.34 * 0.34;
+// V3: hit registration — the blade collides as a CAPSULE from base to tip
+// (same world transform as the rendered blade mesh, no offset), tested as
+// sphere-vs-segment at both the previous and current frame so fast swings
+// can't tunnel through notes. Speed gate + direction judgment are unchanged.
+const BLADE_R = 0.25;  // generous capsule radius around the visible blade
+const NOTE_R = 0.20;   // ~1.3x the note cube's visual half-size
+const BOMB_R = 0.25;
+const ORB_R = 0.25;
+const ZONE_Z = 0.6;    // strike-zone depth around the hit plane (±0.6 m)
+const _ab = new THREE.Vector3(), _ap = new THREE.Vector3();
+function segPointDist2(ax, ay, az, bx, by, bz, px, py, pz) {
+  _ab.set(bx - ax, by - ay, bz - az);
+  _ap.set(px - ax, py - ay, pz - az);
+  const len2 = _ab.lengthSq();
+  let t = len2 > 1e-8 ? _ap.dot(_ab) / len2 : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  const dx = px - (ax + _ab.x * t), dy = py - (ay + _ab.y * t), dz = pz - (az + _ab.z * t);
+  return dx * dx + dy * dy + dz * dz;
+}
+// True if the blade capsule (at prev or current frame) touches a sphere of
+// radius r centered at (px,py,pz). Desktop's blade is a point, so its capsule
+// degenerates to a tip sphere there.
+function bladeHits(key, px, py, pz, r) {
+  const rr = (BLADE_R + r) * (BLADE_R + r);
+  const A = baseCur[key], B = tipCur[key];
+  if (segPointDist2(A.x, A.y, A.z, B.x, B.y, B.z, px, py, pz) < rr) return true;
+  const C = basePrev[key], D = tipPrev[key];
+  return segPointDist2(C.x, C.y, C.z, D.x, D.y, D.z, px, py, pz) < rr;
+}
 function trySlice(key, hand, dt) {
   // V2: VR uses controller world velocity (speed gate ~1.5 m/s so drifting
   // through a stationary blade never counts); desktop keeps its tip path.
@@ -1033,26 +1078,24 @@ function trySlice(key, hand, dt) {
   const spd = isDesk ? bladeSpeed(key, dt) : vrBladeSpeed(key);
   if (spd < 1.5 || sliceCd[key] > 0) return;
   const dirIdx = isDesk ? snapDir2D(bladeDir(key, dt)) : sliceDirIndex(key);
-  const tx = tipCur[key].x, ty = tipCur[key].y, tz = tipCur[key].z;
-  // Notes + bombs near the hit plane
+  // Notes + bombs near the hit plane — positions read live from the meshes
   for (const n of notes) {
     if (!n.active || n.judged) continue;
-    if (Math.abs(n.z - HIT_Z) > 0.5) continue;
-    const dx = tx - n.x, dy = ty - n.y;
-    if (dx * dx + dy * dy < SLICE_R2) { n.judged = true; sliceCd[key] = 0.08; resolveNoteSlice(n, hand, dirIdx); return; }
+    if (Math.abs(n.z - HIT_Z) > ZONE_Z) continue;
+    const np = n.grp.position;
+    if (bladeHits(key, np.x, np.y, np.z, NOTE_R)) { n.judged = true; sliceCd[key] = 0.08; resolveNoteSlice(n, hand, dirIdx); return; }
   }
   for (const b of bombs) {
     if (!b.active || b.judged) continue;
-    if (Math.abs(b.z - HIT_Z) > 0.5) continue;
-    const dx = tx - b.x, dy = ty - b.y;
-    if (dx * dx + dy * dy < SLICE_R2) { b.judged = true; sliceCd[key] = 0.08; resolveBombHit(b); return; }
+    if (Math.abs(b.z - HIT_Z) > ZONE_Z) continue;
+    const bp = b.grp.position;
+    if (bladeHits(key, bp.x, bp.y, bp.z, BOMB_R)) { b.judged = true; sliceCd[key] = 0.08; resolveBombHit(b); return; }
   }
   // Orbs anywhere along their arc
   for (const o of orbs) {
     if (!o.active || o.judged) continue;
-    const ox = o.m.position.x, oy = o.m.position.y, oz = o.m.position.z;
-    const dx = tx - ox, dy = ty - oy, dz = tz - oz;
-    if (dx * dx + dy * dy + dz * dz < 0.38 * 0.38) { sliceCd[key] = 0.08; resolveOrbSlice(o); return; }
+    const op = o.m.position;
+    if (bladeHits(key, op.x, op.y, op.z, ORB_R)) { sliceCd[key] = 0.08; resolveOrbSlice(o); return; }
   }
 }
 
@@ -1258,11 +1301,13 @@ function tick() {
   if (presenting) {
     if (leftCtl) {
       tipPrev.left.copy(tipCur.left); controllerTip(leftCtl, tipCur.left);
+      basePrev.left.copy(baseCur.left); controllerBase(leftCtl, baseCur.left);
       trackController('left', leftCtl, dt);
       pushVrTrail(vrTrailL, tipCur.left);
     }
     if (rightCtl) {
       tipPrev.right.copy(tipCur.right); controllerTip(rightCtl, tipCur.right);
+      basePrev.right.copy(baseCur.right); controllerBase(rightCtl, baseCur.right);
       trackController('right', rightCtl, dt);
       pushVrTrail(vrTrailR, tipCur.right);
     }
@@ -1276,6 +1321,9 @@ function tick() {
     tipPrev.desk.copy(tipCur.desk);
     mouseBladePoint();
     tipCur.desk.copy(_hitP);
+    // V3: desktop blade is a point — capsule degenerates to a tip sphere
+    basePrev.desk.copy(baseCur.desk);
+    baseCur.desk.copy(tipCur.desk);
     trailLine.visible = mouseDown;
     if (mouseDown) {
       // Shift-register trail history, newest at index 0
@@ -1314,7 +1362,7 @@ function tick() {
       const pop = clamp((n.z - SPAWN_Z) / 2, 0, 1);
       const s = 0.6 + 0.4 * pop;
       n.grp.scale.set(s, s, s);
-      if (n.z >= HIT_Z + 0.45) {
+      if (n.z >= HIT_Z + 0.65) {
         n.active = false; n.grp.visible = false;
         combo = 0; applyMult();
         floatText('MISS', '#8a8f9e', n.x, n.y + 0.35, HIT_Z);
