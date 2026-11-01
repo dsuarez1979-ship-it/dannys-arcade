@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Rhythm Slicer VR — Neon Rhythm Slice</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#06021a;
+    font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
+  canvas { display:block; }
+  #panel {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
+    z-index:10; text-align:center; color:#fff;
+  }
+  #panel .box { max-width:600px; padding:24px 20px; }
+  #panel h1 {
+    font-size:58px; letter-spacing:5px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    text-shadow:0 0 34px rgba(255,113,206,.25);
+  }
+  #panel .sub { font-size:15px; letter-spacing:3px; color:#ffd9ec; margin-bottom:22px; text-transform:uppercase; }
+  #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#ffeef8; }
+  #panel p.small { font-size:13px; color:#e8c9e2; }
+  #vrBtn {
+    margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+  }
+  #vrBtn:disabled { opacity:.55; cursor:wait; }
+  #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  /* Shared arcade scoreboard cell: small dark translucent rectangle, thin neon
+     border, TOP-LEFT. Mirrored 1:1 by the VR camera-attached plane below. */
+  #hud {
+    position:fixed; top:12px; left:12px; z-index:5;
+    background:rgba(8,6,20,0.72); border:2px solid #27e8ff; border-radius:10px;
+    padding:8px 12px; pointer-events:none; display:none; text-align:left;
+    text-shadow:0 2px 8px #000; letter-spacing:1px;
+  }
+  #hudL1 { color:#ffffff; font-size:20px; font-weight:900; letter-spacing:1px; }
+  #hudL2 { color:#27e8ff; font-size:14px; font-weight:700; letter-spacing:1px; margin-top:2px; }
+  #hudL3 { color:#ffd319; font-size:13px; font-weight:700; letter-spacing:1px; margin-top:2px; }
+  #muteBtn {
+    position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
+    background:rgba(20,10,40,.7); color:#ffd9ec; border:1px solid #ff71ce; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  #flash {
+    position:fixed; inset:0; z-index:8; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at center, rgba(255,30,30,0.55) 0%, rgba(255,0,0,0.25) 60%, rgba(255,0,0,0) 100%);
+    transition:opacity 0.08s linear;
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<div id="panel">
+  <div class="box">
+    <h1>RHYTHM SLICER</h1>
+    <div class="sub">Neon Rhythm Slice &middot; original rhythm-slicing</div>
+    <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <p><b>VR:</b> slice the glowing cubes with the matching blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. On Normal/Hard, slice <b>in the arrow's direction</b>. Grab the bonus orbs, dodge the bombs.</p>
+    <p><b>Desktop:</b> hold the mouse button and drag — your blade cuts any color. M mutes.</p>
+    <p class="small">No lives, no game over, ever — misses and bombs only reset your combo. Every track is original synth, generated live in your browser.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+  </div>
+</div>
+
+<div id="hud"><div id="hudL1">0 PTS · x1</div><div id="hudL2">COMBO 0 · MAX 0</div><div id="hudL3">LV1 · EASY</div></div>
+<button id="muteBtn">SOUND: ON</button>
+<div id="flash"></div>
+
+<script type="module">
+// MARKER: RHYTHM-SLICER-V1
+// Rhythm Slicer VR — original neon rhythm-slicing game for Danny's Arcade.
+// Everything here (art, music, names) is original: synth loops are generated
+// live with the Web Audio API, all meshes are procedural neon geometry.
+import * as THREE from 'three';
+
+// ============================== helpers ==============================
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp  = (a, b, t) => a + (b - a) * t;
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ============================== renderer / scene ==============================
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+// Stereo VR is the expensive path — pixel ratio capped for the Quest browser.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05021a);
+scene.fog = new THREE.Fog(0x05021a, 26, 60);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 900);
+
+// Player rig: dolly -> height holder -> camera (mirrors the arcade pattern;
+// in VR the headset pose drives the camera, on desktop the holder sets eye height)
+const dolly = new THREE.Group();
+const heightHolder = new THREE.Group();
+heightHolder.position.y = 1.6;
+dolly.add(heightHolder); heightHolder.add(camera);
+scene.add(dolly);
+
+// Lights: hemisphere base + two colored stage lights that pulse on the beat
+scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.8));
+const stageL = new THREE.PointLight(0x27e8ff, 30, 30, 1.8);
+stageL.position.set(-4, 4, -4); scene.add(stageL);
+const stageR = new THREE.PointLight(0xff3df0, 30, 30, 1.8);
+stageR.position.set(4, 4, -4); scene.add(stageR);
+
+// Shared radial glow texture (every fake glow in the game uses it)
+function makeGlowTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  gr.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const glowTex = makeGlowTexture();
+function glowSprite(color, scale, opacity) {
+  const m = new THREE.SpriteMaterial({
+    map: glowTex, color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false
+  });
+  const s = new THREE.Sprite(m);
+  s.scale.set(scale, scale, 1);
+  return s;
+}
+
+// ============================== environment: skybox, stars, grid, stage ==============================
+const COL_CYAN = 0x27e8ff, COL_MAG = 0xff3df0, COL_YEL = 0xffd319;
+{
+  // Gradient sky dome via vertex colors (one draw call, fog-exempt)
+  const skyGeo = new THREE.SphereGeometry(400, 24, 14);
+  const pos = skyGeo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const top = new THREE.Color(0x02010c), mid = new THREE.Color(0x12062e),
+        low = new THREE.Color(0x2a0f4a), hor = new THREE.Color(0x51155f);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = clamp(pos.getY(i) / 400, -1, 1);
+    if (t < 0) c.copy(hor).lerp(new THREE.Color(0x0a0420), clamp(-t * 2.2, 0, 1));
+    else if (t < 0.25) c.copy(hor).lerp(low, t / 0.25);
+    else if (t < 0.6) c.copy(low).lerp(mid, (t - 0.25) / 0.35);
+    else c.copy(mid).lerp(top, (t - 0.6) / 0.4);
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  skyGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const sky = new THREE.Mesh(skyGeo,
+    new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
+  scene.add(sky);
+  // Starfield (one Points draw call, static)
+  const n = 700, sp = new Float32Array(n * 3);
+  const srng = mulberry32(99);
+  for (let i = 0; i < n; i++) {
+    const th = srng() * Math.PI * 2, ph = Math.acos(srng() * 1.6 - 0.6), r = 380;
+    sp[i * 3] = r * Math.sin(ph) * Math.cos(th);
+    sp[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * 0.9 + 4;
+    sp[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({
+    color: 0xcfd8ff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.85
+  })));
+}
+// Beat-reactive floor grid
+const grid = new THREE.GridHelper(70, 35, COL_CYAN, 0x1a2a5a);
+grid.position.y = 0;
+grid.material.transparent = true; grid.material.opacity = 0.4;
+scene.add(grid);
+
+// Stage: two light towers with pulsing glow orbs, plus a back arch
+const towerGlows = [];
+{
+  const towerMat = new THREE.MeshBasicMaterial({ color: 0x0d0a24 });
+  const towerGeo = new THREE.BoxGeometry(0.5, 7, 0.5);
+  for (const sx of [-5.5, 5.5]) {
+    const t = new THREE.Mesh(towerGeo, towerMat);
+    t.position.set(sx, 3.5, -9); scene.add(t);
+    const glow = glowSprite(sx < 0 ? COL_CYAN : COL_MAG, 3.2, 0.7);
+    glow.position.set(sx, 7.2, -9); scene.add(glow);
+    glow.userData.base = 3.2;
+    towerGlows.push(glow);
+  }
+  // Back arch ring
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(9, 0.16, 10, 48),
+    new THREE.MeshBasicMaterial({ color: 0xff3df0, toneMapped: false }));
+  arch.position.set(0, 2.2, -16); scene.add(arch);
+  const archGlow = glowSprite(0xff3df0, 20, 0.18);
+  archGlow.position.set(0, 2.2, -16); scene.add(archGlow);
+  archGlow.userData.base = 20;
+  towerGlows.push(archGlow);
+}
+
+// ============================== hit plane + lane guides ==============================
+const HIT_Z = -1.1, SPAWN_Z = -13, LANE_Y = 1.3;
+const LANES = [-0.62, -0.21, 0.21, 0.62];
+function handOfLane(x) { return x < 0 ? 'left' : 'right'; }
+{
+  // Neon frame around the strike zone
+  const frameMat = new THREE.MeshBasicMaterial({ color: COL_CYAN, toneMapped: false });
+  const mkBar = (w, h, x, y) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frameMat);
+    m.position.set(x, y, HIT_Z); scene.add(m);
+  };
+  mkBar(1.9, 0.05, 0, 0.55); mkBar(1.9, 0.05, 0, 2.05);
+  mkBar(0.05, 1.55, -0.93, 1.3); mkBar(0.05, 1.55, 0.93, 1.3);
+  // Faint lane guide lines from spawn to hit plane (colored by hand)
+  for (const lx of LANES) {
+    const col = handOfLane(lx) === 'left' ? COL_CYAN : COL_MAG;
+    const g = new THREE.BufferGeometry().setFromPoints(
+      [new THREE.Vector3(lx, LANE_Y, SPAWN_Z), new THREE.Vector3(lx, LANE_Y, HIT_Z)]);
+    scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+      color: col, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false
+    })));
+  }
+}
+
+// ============================== VR controllers + neon blades ==============================
+// Left hand = CYAN blade, right hand = MAGENTA blade. Original blade design:
+// simple glowing blade bar on a dark grip — no borrowed likeness.
+const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
+let rightCtl = null, leftCtl = null;
+[ctlL, ctlR].forEach(c => {
+  c.addEventListener('connected', e => {
+    c.userData.handedness = e.data.handedness;
+    c.userData.connected = true;
+    if (e.data.handedness === 'right') rightCtl = c;
+    if (e.data.handedness === 'left') leftCtl = c;
+  });
+  c.addEventListener('disconnected', () => {
+    c.userData.connected = false;
+    if (rightCtl === c) rightCtl = null;
+    if (leftCtl === c) leftCtl = null;
+  });
+  scene.add(c);
+});
+function buildBlade(color) {
+  const g = new THREE.Group();
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.16, 10),
+    new THREE.MeshBasicMaterial({ color: 0x11111c }));
+  grip.rotation.x = Math.PI / 2; grip.position.z = 0.02; g.add(grip);
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.62),
+    new THREE.MeshBasicMaterial({ color, toneMapped: false }));
+  blade.position.z = -0.38; g.add(blade);
+  const tip = glowSprite(color, 0.34, 0.9); tip.position.z = -0.70; g.add(tip);
+  const edge = glowSprite(color, 0.5, 0.35); edge.position.z = -0.38; g.add(edge);
+  g.visible = false;
+  return g;
+}
+const bladeL = buildBlade(COL_CYAN), bladeR = buildBlade(COL_MAG);
+ctlL.add(bladeL); ctlR.add(bladeR);
+// Blade tip trackers: world position of the blade tip this frame and last frame
+const tipPrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
+const tipCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
+const sliceCd = { left: 0, right: 0, desk: 0 };
+const _tipLocal = new THREE.Vector3(0, 0, -0.70);
+const _ctlQ = new THREE.Quaternion();
+function controllerTip(ctl, out) {
+  ctl.getWorldQuaternion(_ctlQ);
+  out.setFromMatrixPosition(ctl.matrixWorld);
+  _tipLocal.set(0, 0, -0.70).applyQuaternion(_ctlQ);
+  out.add(_tipLocal);
+  return out;
+}
+
+// Aim laser for the 3D menu (visible only on menu/results screens in VR)
+const laserGeo = new THREE.BufferGeometry();
+laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
+const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({
+  color: 0xffffff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+laser.frustumCulled = false; laser.visible = false;
+scene.add(laser);
+
+// ============================== scoreboard: DOM cell + VR camera-attached cell ==============================
+const hud = document.getElementById('hud');
+const hudL1 = document.getElementById('hudL1'), hudL2 = document.getElementById('hudL2'), hudL3 = document.getElementById('hudL3');
+const scoreCellCanvas = document.createElement('canvas');
+scoreCellCanvas.width = 512; scoreCellCanvas.height = 224;
+const scoreCellCtx = scoreCellCanvas.getContext('2d');
+const scoreCellTex = new THREE.CanvasTexture(scoreCellCanvas);
+scoreCellTex.colorSpace = THREE.SRGBColorSpace;
+const scoreCell = new THREE.Mesh(new THREE.PlaneGeometry(0.80, 0.35),
+  new THREE.MeshBasicMaterial({ map: scoreCellTex, transparent: true, toneMapped: false }));
+scoreCell.position.set(-0.55, 0.81, -1.5);
+scoreCell.visible = false;
+camera.add(scoreCell);
+function drawScoreCell(l1, l2, l3) {
+  const g = scoreCellCtx;
+  g.clearRect(0, 0, 512, 224);
+  const r = 22;
+  g.beginPath();
+  g.moveTo(8 + r, 8); g.lineTo(504 - r, 8); g.arcTo(504, 8, 504, 8 + r, r);
+  g.lineTo(504, 216 - r); g.arcTo(504, 216, 504 - r, 216, r);
+  g.lineTo(8 + r, 216); g.arcTo(8, 216, 8, 216 - r, 216 - r); g.arcTo(8, 216, 8, 216 - r, r);
+  g.lineTo(8, 8 + r); g.arcTo(8, 8, 8 + r, 8, r); g.closePath();
+  g.fillStyle = 'rgba(8,6,20,0.72)'; g.fill();
+  g.lineWidth = 5; g.strokeStyle = '#27e8ff'; g.stroke();
+  g.textAlign = 'left';
+  const fit = (txt, weight, px) => {
+    let s = px;
+    g.font = weight + ' ' + s + 'px Arial';
+    while (g.measureText(txt).width > 460 && s > 18) { s -= 2; g.font = weight + ' ' + s + 'px Arial'; }
+  };
+  fit(l1, '900', 52); g.fillStyle = '#ffffff'; g.fillText(l1, 26, 74);
+  fit(l2, '700', 34); g.fillStyle = '#27e8ff'; g.fillText(l2, 26, 128);
+  fit(l3, '700', 29); g.fillStyle = '#ffd319'; g.fillText(l3, 26, 182);
+  scoreCellTex.needsUpdate = true;
+}
+drawScoreCell('0 PTS · x1', 'COMBO 0 · MAX 0', 'LV1 · EASY');
+function updateScoreboard() {
+  const l1 = score + ' PTS · x' + mult;
+  const l2 = 'COMBO ' + combo + ' · MAX ' + maxCombo;
+  const l3 = 'LV' + (selLevel + 1) + ' ' + LEVELS[selLevel].name + ' · ' + DIFFS[selDiff].label;
+  hudL1.textContent = l1; hudL2.textContent = l2; hudL3.textContent = l3;
+  drawScoreCell(l1, l2, l3);
+}
+
+// ============================== 3D menu (level/difficulty/results, in-world) ==============================
+// One canvas-texture plane head-locked to the camera: visible on desktop and
+// in VR alike, so the menu is the same surface in both. Interacted via mouse
+// click on desktop, controller-ray + trigger in VR.
+const menuCanvas = document.createElement('canvas');
+menuCanvas.width = 1024; menuCanvas.height = 640;
+const menuCtx = menuCanvas.getContext('2d');
+const menuTex = new THREE.CanvasTexture(menuCanvas);
+menuTex.colorSpace = THREE.SRGBColorSpace;
+const menuPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.0625),
+  new THREE.MeshBasicMaterial({ map: menuTex, transparent: true, toneMapped: false }));
+menuPlane.position.set(0, 0.05, -2.3);
+menuPlane.visible = false;
+camera.add(menuPlane);
+let screen = 'menu'; // 'menu' | 'playing' | 'results'
+let selLevel = 0, selDiff = 1; // default: level 1, Normal
+let menuButtons = [];
+const BTN_FONT = '900 44px Arial';
+function drawButton(g, b) {
+  g.fillStyle = b.selected ? 'rgba(39,232,255,0.9)' : 'rgba(255,255,255,0.07)';
+  g.strokeStyle = b.selected ? '#ffffff' : 'rgba(255,255,255,0.35)';
+  g.lineWidth = b.selected ? 5 : 3;
+  const r = 16;
+  g.beginPath();
+  g.moveTo(b.x + r, b.y); g.lineTo(b.x + b.w - r, b.y); g.arcTo(b.x + b.w, b.y, b.x + b.w, b.y + r, r);
+  g.lineTo(b.x + b.w, b.y + b.h - r); g.arcTo(b.x + b.w, b.y + b.h, b.x + b.w - r, b.y + b.h, r);
+  g.lineTo(b.x + r, b.y + b.h); g.arcTo(b.x, b.y + b.h, b.x, b.y + b.h - r, r);
+  g.lineTo(b.x, b.y + r); g.arcTo(b.x, b.y, b.x + r, b.y, r); g.closePath();
+  g.fill(); g.stroke();
+  g.font = BTN_FONT; g.textAlign = 'center';
+  g.fillStyle = b.selected ? '#06121f' : '#ffffff';
+  g.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 15);
+}
+function drawMenu() {
+  const g = menuCtx;
+  g.clearRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.textAlign = 'center';
+  g.font = '900 64px Arial';
+  const grad = g.createLinearGradient(200, 0, 824, 0);
+  grad.addColorStop(0, '#27e8ff'); grad.addColorStop(0.55, '#2bff88'); grad.addColorStop(1, '#ff3df0');
+  g.fillStyle = grad;
+  g.fillText('RHYTHM SLICER', 512, 92);
+  g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
+  g.fillText('LEVEL', 512, 152);
+  menuButtons = [];
+  const lvNames = ['1 · WARMUP', '2 · PULSE', '3 · OVERDRIVE'];
+  for (let i = 0; i < 3; i++) {
+    const b = { id: 'lvl' + i, x: 172 + i * 240, y: 172, w: 200, h: 88, label: lvNames[i], selected: selLevel === i };
+    menuButtons.push(b); drawButton(g, b);
+  }
+  g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
+  g.fillText('DIFFICULTY', 512, 316);
+  const dNames = ['EASY', 'NORMAL', 'HARD'];
+  for (let i = 0; i < 3; i++) {
+    const b = { id: 'dif' + i, x: 172 + i * 240, y: 336, w: 200, h: 88, label: dNames[i], selected: selDiff === i };
+    menuButtons.push(b); drawButton(g, b);
+  }
+  const sb = { id: 'start', x: 332, y: 452, w: 360, h: 92, label: 'START', selected: true };
+  menuButtons.push(sb); drawButton(g, sb);
+  g.font = '400 24px Arial'; g.fillStyle = '#c9b8e8'; g.textAlign = 'center';
+  g.fillText('VR: slice cyan cubes with your LEFT blade, magenta with your RIGHT.', 512, 578);
+  g.fillText('Normal/Hard: slice in the arrow direction. Desktop: hold mouse + drag.', 512, 608);
+  menuTex.needsUpdate = true;
+}
+function drawResults() {
+  const g = menuCtx;
+  g.clearRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
+  g.strokeStyle = '#ffd319'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.textAlign = 'center';
+  g.font = '900 60px Arial'; g.fillStyle = '#2bff88';
+  g.fillText('TRACK COMPLETE', 512, 96);
+  g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
+  g.fillText('LV' + (selLevel + 1) + ' ' + LEVELS[selLevel].name + ' · ' + DIFFS[selDiff].label, 512, 146);
+  const acc = notesTotal > 0 ? Math.round(100 * notesHit / notesTotal) : 0;
+  g.font = '900 44px Arial'; g.fillStyle = '#ffffff'; g.textAlign = 'left';
+  g.fillText('SCORE', 240, 230); g.fillText('MAX COMBO', 240, 292);
+  g.fillText('ACCURACY', 240, 354); g.fillText('NOTES', 240, 416); g.fillText('ORBS', 240, 478);
+  g.fillStyle = '#27e8ff'; g.textAlign = 'right';
+  g.fillText('' + score, 790, 230); g.fillText('' + maxCombo, 790, 292);
+  g.fillText(acc + '%', 790, 354); g.fillText(notesHit + ' / ' + notesTotal, 790, 416);
+  g.fillText('' + orbsSliced, 790, 478);
+  menuButtons = [];
+  let bx = 112;
+  if (selLevel < 2) {
+    const b = { id: 'next', x: bx, y: 520, w: 250, h: 80, label: 'NEXT LEVEL', selected: false };
+    menuButtons.push(b); drawButton(g, b); bx += 280;
+  }
+  const r = { id: 'replay', x: bx, y: 520, w: 250, h: 80, label: 'REPLAY', selected: true };
+  menuButtons.push(r); drawButton(g, r); bx += 280;
+  const m = { id: 'menu', x: bx, y: 520, w: 250, h: 80, label: 'MENU', selected: false };
+  menuButtons.push(m); drawButton(g, m);
+  menuTex.needsUpdate = true;
+}
+function menuHit(cx, cy) {
+  for (const b of menuButtons) {
+    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) return b.id;
+  }
+  return null;
+}
+const raycaster = new THREE.Raycaster();
+function menuTapFromRay(origin, dir) {
+  raycaster.set(origin, dir);
+  const hits = raycaster.intersectObject(menuPlane);
+  if (!hits.length) return;
+  const uv = hits[0].uv;
+  const cx = uv.x * 1024, cy = (1 - uv.y) * 640;
+  const id = menuHit(cx, cy);
+  if (id) activateButton(id);
+}
+function activateButton(id) {
+  sfxClick();
+  if (id === 'lvl0' || id === 'lvl1' || id === 'lvl2') { selLevel = +id.slice(3); drawMenu(); }
+  else if (id === 'dif0' || id === 'dif1' || id === 'dif2') { selDiff = +id.slice(3); drawMenu(); }
+  else if (id === 'start') startLevel();
+  else if (id === 'replay') startLevel();
+  else if (id === 'menu') { screen = 'menu'; menuPlane.visible = true; hud.style.display = 'none'; drawMenu(); }
+  else if (id === 'next') { selLevel = Math.min(2, selLevel + 1); startLevel(); }
+}
+
+// ============================== audio: all synthesized, Web Audio API only ==============================
+// Every loop is an original composition generated live — no audio files, no
+// borrowed melodies. Three levels, three keys, three drum/bass/lead patterns.
+const LEVELS = [
+  { name: 'WARMUP', bpm: 90, dur: 60, root: 110.00, // A2
+    kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    hat:   [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,1],
+    bass:  [0,-1,-1,-1, 0,-1,-1,-1, -2,-1,-1,-1, -4,-1,-1,-1],
+    lead:  [12,-1,-1,15, -1,-1,19,-1, -1,17,-1,15, 12,-1,-1,-1] },
+  { name: 'PULSE', bpm: 110, dur: 70, root: 146.83, // D3
+    kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,1,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,1],
+    hat:   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+    bass:  [0,-1,0,-1, 0,-1,0,-1, -2,-1,-2,-1, -4,-1,-4,-1],
+    lead:  [12,-1,15,-1, 17,-1,19,-1, 22,-1,19,-1, 17,-1,15,-1] },
+  { name: 'OVERDRIVE', bpm: 130, dur: 80, root: 82.41, // E2
+    kick:  [1,0,0,0, 1,0,0,1, 1,0,0,0, 1,0,0,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    hat:   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+    bass:  [0,0,-1,0, 0,0,-1,0, -2,-2,-1,-2, -4,-4,-1,-4],
+    lead:  [12,12,-1,12, -1,15,-1,17, 19,-1,19,22, -1,19,17,15] },
+];
+const DIFFS = [
+  { label: 'EASY',   travel: 1.8, bombRate: 0,    dirStrict: false, wrongDirReset: false },
+  { label: 'NORMAL', travel: 1.4, bombRate: 0.06, dirStrict: true,  wrongDirReset: false },
+  { label: 'HARD',   travel: 1.1, bombRate: 0.12, dirStrict: true,  wrongDirReset: true },
+];
+const DIR_VECS = [ { x: 0, y: 1 }, { x: 1, y: 0 }, { x: 0, y: -1 }, { x: -1, y: 0 } ]; // up,right,down,left
+const DIR_NAMES = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+
+const audioSys = {
+  ctx: null, master: null, noiseBuf: null, muted: false,
+  running: false, baseTime: 0, stepDur: 0, nextStep: 0, stepIdx: 0, totalSteps: 0, lv: null,
+  ensure() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.9;
+    this.master.connect(this.ctx.destination);
+    const len = this.ctx.sampleRate;
+    this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  },
+  resume() { this.ensure(); if (this.ctx.state === 'suspended') this.ctx.resume(); },
+  setMuted(m) {
+    this.muted = m;
+    if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.02);
+  },
+  semi(root, s) { return root * Math.pow(2, s / 12); },
+  kick(t) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+    g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.16);
+  },
+  snare(t) {
+    const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuf;
+    const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1800;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.32, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    n.connect(f); f.connect(g); g.connect(this.master); n.start(t); n.stop(t + 0.1);
+    const o = this.ctx.createOscillator(), g2 = this.ctx.createGain();
+    o.type = 'triangle'; o.frequency.value = 190;
+    g2.gain.setValueAtTime(0.2, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    o.connect(g2); g2.connect(this.master); o.start(t); o.stop(t + 0.08);
+  },
+  hat(t, loud) {
+    const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuf;
+    const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7500;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(loud ? 0.16 : 0.09, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+    n.connect(f); f.connect(g); g.connect(this.master); n.start(t); n.stop(t + 0.05);
+  },
+  bass(t, f0) {
+    const o = this.ctx.createOscillator(), fl = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    o.type = 'sawtooth'; o.frequency.value = f0;
+    fl.type = 'lowpass'; fl.frequency.value = 520;
+    g.gain.setValueAtTime(0.34, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+    o.connect(fl); fl.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.26);
+  },
+  lead(t, f0) {
+    const o = this.ctx.createOscillator(), fl = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    o.type = 'square'; o.frequency.value = f0;
+    fl.type = 'lowpass'; fl.frequency.value = 2400;
+    g.gain.setValueAtTime(0.14, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(fl); fl.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.22);
+  },
+  scheduleStep(idx, t) {
+    const lv = this.lv, s = idx % 16;
+    if (lv.kick[s]) { this.kick(t); beatPulse = 1; }
+    if (lv.snare[s]) this.snare(t);
+    if (lv.hat[s]) this.hat(t, s % 4 === 0);
+    if (lv.bass[s] >= 0) this.bass(t, this.semi(lv.root, lv.bass[s]));
+    if (lv.lead[s] >= 0) this.lead(t, this.semi(lv.root * 4, lv.lead[s]));
+  },
+  startLevel(lv) {
+    this.resume();
+    this.lv = lv;
+    this.stepDur = 60 / lv.bpm / 4;
+    this.totalSteps = Math.ceil(lv.dur / this.stepDur);
+    this.baseTime = this.ctx.currentTime + 0.6;
+    this.nextStep = this.baseTime;
+    this.stepIdx = 0;
+    this.running = true;
+  },
+  stop() { this.running = false; },
+  tick() {
+    if (!this.running || !this.ctx) return;
+    const ahead = this.ctx.currentTime + 0.25;
+    while (this.nextStep < ahead && this.stepIdx < this.totalSteps) {
+      this.scheduleStep(this.stepIdx, this.nextStep);
+      this.stepIdx++;
+      this.nextStep += this.stepDur;
+    }
+    if (this.stepIdx >= this.totalSteps) this.running = false;
+  },
+  get now() { return this.ctx ? this.ctx.currentTime : 0; },
+  get endTime() { return this.baseTime + this.lv.dur; },
+};
+// One-shot SFX (all synthesized)
+function sfxSlice(comboN) {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
+  const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 1.2;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  n.connect(f); f.connect(g); g.connect(audioSys.master); n.start(t); n.stop(t + 0.13);
+  const o = c.createOscillator(), g2 = c.createGain();
+  o.type = 'sine';
+  const p = 620 + Math.min(comboN, 60) * 9;
+  o.frequency.setValueAtTime(p, t); o.frequency.exponentialRampToValueAtTime(p * 1.6, t + 0.09);
+  g2.gain.setValueAtTime(0.22, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  o.connect(g2); g2.connect(audioSys.master); o.start(t); o.stop(t + 0.11);
+}
+function sfxThud() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(150, t);
+  o.frequency.exponentialRampToValueAtTime(70, t + 0.08);
+  g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  o.connect(g); g.connect(audioSys.master); o.start(t); o.stop(t + 0.11);
+}
+function sfxMiss() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(330, t); o.frequency.exponentialRampToValueAtTime(215, t + 0.16);
+  g.gain.setValueAtTime(0.16, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+  o.connect(g); g.connect(audioSys.master); o.start(t); o.stop(t + 0.18);
+}
+function sfxBomb() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
+  const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.7, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+  n.connect(f); f.connect(g); g.connect(audioSys.master); n.start(t); n.stop(t + 0.52);
+  const o = c.createOscillator(), g2 = c.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(32, t + 0.4);
+  g2.gain.setValueAtTime(0.55, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+  o.connect(g2); g2.connect(audioSys.master); o.start(t); o.stop(t + 0.47);
+}
+function sfxOrb() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(1180, t); o.frequency.exponentialRampToValueAtTime(1900, t + 0.12);
+  g.gain.setValueAtTime(0.2, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+  o.connect(g); g.connect(audioSys.master); o.start(t); o.stop(t + 0.15);
+}
+function sfxClick() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'square'; o.frequency.value = 880;
+  g.gain.setValueAtTime(0.1, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  o.connect(g); g.connect(audioSys.master); o.start(t); o.stop(t + 0.06);
+}
+
+// ============================== game state ==============================
+let score = 0, combo = 0, maxCombo = 0, mult = 1;
+let notesHit = 0, notesTotal = 0, orbsSliced = 0;
+let beatPulse = 0;
+let chart = [], orbEvents = [], chartIdx = 0, orbIdx = 0;
+let levelActive = false;
+
+// Direction arrow textures (chevron, 4 rotations) for Normal/Hard notes
+const arrowTex = [];
+{
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.strokeStyle = '#ffffff'; g.lineWidth = 22; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.beginPath(); g.moveTo(28, 88); g.lineTo(64, 44); g.lineTo(100, 88); g.stroke();
+  const base = new THREE.CanvasTexture(cv); base.colorSpace = THREE.SRGBColorSpace;
+  for (let i = 0; i < 4; i++) {
+    const t = base.clone();
+    t.center.set(0.5, 0.5); t.rotation = -i * Math.PI / 2; t.needsUpdate = true;
+    arrowTex.push(t);
+  }
+}
+
+// ============================== object pools (zero per-frame allocation) ==============================
+const noteGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+const noteMats = { left: new THREE.MeshBasicMaterial({ color: COL_CYAN }), right: new THREE.MeshBasicMaterial({ color: COL_MAG }) };
+const arrowGeo = new THREE.PlaneGeometry(0.22, 0.22);
+const notes = [];
+for (let i = 0; i < 26; i++) {
+  const grp = new THREE.Group();
+  const cube = new THREE.Mesh(noteGeo, noteMats.left);
+  grp.add(cube);
+  const arrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({
+    map: arrowTex[0], transparent: true, toneMapped: false, depthWrite: false
+  }));
+  arrow.position.z = 0.17; arrow.visible = false;
+  grp.add(arrow);
+  grp.visible = false; scene.add(grp);
+  notes.push({ grp, cube, arrow, active: false, x: 0, z: 0, vz: 0, hand: 'left', dir: -1, bomb: false, judged: false });
+}
+const bombGeo = new THREE.SphereGeometry(0.19, 14, 12);
+const bombMat = new THREE.MeshBasicMaterial({ color: 0x14141c });
+const ringGeo = new THREE.TorusGeometry(0.26, 0.03, 8, 24);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xff2222, toneMapped: false });
+const bombs = [];
+for (let i = 0; i < 8; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(bombGeo, bombMat));
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  grp.add(ring);
+  const glow = glowSprite(0xff2222, 0.7, 0.5);
+  grp.add(glow);
+  grp.visible = false; scene.add(grp);
+  bombs.push({ grp, ring, active: false, x: 0, z: 0, vz: 0, judged: false, spin: 0 });
+}
+const orbGeo = new THREE.SphereGeometry(0.16, 14, 12);
+const ORB_COLORS = [0xffd319, 0xff71ce, 0x2bff88, 0x27e8ff, 0xff9e4f];
+const orbs = [];
+for (let i = 0; i < 6; i++) {
+  const mat = new THREE.MeshBasicMaterial({ color: ORB_COLORS[i % ORB_COLORS.length] });
+  const m = new THREE.Mesh(orbGeo, mat);
+  const glow = glowSprite(ORB_COLORS[i % ORB_COLORS.length], 0.6, 0.7);
+  m.add(glow);
+  m.visible = false; scene.add(m);
+  orbs.push({ m, mat, active: false, t: 0, x0: 0, x1: 0, judged: false });
+}
+// Particles (slice bursts): pooled additive sprites
+const PMAX = 64;
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(PMAX * 3);
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
+const pMat = new THREE.PointsMaterial({
+  color: 0xffffff, size: 0.09, transparent: true, opacity: 0.95,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+});
+const pPoints = new THREE.Points(pGeo, pMat);
+pPoints.frustumCulled = false; scene.add(pPoints);
+const pVel = new Float32Array(PMAX * 3), pLife = new Float32Array(PMAX);
+let pHead = 0;
+function burst(x, y, z, color, count, speed) {
+  pMat.color.setHex(color);
+  for (let i = 0; i < count; i++) {
+    const k = pHead; pHead = (pHead + 1) % PMAX;
+    pPos[k * 3] = x; pPos[k * 3 + 1] = y; pPos[k * 3 + 2] = z;
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 2 - 1);
+    pVel[k * 3] = speed * Math.sin(ph) * Math.cos(th);
+    pVel[k * 3 + 1] = speed * Math.cos(ph);
+    pVel[k * 3 + 2] = speed * Math.sin(ph) * Math.sin(th);
+    pLife[k] = 0.55;
+  }
+}
+// Floating hit text: pooled canvas sprites
+const texts = [];
+for (let i = 0; i < 10; i++) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false, toneMapped: false
+  }));
+  sp.scale.set(0.7, 0.26, 1); sp.visible = false; scene.add(sp);
+  texts.push({ sp, cv, tex, life: 0 });
+}
+let textHead = 0;
+function floatText(str, color, x, y, z) {
+  const t = texts[textHead]; textHead = (textHead + 1) % texts.length;
+  const g = t.cv.getContext('2d');
+  g.clearRect(0, 0, 256, 96);
+  g.font = '900 52px Arial'; g.textAlign = 'center';
+  g.fillStyle = color; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.lineWidth = 8;
+  g.strokeText(str, 128, 64); g.fillText(str, 128, 64);
+  t.tex.needsUpdate = true;
+  t.sp.position.set(x, y, z); t.sp.visible = true; t.life = 0.8;
+}
+// Screen flash: DOM overlay on desktop, camera-attached red quad in VR
+const flashEl = document.getElementById('flash');
+const flashQuad = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6),
+  new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+flashQuad.position.set(0, 0, -1.2);
+camera.add(flashQuad);
+let flashAmt = 0;
+function doFlash(a) {
+  flashAmt = Math.max(flashAmt, a);
+  flashEl.style.opacity = String(clamp(a, 0, 0.9));
+}
+
+// ============================== chart builder (spawn locked to the audio clock) ==============================
+function buildChart(lv, di, baseTime) {
+  const diff = DIFFS[di];
+  const rng = mulberry32(1234 + (selLevel + 1) * 77 + (di + 1) * 13);
+  const beat = 60 / lv.bpm;
+  const nBeats = Math.floor(lv.dur / beat) - 1;
+  const evts = [];
+  for (let b = 0; b < nBeats; b++) {
+    const slots = [];
+    // Density per level: L1 half-time-ish, L2 every beat, L3 beats + offbeats
+    if (selLevel === 0) {
+      if (rng() < (b % 2 === 0 ? 0.85 : 0.4)) slots.push(0);
+    } else if (selLevel === 1) {
+      if (rng() < 0.75) slots.push(0);
+      if (rng() < 0.2) slots.push(0.5);
+    } else {
+      if (rng() < 0.88) slots.push(0);
+      if (rng() < 0.35) slots.push(0.5);
+    }
+    const usedLanes = [];
+    for (const off of slots) {
+      const T = baseTime + (b + off) * beat;
+      let lane = Math.floor(rng() * 4);
+      let guard = 0;
+      while (usedLanes.includes(lane) && guard++ < 8) lane = Math.floor(rng() * 4);
+      usedLanes.push(lane);
+      const isBomb = rng() < diff.bombRate;
+      evts.push({
+        hitTime: T, lane, kind: isBomb ? 'bomb' : 'note',
+        dir: (diff.dirStrict && !isBomb) ? Math.floor(rng() * 4) : -1
+      });
+    }
+  }
+  evts.sort((a, b2) => a.hitTime - b2.hitTime);
+  // Bonus orbs: independent of the beat grid, every 3.5–6s
+  const orbsE = [];
+  let ot = baseTime + 3;
+  while (ot < baseTime + lv.dur - 3) {
+    orbsE.push({ time: ot, x0: (rng() - 0.5) * 1.4, x1: (rng() - 0.5) * 1.4, color: ORB_COLORS[Math.floor(rng() * ORB_COLORS.length)] });
+    ot += 3.5 + rng() * 2.5;
+  }
+  return { evts, orbsE };
+}
+function spawnNote(e) {
+  const diff = DIFFS[selDiff];
+  const travel = diff.travel;
+  const x = LANES[e.lane];
+  const vz = (HIT_Z - SPAWN_Z) / travel;
+  if (e.kind === 'bomb') {
+    const b = bombs.find(o => !o.active);
+    if (!b) return;
+    b.active = true; b.judged = false; b.x = x; b.z = SPAWN_Z; b.vz = vz; b.spin = 0;
+    b.grp.position.set(x, LANE_Y, SPAWN_Z); b.grp.visible = true;
+  } else {
+    const n = notes.find(o => !o.active);
+    if (!n) return;
+    const hand = handOfLane(x);
+    n.active = true; n.judged = false; n.x = x; n.z = SPAWN_Z; n.vz = vz;
+    n.hand = hand; n.dir = e.dir; n.bomb = false;
+    n.cube.material = noteMats[hand];
+    if (e.dir >= 0) {
+      n.arrow.visible = true;
+      n.arrow.material.map = arrowTex[e.dir];
+      n.arrow.material.needsUpdate = true;
+    } else n.arrow.visible = false;
+    n.grp.position.set(x, LANE_Y, SPAWN_Z);
+    const s = 0.6; n.grp.scale.set(s, s, s);
+    n.grp.visible = true;
+    notesTotal++;
+  }
+}
+function spawnOrb(e) {
+  const o = orbs.find(q => !q.active);
+  if (!o) return;
+  o.active = true; o.judged = false; o.t = 0; o.x0 = e.x0; o.x1 = e.x1;
+  o.mat.color.setHex(e.color);
+  o.m.children[0].material.color.setHex(e.color);
+  o.m.visible = true;
+}
+
+// ============================== slicing ==============================
+const _bd = new THREE.Vector3();
+function bladeDir(key, dt) {
+  // XY-plane blade direction (normalized), used for arrow judgment
+  _bd.set(tipCur[key].x - tipPrev[key].x, tipCur[key].y - tipPrev[key].y, 0);
+  const len = _bd.length();
+  if (len < 1e-5 || dt <= 0) { _bd.set(0, 0, 0); return _bd; }
+  return _bd.multiplyScalar(1 / len);
+}
+function bladeSpeed(key, dt) {
+  if (dt <= 0) return 0;
+  return tipCur[key].distanceTo(tipPrev[key]) / dt;
+}
+function applyMult() {
+  mult = combo >= 50 ? 8 : combo >= 25 ? 4 : combo >= 10 ? 2 : 1;
+}
+function resolveNoteSlice(n, hand, bdir) {
+  const diff = DIFFS[selDiff];
+  n.active = false; n.grp.visible = false;
+  if (hand !== 'both' && hand !== n.hand) {
+    // Wrong blade: note consumed, combo kept, no points — clear feedback
+    floatText('WRONG BLADE', '#9aa0ac', n.x, LANE_Y + 0.35, n.z);
+    sfxThud();
+    return;
+  }
+  let pts = 0, tag = '', dirOk = true;
+  if (diff.dirStrict && n.dir >= 0) {
+    const need = DIR_VECS[n.dir];
+    const dot = bdir.x * need.x + bdir.y * need.y;
+    if (dot < 0.5) {
+      dirOk = false;
+      if (diff.wrongDirReset) {
+        combo = 0; tag = 'WRONG WAY';
+        doFlash(0.25); sfxThud();
+      } else {
+        // Normal: wrong direction keeps the combo but pays no points
+        tag = 'OFF ANGLE';
+        sfxThud();
+      }
+    }
+  }
+  if (dirOk) {
+    combo++; maxCombo = Math.max(maxCombo, combo);
+    pts = 100;
+  }
+  applyMult();
+  if (pts > 0) {
+    const gained = pts * mult;
+    score += gained;
+    notesHit++;
+    const col = n.hand === 'left' ? '#27e8ff' : '#ff3df0';
+    floatText('+' + gained, col, n.x, LANE_Y + 0.35, n.z);
+    burst(n.x, LANE_Y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, 8, 2.2);
+    sfxSlice(combo);
+  } else if (tag) {
+    floatText(tag, '#ffd319', n.x, LANE_Y + 0.35, n.z);
+  }
+  updateScoreboard();
+}
+function resolveBombHit(b) {
+  b.active = false; b.grp.visible = false;
+  combo = 0; applyMult();
+  score = Math.max(0, score - 50);
+  burst(b.x, LANE_Y, b.z, 0xff2222, 16, 3.5);
+  floatText('-50', '#ff5555', b.x, LANE_Y + 0.4, b.z);
+  doFlash(0.75);
+  sfxBomb();
+  updateScoreboard();
+}
+function resolveOrbSlice(o) {
+  o.active = false; o.judged = true; o.m.visible = false;
+  const gained = 50 * mult;
+  score += gained;
+  orbsSliced++;
+  floatText('+' + gained, '#ffd319', o.m.position.x, o.m.position.y + 0.3, o.m.position.z);
+  burst(o.m.position.x, o.m.position.y, o.m.position.z, 0xffd319, 6, 1.8);
+  sfxOrb();
+  updateScoreboard();
+}
+const SLICE_R2 = 0.34 * 0.34;
+function trySlice(key, hand, dt) {
+  const spd = bladeSpeed(key, dt);
+  if (spd < 1.4 || sliceCd[key] > 0) return;
+  const bdir = bladeDir(key, dt).clone();
+  const tx = tipCur[key].x, ty = tipCur[key].y, tz = tipCur[key].z;
+  // Notes + bombs near the hit plane
+  for (const n of notes) {
+    if (!n.active || n.judged) continue;
+    if (Math.abs(n.z - HIT_Z) > 0.5) continue;
+    const dx = tx - n.x, dy = ty - LANE_Y;
+    if (dx * dx + dy * dy < SLICE_R2) { n.judged = true; sliceCd[key] = 0.08; resolveNoteSlice(n, hand, bdir); return; }
+  }
+  for (const b of bombs) {
+    if (!b.active || b.judged) continue;
+    if (Math.abs(b.z - HIT_Z) > 0.5) continue;
+    const dx = tx - b.x, dy = ty - LANE_Y;
+    if (dx * dx + dy * dy < SLICE_R2) { b.judged = true; sliceCd[key] = 0.08; resolveBombHit(b); return; }
+  }
+  // Orbs anywhere along their arc
+  for (const o of orbs) {
+    if (!o.active || o.judged) continue;
+    const ox = o.m.position.x, oy = o.m.position.y, oz = o.m.position.z;
+    const dx = tx - ox, dy = ty - oy, dz = tz - oz;
+    if (dx * dx + dy * dy + dz * dz < 0.38 * 0.38) { sliceCd[key] = 0.08; resolveOrbSlice(o); return; }
+  }
+}
+
+// ============================== level flow ==============================
+function startLevel() {
+  const lv = LEVELS[selLevel], diff = DIFFS[selDiff];
+  // Reset state
+  score = 0; combo = 0; maxCombo = 0; mult = 1;
+  notesHit = 0; notesTotal = 0; orbsSliced = 0;
+  for (const n of notes) { n.active = false; n.grp.visible = false; }
+  for (const b of bombs) { b.active = false; b.grp.visible = false; }
+  for (const o of orbs) { o.active = false; o.m.visible = false; }
+  for (const t of texts) { t.life = 0; t.sp.visible = false; }
+  audioSys.startLevel(lv);
+  const built = buildChart(lv, selDiff, audioSys.baseTime);
+  chart = built.evts; orbEvents = built.orbsE;
+  chartIdx = 0; orbIdx = 0;
+  screen = 'playing';
+  levelActive = true;
+  menuPlane.visible = false;
+  laser.visible = false;
+  hud.style.display = 'block';
+  updateScoreboard();
+  drawScoreCell('GET READY', lv.name + ' · ' + diff.label, 'FIRST NOTES INCOMING');
+}
+function endLevel() {
+  levelActive = false;
+  audioSys.stop();
+  screen = 'results';
+  menuPlane.visible = true;
+  hud.style.display = 'none';
+  drawResults();
+}
+
+// ============================== desktop mouse blade ==============================
+const mouseNDC = new THREE.Vector2();
+let mouseDown = false, mouseSeen = false;
+const _ray = new THREE.Raycaster();
+const _planeZ = new THREE.Plane(new THREE.Vector3(0, 0, 1), 1.15);
+const _hitP = new THREE.Vector3();
+const TRAIL_N = 26;
+const trailGeo = new THREE.BufferGeometry();
+const trailPos = new Float32Array(TRAIL_N * 3);
+trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3).setUsage(THREE.DynamicDrawUsage));
+const trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
+  color: COL_YEL, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+trailLine.frustumCulled = false; trailLine.visible = false;
+scene.add(trailLine);
+function mouseBladePoint() {
+  _ray.setFromCamera(mouseNDC, camera);
+  _ray.ray.intersectPlane(_planeZ, _hitP);
+  return _hitP;
+}
+window.addEventListener('pointermove', e => {
+  mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  mouseSeen = true;
+});
+renderer.domElement.addEventListener('pointerdown', e => {
+  mouseDown = true;
+  mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  mouseSeen = true;
+  audioSys.resume();
+  if (screen !== 'playing' && menuPlane.visible) {
+    _ray.setFromCamera(mouseNDC, camera);
+    menuTapFromRay(_ray.ray.origin, _ray.ray.direction);
+  }
+});
+window.addEventListener('pointerup', () => { mouseDown = false; });
+
+// ============================== sound toggle ==============================
+const muteBtn = document.getElementById('muteBtn');
+function setMuted(m) {
+  audioSys.setMuted(m);
+  muteBtn.textContent = m ? 'SOUND: OFF' : 'SOUND: ON';
+}
+muteBtn.addEventListener('click', () => { audioSys.ensure(); setMuted(!audioSys.muted); });
+window.addEventListener('keydown', e => {
+  if (e.key === 'm' || e.key === 'M') { audioSys.ensure(); setMuted(!audioSys.muted); }
+});
+
+// ============================== VR session menu interaction ==============================
+let prevTrigger = false;
+const _aimO = new THREE.Vector3(), _aimD = new THREE.Vector3(), _aimQ = new THREE.Quaternion();
+function pollMenuInput() {
+  if (!renderer.xr.isPresenting || (screen !== 'menu' && screen !== 'results')) {
+    laser.visible = false; prevTrigger = false; return;
+  }
+  const aimCtl = rightCtl || leftCtl;
+  if (!aimCtl) { laser.visible = false; return; }
+  aimCtl.getWorldQuaternion(_aimQ);
+  _aimO.setFromMatrixPosition(aimCtl.matrixWorld);
+  _aimD.set(0, 0, -1).applyQuaternion(_aimQ);
+  const lp = laserGeo.attributes.position.array;
+  lp[0] = _aimO.x; lp[1] = _aimO.y; lp[2] = _aimO.z;
+  lp[3] = _aimO.x + _aimD.x * 6; lp[4] = _aimO.y + _aimD.y * 6; lp[5] = _aimO.z + _aimD.z * 6;
+  laserGeo.attributes.position.needsUpdate = true;
+  laser.visible = true;
+  // Trigger edge -> menu tap
+  let pressed = false;
+  const session = renderer.xr.getSession();
+  if (session) {
+    for (const src of session.inputSources) {
+      const gp = src.gamepad;
+      if (gp && gp.buttons && gp.buttons[0] && gp.buttons[0].pressed) { pressed = true; break; }
+    }
+  }
+  if (pressed && !prevTrigger) menuTapFromRay(_aimO, _aimD);
+  prevTrigger = pressed;
+}
+
+// ============================== ENTER VR flow ==============================
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+const panel = document.getElementById('panel');
+let xrSupported = false;
+function setStatus(msg) { statusEl.textContent = msg; }
+function hidePanel() { panel.style.display = 'none'; }
+function showPanel() { panel.style.display = 'flex'; }
+function xrPixelDown() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); }
+function xrPixelUp() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); }
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+vrBtn.addEventListener('click', async () => {
+  audioSys.resume();
+  if (!xrSupported) { hidePanel(); menuPlane.visible = true; screen = 'menu'; drawMenu(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    xrPixelDown();
+    hidePanel();
+    menuPlane.visible = true; screen = 'menu'; drawMenu();
+    audioSys.resume();
+    session.addEventListener('end', () => { xrPixelUp(); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      xrPixelDown();
+      hidePanel();
+      menuPlane.visible = true; screen = 'menu'; drawMenu();
+      audioSys.resume();
+      session.addEventListener('end', () => { xrPixelUp(); showPanel(); vrBtn.disabled = false; });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+      menuPlane.visible = true; screen = 'menu'; drawMenu();
+    }
+  }
+});
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ============================== main loop ==============================
+const clock = new THREE.Clock();
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const presenting = renderer.xr.isPresenting;
+  audioSys.tick();
+  beatPulse = Math.max(0, beatPulse - dt * 2.2);
+
+  // Beat-reactive stage
+  grid.material.opacity = 0.3 + 0.45 * beatPulse;
+  stageL.intensity = 20 + 45 * beatPulse;
+  stageR.intensity = 20 + 45 * beatPulse;
+  for (let i = 0; i < towerGlows.length; i++) {
+    const tg = towerGlows[i];
+    const s = 1 + beatPulse * 0.35;
+    tg.scale.set(tg.userData.base * s, tg.userData.base * s, 1);
+  }
+
+  pollMenuInput();
+
+  // Blade visibility + tip tracking
+  bladeL.visible = presenting && !!leftCtl;
+  bladeR.visible = presenting && !!rightCtl;
+  if (presenting) {
+    if (leftCtl) { tipPrev.left.copy(tipCur.left); controllerTip(leftCtl, tipCur.left); }
+    if (rightCtl) { tipPrev.right.copy(tipCur.right); controllerTip(rightCtl, tipCur.right); }
+    if (screen === 'playing') {
+      if (leftCtl) trySlice('left', 'left', dt);
+      if (rightCtl) trySlice('right', 'right', dt);
+    }
+  } else if (screen === 'playing' && mouseSeen) {
+    tipPrev.desk.copy(tipCur.desk);
+    mouseBladePoint();
+    tipCur.desk.copy(_hitP);
+    trailLine.visible = mouseDown;
+    if (mouseDown) {
+      // Shift-register trail history, newest at index 0
+      for (let i = TRAIL_N - 1; i > 0; i--) {
+        trailPos[i * 3] = trailPos[(i - 1) * 3];
+        trailPos[i * 3 + 1] = trailPos[(i - 1) * 3 + 1];
+        trailPos[i * 3 + 2] = trailPos[(i - 1) * 3 + 2];
+      }
+      trailPos[0] = _hitP.x; trailPos[1] = _hitP.y; trailPos[2] = _hitP.z;
+      trailGeo.attributes.position.needsUpdate = true;
+      trySlice('desk', 'both', dt);
+    }
+  } else {
+    trailLine.visible = false;
+  }
+  for (const k of ['left', 'right', 'desk']) sliceCd[k] = Math.max(0, sliceCd[k] - dt);
+
+  // Level simulation
+  if (levelActive && audioSys.ctx) {
+    const now = audioSys.now;
+    const travel = DIFFS[selDiff].travel;
+    // Spawn anything whose hit time is within one travel window
+    while (chartIdx < chart.length && chart[chartIdx].hitTime - now <= travel) {
+      const e = chart[chartIdx];
+      if (e.hitTime > now - 0.5) spawnNote(e); // skip notes we fell too far behind on
+      chartIdx++;
+    }
+    while (orbIdx < orbEvents.length && orbEvents[orbIdx].time - now <= 0.05) {
+      spawnOrb(orbEvents[orbIdx]); orbIdx++;
+    }
+    // Move notes/bombs; misses break combo (never end the run)
+    for (const n of notes) {
+      if (!n.active) continue;
+      n.z += n.vz * dt;
+      n.grp.position.z = n.z;
+      const pop = clamp((n.z - SPAWN_Z) / 2, 0, 1);
+      const s = 0.6 + 0.4 * pop;
+      n.grp.scale.set(s, s, s);
+      if (n.z >= HIT_Z + 0.45) {
+        n.active = false; n.grp.visible = false;
+        combo = 0; applyMult();
+        floatText('MISS', '#8a8f9e', n.x, LANE_Y + 0.35, HIT_Z);
+        sfxMiss();
+        updateScoreboard();
+      }
+    }
+    for (const b of bombs) {
+      if (!b.active) continue;
+      b.z += b.vz * dt;
+      b.grp.position.z = b.z;
+      b.spin += dt * 3;
+      b.ring.rotation.x = b.spin; b.ring.rotation.y = b.spin * 0.7;
+      const pulse = 1 + Math.sin(now * 10) * 0.15;
+      b.ring.scale.set(pulse, pulse, 1);
+      if (b.z >= HIT_Z + 0.45) { b.active = false; b.grp.visible = false; }
+    }
+    // Orbs arc; expired orbs vanish silently (no combo break)
+    for (const o of orbs) {
+      if (!o.active) continue;
+      o.t += dt / 1.15;
+      if (o.t >= 1) { o.active = false; o.m.visible = false; continue; }
+      const t = o.t;
+      o.m.position.set(
+        lerp(o.x0, o.x1, t),
+        -1.2 + 2.8 * Math.sin(Math.PI * t),
+        -2.2 + 1.0 * Math.sin(Math.PI * t)
+      );
+    }
+    // Track end -> results (no fail state ever)
+    if (now > audioSys.endTime + 1.6) endLevel();
+  }
+
+  // Particles
+  let pDirty = false;
+  for (let i = 0; i < PMAX; i++) {
+    if (pLife[i] <= 0) continue;
+    pLife[i] -= dt;
+    pPos[i * 3] += pVel[i * 3] * dt;
+    pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
+    pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+    pVel[i * 3 + 1] -= 3 * dt;
+    if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; }
+    pDirty = true;
+  }
+  if (pDirty) pGeo.attributes.position.needsUpdate = true;
+
+  // Floating text
+  for (const t of texts) {
+    if (t.life <= 0) continue;
+    t.life -= dt;
+    t.sp.position.y += dt * 0.7;
+    t.sp.material.opacity = clamp(t.life / 0.8, 0, 1);
+    if (t.life <= 0) t.sp.visible = false;
+  }
+
+  // Flash decay
+  if (flashAmt > 0) {
+    flashAmt = Math.max(0, flashAmt - dt * 2.4);
+    flashEl.style.opacity = String(clamp(flashAmt, 0, 0.9));
+    flashQuad.material.opacity = clamp(flashAmt, 0, 0.85);
+  }
+
+  // Scoreboard: VR cell while presenting, DOM cell on desktop
+  scoreCell.visible = presenting && screen === 'playing';
+
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(tick);
+</script>
+</body>
+</html>
