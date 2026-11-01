@@ -66,6 +66,8 @@
   <div class="row"><span class="label">AMMO</span><span class="val">UNLIMITED</span></div>
   <div class="row"><span class="label">MODE</span><span class="val" id="modetext">WALK</span></div>
   <div class="row"><span class="label">KILLS</span><span class="val" id="killtext">0</span></div>
+  <div class="row"><span class="label">WAVE</span><span class="val" id="wavetext">—</span></div>
+  <div class="row"><span class="label">LEFT</span><span class="val" id="wavelefttext">—</span></div>
 </div>
 <div id="dot"></div>
 <div id="banner"></div>
@@ -75,7 +77,7 @@
     <h1>DEAD HOLLOW</h1>
     <h2>Hollow Creek is overrun. Find weapons. Survive the night.</h2>
     <p>Hollow Creek, population 812. Three days after the outbreak, you're the one still moving. Roam Main Street, go inside the shops, and don't let them corner you. The town is big now — follow the tall glowing beams to the weapons.</p>
-    <p style="font-size:13.5px;color:#ffe6a0"><b>WEAPONS — follow the glowing beams:</b><br>SHOTGUN — Hank's Hardware, back room &nbsp;·&nbsp; RIFLE — Sheriff's Office, back room<br>AXE — Hank's Hardware, just inside the front &nbsp;·&nbsp; KNIFE — Hollow Creek Diner, kitchen area<br>New: Hollow Woods, a walkable forest in the north-west — look for the HOLLOW WOODS trail sign.</p>
+    <p style="font-size:13.5px;color:#ffe6a0"><b>WEAPONS — follow the glowing beams:</b><br>SHOTGUN — Hank's Hardware, back room &nbsp;·&nbsp; RIFLE — Sheriff's Office, back room &nbsp;·&nbsp; SNIPER — Fire Station, back room<br>AXE — Hank's Hardware, just inside the front &nbsp;·&nbsp; MACHETE — Hank's Hardware, front aisle &nbsp;·&nbsp; KNIFE — Hollow Creek Diner, kitchen area &nbsp;·&nbsp; KATANA — Public Library, main room<br>New: Hollow Woods, a walkable forest in the north-west — look for the HOLLOW WOODS trail sign.</p>
     <div class="ctl" id="ctltext"></div>
     <button id="vrBtn">ENTER VR</button>
     <button id="startBtn" class="secondary">PLAY ON THIS SCREEN</button>
@@ -90,6 +92,8 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
+// MARKER-DH5-HAPTICS-WAVES: gun haptics, laser sights, katana/machete/sniper,
+// zombie waves, dual-wield clarity, grip-button scope.
 
 // ============ renderer / scene ============
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -889,9 +893,12 @@ const WEAPONS = {
   rifle: { label: 'RIFLE', dmg: 3, rate: 0.45, spread: 0.003, pellets: 1, melee: false },
   axe: { label: 'AXE', dmg: 6, rate: 0.7, spread: 0, pellets: 1, melee: true, range: 2.2 },
   knife: { label: 'KNIFE', dmg: 2, rate: 0.35, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  katana: { label: 'KATANA', dmg: 8, rate: 0.85, spread: 0, pellets: 1, melee: true, range: 2.6 },
+  machete: { label: 'MACHETE', dmg: 5, rate: 0.4, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  sniper: { label: 'SNIPER', dmg: 8, rate: 1.2, spread: 0.001, pellets: 1, melee: false },
 };
-const WEAPON_ORDER = ['pistol', 'shotgun', 'rifle', 'axe', 'knife'];
-const owned = { pistol: true, shotgun: false, rifle: false, axe: false, knife: false };
+const WEAPON_ORDER = ['pistol', 'shotgun', 'rifle', 'axe', 'knife', 'katana', 'machete', 'sniper'];
+const owned = { pistol: true, shotgun: false, rifle: false, axe: false, knife: false, katana: false, machete: false, sniper: false };
 const handWeapon = { right: 'pistol', left: null };
 const handCooldown = { right: 0, left: 0 };
 const handSwing = { right: 0, left: 0 };
@@ -943,18 +950,42 @@ function buildHandWeapon(hand) {
     box(0.015, 0.05, 0.34, steelMat, 0, 0, 0.22); // steel blade
     box(0.05, 0.06, 0.04, darkMetalMat, 0, 0, 0.04); // guard
     cyl(0.024, 0.024, 0.14, gripMat, 0, 0, -0.05, Math.PI / 2); // grip
+  } else if (name === 'katana') {
+    box(0.018, 0.07, 0.72, steelMat, 0, 0, 0.42); // long blade
+    box(0.09, 0.09, 0.03, darkMetalMat, 0, 0, 0.05); // round guard
+    cyl(0.024, 0.024, 0.26, gripMat, 0, 0, -0.1, Math.PI / 2); // wrapped two-hand grip
+  } else if (name === 'machete') {
+    box(0.025, 0.13, 0.52, steelMat, 0, 0, 0.34); // broad blade
+    box(0.04, 0.06, 0.18, woodMat, 0, 0, 0.0); // handle
+  } else if (name === 'sniper') {
+    cyl(0.022, 0.022, 0.85, steelMat, 0, 0.03, 0.32, Math.PI / 2); // long barrel
+    cyl(0.045, 0.045, 0.3, darkMetalMat, 0, 0.1, -0.05, Math.PI / 2); // scope tube
+    cyl(0.055, 0.055, 0.1, darkMetalMat, 0, 0.1, 0.12, Math.PI / 2); // scope bell
+    box(0.07, 0.1, 0.3, darkMetalMat, 0, 0, -0.1); // receiver
+    box(0.06, 0.13, 0.3, woodMat, 0, -0.02, -0.36); // stock
+    box(0.05, 0.05, 0.12, darkMetalMat, 0, -0.08, 0.05); // bipod stub
   }
   mount.add(g);
   if (!WEAPONS[name].melee) {
     const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(255,220,120,1)', 'rgba(255,120,0,0)'), transparent: true, opacity: 0, depthWrite: false }));
     flash.scale.set(0.4, 0.4, 1);
-    flash.position.set(0, 0.02, name === 'pistol' ? 0.3 : name === 'shotgun' ? 0.55 : 0.62);
+    flash.position.set(0, 0.02, name === 'pistol' ? 0.3 : name === 'shotgun' ? 0.55 : name === 'sniper' ? 0.85 : 0.62);
     g.add(flash);
     mount.userData.flash = flash;
   }
 }
 buildHandWeapon('right');
 buildHandWeapon('left');
+
+// DH5: laser sights — thin red beam from each gun's muzzle along the exact
+// firing ray (same mount transform fireHand uses). Shared geometry/material;
+// updated every frame in tick().
+const laserGeo = new THREE.CylinderGeometry(0.005, 0.005, 1, 6);
+const laserMat = new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.55, depthWrite: false });
+const laserMeshes = { right: new THREE.Mesh(laserGeo, laserMat), left: new THREE.Mesh(laserGeo, laserMat) };
+const UP_Y = new THREE.Vector3(0, 1, 0);
+scene.add(laserMeshes.right, laserMeshes.left);
+laserMeshes.right.visible = laserMeshes.left.visible = false;
 
 // In-VR stick debug readout: attached to the camera, low in view, VR only.
 // Diagnostic only — it hides permanently once the player has moved > 2 metres.
@@ -1111,12 +1142,28 @@ const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [
 const playerPos = new THREE.Vector3(0, 0, 0);
 const playerCollide = { x: 0, z: 0 }; // reused every frame: no per-frame object in tick()
 const zombieCollide = { x: 0, z: 0 };
-let spawnTimer = 4, kills = 0;
+let wave = 0, waveToSpawn = 0, waveTimer = 2.5, waveSpawning = false, spawnTimer = 0, kills = 0;
+// DH5: zombie WAVES. Wave N fields 6 + N*3 zombies (queued beyond the
+// concurrent-alive cap of 12), spawning faster and moving faster each wave.
+// 4s breather between waves with a "WAVE N INCOMING" banner + horn.
+// Runner/brute mix, hit spheres, and the >25m spawn rule are unchanged.
 function spawnDirector(dt) {
-  spawnTimer -= dt;
   const active = zombies.filter(z => !z.dead).length;
-  if (spawnTimer <= 0 && active < 12) {
-    spawnTimer = clamp(3.2 - kills * 0.03, 1.6, 3.2);
+  if (!waveSpawning) {
+    waveTimer -= dt;
+    if (waveTimer <= 0) {
+      wave++;
+      waveToSpawn = 6 + wave * 3;
+      waveSpawning = true;
+      spawnTimer = 0.5;
+      showBanner('WAVE ' + wave + ' INCOMING', 2500);
+      hornSound();
+    }
+    return;
+  }
+  spawnTimer -= dt;
+  if (spawnTimer <= 0 && waveToSpawn > 0 && active < 12) {
+    spawnTimer = Math.max(2.6 - wave * 0.15, 0.8);
     const far = SPAWNS.filter(([x, z]) => Math.hypot(x - playerPos.x, z - playerPos.z) > 25);
     const [sx, sz] = (far.length ? far : SPAWNS)[Math.floor(Math.random() * (far.length ? far.length : SPAWNS.length))];
     let type = 'walker';
@@ -1124,7 +1171,14 @@ function spawnDirector(dt) {
     if (kills >= 20) { const r = Math.random(); type = r < 0.1 ? 'brute' : r < 0.4 ? 'runner' : 'walker'; }
     spawnZombie(type);
     const z = zombies[zombies.length - 1];
+    z.speed *= Math.min(1 + wave * 0.04, 1.4); // later waves are faster (capped 1.4x)
     z.grp.position.set(sx, 0, sz);
+    waveToSpawn--;
+  }
+  if (waveToSpawn <= 0 && active <= 0) {
+    waveSpawning = false;
+    waveTimer = 4;
+    showBanner('WAVE ' + wave + ' CLEARED', 2200);
   }
 }
 
@@ -1149,6 +1203,21 @@ function addPickup(kind, x, z) {
     bl.position.z = 0.25; g.add(bl);
     const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.18, 8), new THREE.MeshStandardMaterial({ color: 0x2e1c10, roughness: 0.95 }));
     gr.rotation.x = Math.PI / 2; gr.position.z = -0.05; g.add(gr); label = 'KNIFE';
+  } else if (kind === 'katana') {
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.08, 0.85), new THREE.MeshStandardMaterial({ color: 0xb8c0cc, roughness: 0.2, metalness: 0.85 }));
+    bl.position.z = 0.42; g.add(bl);
+    const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 8), new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.9 }));
+    gr.rotation.x = Math.PI / 2; gr.position.z = -0.12; g.add(gr); label = 'KATANA';
+  } else if (kind === 'machete') {
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.15, 0.6), new THREE.MeshStandardMaterial({ color: 0x9aa2ae, roughness: 0.3, metalness: 0.8 }));
+    bl.position.z = 0.32; g.add(bl);
+    const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.18, 8), new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.9 }));
+    gr.rotation.x = Math.PI / 2; gr.position.z = -0.02; g.add(gr); label = 'MACHETE';
+  } else if (kind === 'sniper') {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 1.25), new THREE.MeshStandardMaterial({ color: 0x1c1e24, roughness: 0.5, metalness: 0.4 }));
+    g.add(b);
+    const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.34, 10), new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.4, metalness: 0.6 }));
+    sc.rotation.x = Math.PI / 2; sc.position.y = 0.11; g.add(sc); label = 'SNIPER';
   } else if (kind === 'ammo') {
     const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.24), new THREE.MeshStandardMaterial({ color: 0x2a4a22, roughness: 0.8 }));
     g.add(b); label = 'SUPPLY';
@@ -1170,8 +1239,9 @@ function addPickup(kind, x, z) {
   // DH4: tall glowing beacon beam on every weapon pickup, so it is visible
   // from far across the (now doubled) town. Hidden automatically on pickup
   // because the whole pickup group is hidden (p.grp.visible = false).
-  if (kind === 'shotgun' || kind === 'rifle' || kind === 'axe' || kind === 'knife') {
-    const beamColor = kind === 'shotgun' ? 0xffc040 : kind === 'rifle' ? 0x40c0ff : kind === 'axe' ? 0xff7020 : 0x60ff80;
+  if (kind === 'shotgun' || kind === 'rifle' || kind === 'axe' || kind === 'knife' || kind === 'katana' || kind === 'machete' || kind === 'sniper') {
+    const beamColor = kind === 'shotgun' ? 0xffc040 : kind === 'rifle' ? 0x40c0ff : kind === 'axe' ? 0xff7020 :
+      kind === 'knife' ? 0x60ff80 : kind === 'katana' ? 0xb040ff : kind === 'machete' ? 0xff3030 : 0xe8ecff; // DH5: katana purple, machete red, sniper white
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 9, 12, 1, true),
       new THREE.MeshBasicMaterial({ color: beamColor, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide }));
     beam.position.y = 4.5; g.add(beam);
@@ -1187,6 +1257,9 @@ addPickup('shotgun', -2, -15.6);
 addPickup('rifle', -33, 15.6);
 addPickup('axe', 0, -9.5);
 addPickup('knife', -46.5, -13.5);
+addPickup('machete', 3.5, -9.5); // DH5: Hank's Hardware, front aisle (next to the axe)
+addPickup('katana', 104, -9.5); // DH5: Public Library, main room
+addPickup('sniper', -94, 15.6); // DH5: Fire Station, back room
 // ammo / health / food scattered around town
 for (const [k, x, z] of [
   ['ammo', -40, -12], ['ammo', -20, -12], ['ammo', 16, 12], ['ammo', 16, -12], ['ammo', -10, 12], ['ammo', 50, 12],
@@ -1246,6 +1319,9 @@ function shotSound(type) {
     noiseBurst(0.4, 0.5, 700); blip(70 * v, 0.3, 0.4, 'sine', 35); blip(50, 0.2, 0.25, 'sine', 30, 0.05);
   } else if (type === 'rifle') { // louder crack with more body than the pistol
     noiseBurst(0.16, 0.45, 2600); blip(210 * v, 0.1, 0.28, 'square', 80); noiseBurst(0.08, 0.2, 1200);
+  } else if (type === 'sniper') { // DH5: loud long crack — heavy body + drawn-out echo tail
+    noiseBurst(0.25, 0.55, 1800); blip(160 * v, 0.18, 0.35, 'sawtooth', 60);
+    blip(150 * v, 0.25, 0.12, 'sine', 70, 0.12); noiseBurst(0.1, 0.22, 900);
   } else { // pistol: sharp crack + short echo tail (two quiet delayed repeats)
     noiseBurst(0.09, 0.35, 3400); blip(310 * v, 0.06, 0.2, 'square', 120);
     blip(300 * v, 0.12, 0.08, 'sine', 140, 0.09); blip(300 * v, 0.12, 0.04, 'sine', 140, 0.18);
@@ -1267,11 +1343,17 @@ function hitSound() { blip(120, 0.12, 0.25, 'sine', 60); noiseBurst(0.05, 0.15, 
 function pickupSound() { blip(660, 0.1, 0.2, 'sine'); blip(990, 0.14, 0.2, 'sine', null, 0.09); }
 // no reload: unlimited ammo, so no reload sound is used
 function thumpSound(delay) { blip(50, 0.16, 0.5, 'sine', 35, delay); }
+function hornSound() { // DH5: two low horn blasts announce a wave
+  if (!AC) return;
+  blip(98, 0.5, 0.4, 'sawtooth', 65); blip(147, 0.5, 0.3, 'sawtooth', 98);
+  blip(98, 0.5, 0.4, 'sawtooth', 65, 0.55); blip(147, 0.5, 0.3, 'sawtooth', 98, 0.55);
+}
 
 // ============ HUD / banner / damage ============
 const hptext = document.getElementById('hptext'), hpfill = document.getElementById('hpfill');
 const weapontext = document.getElementById('weapontext'), leftweapontext = document.getElementById('leftweapontext');
 const killtext = document.getElementById('killtext'), bannerEl = document.getElementById('banner');
+const wavetext = document.getElementById('wavetext'), wavelefttext = document.getElementById('wavelefttext');
 const modetext = document.getElementById('modetext');
 let bannerT = 0;
 function showBanner(text, ms) { bannerEl.textContent = text; bannerEl.style.opacity = 1; bannerT = (ms || 2200) / 1000; }
@@ -1281,6 +1363,8 @@ function updateHUD() {
   weapontext.textContent = handWeapon.right ? WEAPONS[handWeapon.right].label : 'EMPTY';
   leftweapontext.textContent = handWeapon.left ? WEAPONS[handWeapon.left].label : 'EMPTY';
   killtext.textContent = kills;
+  wavetext.textContent = wave > 0 ? wave : '—';
+  wavelefttext.textContent = waveSpawning ? (waveToSpawn + zombies.filter(z => !z.dead).length) : '—';
 }
 let hp = 100, hurtCd = 0, shakeT = 0, blackoutT = -1;
 const hurtMat = new THREE.MeshBasicMaterial({ color: 0xcc0000, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
@@ -1304,11 +1388,48 @@ const vigTex = new THREE.CanvasTexture(vigCanvas);
 const vigMat = new THREE.MeshBasicMaterial({ map: vigTex, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
 const vigQuad = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), vigMat);
 vigQuad.position.z = -0.35; vigQuad.renderOrder = 996; camera.add(vigQuad);
+// DH5: sniper scope — crosshair overlay (canvas drawn once), camera-attached.
+// Holding GRIP (squeeze) on the hand holding the sniper narrows FOV to ~30
+// for ~3x zoom + shows this reticle; releasing restores the normal view.
+// Honest limit: a real magnified scope lens can't work inside WebXR, so the
+// zoom is a view zoom + reticle (same approach as Longshot VR).
+const chCanvas = document.createElement('canvas'); chCanvas.width = chCanvas.height = 256;
+{
+  const g = chCanvas.getContext('2d');
+  g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = 4;
+  g.beginPath(); g.arc(128, 128, 46, 0, 7); g.stroke();
+  g.beginPath();
+  g.moveTo(128, 20); g.lineTo(128, 100); g.moveTo(128, 156); g.lineTo(128, 236);
+  g.moveTo(20, 128); g.lineTo(100, 128); g.moveTo(156, 128); g.lineTo(236, 128);
+  g.stroke();
+  g.fillStyle = 'rgba(255,60,60,0.95)'; g.beginPath(); g.arc(128, 128, 5, 0, 7); g.fill();
+}
+const chTex = new THREE.CanvasTexture(chCanvas);
+const crossQuad = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1),
+  new THREE.MeshBasicMaterial({ map: chTex, transparent: true, depthTest: false, toneMapped: false }));
+crossQuad.position.z = -0.35; crossQuad.renderOrder = 995; crossQuad.visible = false;
+camera.add(crossQuad);
+let scoped = false;
 let vigOpacity = 0, prevRunning = false;
+// DH5: haptics — pulse the firing hand's controller actuator. Quest touch
+// controllers expose gamepad.hapticActuators[0].playEffect('dual-rumble').
+// Feature-detected: silently skipped on desktop or unsupported hardware.
+function hapticPulse(hand, durMs, intensity) {
+  const gp = handGamepad[hand];
+  if (!gp || !gp.hapticActuators || !gp.hapticActuators.length) return;
+  try {
+    const a = gp.hapticActuators[0];
+    if (a && a.playEffect) {
+      const p = a.playEffect('dual-rumble', { duration: durMs, strongMagnitude: intensity, weakMagnitude: intensity * 0.6 });
+      if (p && p.catch) p.catch(() => {});
+    }
+  } catch (e) { /* haptics unavailable — ignore */ }
+}
 function damagePlayer(d) {
   if (hurtCd > 0 || blackoutT >= 0) return;
   hp -= d; hurtCd = 0.8; hurtMat.opacity = 0.55; shakeT = 0.35;
   hitSound();
+  hapticPulse('left', 120, 0.8); hapticPulse('right', 120, 0.8); // DH5: damage buzz
   if (hp <= 0) { hp = 0; blackoutT = 0; }
   updateHUD();
 }
@@ -1324,18 +1445,24 @@ addEventListener('keydown', e => {
   if (e.code === 'Digit3') switchHandWeapon('right', 'rifle');
   if (e.code === 'Digit4') switchHandWeapon('right', 'axe');
   if (e.code === 'Digit5') switchHandWeapon('right', 'knife');
+  if (e.code === 'Digit6') switchHandWeapon('right', 'katana');
+  if (e.code === 'Digit7') switchHandWeapon('right', 'machete');
+  if (e.code === 'Digit8') switchHandWeapon('right', 'sniper');
 });
 addEventListener('keyup', e => keys[e.code] = false);
 let mouseDown = false, dragging = false, lastMX = 0, lastMY = 0, pitch = 0;
+let scopeMouse = false; // DH5: hold right mouse button = sniper scope on desktop
 const dom = renderer.domElement;
+dom.addEventListener('contextmenu', e => e.preventDefault()); // right-click scopes, never menus
 dom.addEventListener('mousedown', e => {
+  if (e.button === 2) { scopeMouse = true; return; } // right button is scope, not fire
   mouseDown = true; dragging = true; lastMX = e.clientX; lastMY = e.clientY;
   if (mode === 'play' && !renderer.xr.isPresenting && document.pointerLockElement !== dom) {
     const pr = dom.requestPointerLock();
     if (pr && pr.catch) pr.catch(() => {});
   }
 });
-addEventListener('mouseup', () => { mouseDown = false; dragging = false; });
+addEventListener('mouseup', e => { if (e.button === 2) scopeMouse = false; else { mouseDown = false; dragging = false; } });
 addEventListener('mousemove', e => {
   if (mode !== 'play' || renderer.xr.isPresenting) return;
   if (document.pointerLockElement === dom) {
@@ -1360,6 +1487,7 @@ let rightCtl = null, leftCtl = null;
   c.addEventListener('disconnected', () => { if (rightCtl === c) rightCtl = null; if (leftCtl === c) leftCtl = null; });
 });
 let prevCycleL = false, prevCycleR = false, snapCd = 0, snapArm = true; // DH4: snap turn is INSTANT (comfort) — easing removed
+const handGamepad = { left: null, right: null }; // DH5: per-hand gamepad refs for haptics + grip
 // MARKER-DH2-MOVEFIX
 const pairBuf = { x: 0, y: 0 };
 function pickPair(axes) {
@@ -1373,6 +1501,8 @@ function pickPair(axes) {
 function dead(v) { return Math.abs(v) < 0.15 ? 0 : v; }
 function pollInput(dt) {
   let fireL = false, fireR = false, mx = 0, mz = 0, lx = 0, ly = 0, rx = 0, ry = 0, running = false;
+  let gripL = false, gripR = false; // DH5: squeeze button per hand (sniper scope)
+  handGamepad.left = handGamepad.right = null; // refreshed every frame from live sources
   if (keys['KeyW'] || keys['ArrowUp']) mz += 1;
   if (keys['KeyS'] || keys['ArrowDown']) mz -= 1;
   if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
@@ -1380,7 +1510,7 @@ function pollInput(dt) {
   if (mouseDown && !renderer.xr.isPresenting) fireR = true;
   if (keys['ShiftLeft'] || keys['ShiftRight']) running = true; // desktop run: hold Shift
   let cycleL = false, cycleR = false, axisSeen = false;
-  const applyHand = (hand, axes, buttons) => {
+  const applyHand = (hand, axes, buttons, gp) => {
     pickPair(axes); const ax = pairBuf.x, ay = pairBuf.y;
     const dx = dead(ax), dy = dead(ay);
     if (dx !== 0 || dy !== 0) axisSeen = true;
@@ -1397,6 +1527,11 @@ function pollInput(dt) {
     if (buttons && buttons[0] && buttons[0].value > 0.35) {
       if (hand === 'left') fireL = true; else fireR = true;
     }
+    // DH5: grip (squeeze, buttons[1]) — held with the sniper equipped = aim down sights.
+    if (buttons && buttons[1] && buttons[1].pressed) {
+      if (hand === 'left') gripL = true; else gripR = true;
+    }
+    if (gp) handGamepad[hand] = gp; // DH5: stash live gamepad for haptics
     // DH4 run: hold the LEFT thumbstick click (buttons[3]) while moving.
     // Full-forward stick alone is still walk only — running is opt-in.
     if (hand === 'left' && buttons && buttons[3] && buttons[3].pressed) running = true;
@@ -1409,7 +1544,7 @@ function pollInput(dt) {
     if (session) {
       for (const src of session.inputSources) {
         const gp = src.gamepad; if (!gp) continue;
-        if (gp.axes && gp.axes.length > 1) applyHand(src.handedness, gp.axes, gp.buttons);
+        if (gp.axes && gp.axes.length > 1) applyHand(src.handedness, gp.axes, gp.buttons, gp);
       }
     }
     // Fallback: controller objects' gamepads, if the session sources gave nothing.
@@ -1417,7 +1552,7 @@ function pollInput(dt) {
       for (const [c, hand] of [[leftCtl, 'left'], [rightCtl, 'right'], [ctlL, 'left'], [ctlR, 'right']]) {
         if (!c) continue;
         const gp = c.gamepad || (c.userData && c.userData.inputSource && c.userData.inputSource.gamepad);
-        if (gp && gp.axes && gp.axes.length > 1) applyHand(hand, gp.axes, gp.buttons);
+        if (gp && gp.axes && gp.axes.length > 1) applyHand(hand, gp.axes, gp.buttons, gp);
       }
     }
     snapCd = Math.max(0, snapCd - dt);
@@ -1427,7 +1562,7 @@ function pollInput(dt) {
   prevCycleL = cycleL; prevCycleR = cycleR;
   const len = Math.hypot(mx, mz);
   if (len > 1) { mx /= len; mz /= len; }
-  return { fire: { left: fireL, right: fireR }, mx, mz, lx, ly, rx, ry, running };
+  return { fire: { left: fireL, right: fireR }, mx, mz, lx, ly, rx, ry, running, grip: { left: gripL, right: gripR } };
 }
 
 // ============ weapons: switch ============
@@ -1491,10 +1626,14 @@ function whooshSound(dur, vol) {
 }
 function swingSound(kind) {
   if (kind === 'knife') whooshSound(0.14, 0.16); // quick swish
+  else if (kind === 'katana') whooshSound(0.22, 0.2); // katana: longer whoosh, ring lands on hit
+  else if (kind === 'machete') whooshSound(0.18, 0.2); // machete: quick heavy whoosh
   else whooshSound(0.28, 0.22); // axe whoosh
 }
 function thudSound() { blip(70, 0.16, 0.4, 'sine', 38); noiseBurst(0.08, 0.25, 400); } // axe hit: solid thud
 function sliceSound() { noiseBurst(0.06, 0.2, 5200); blip(1400, 0.05, 0.08, 'sine', 900); } // knife hit: slice
+function katanaHitSound() { noiseBurst(0.05, 0.18, 6000); blip(2400, 0.3, 0.12, 'sine', 1800); } // katana: metallic ring
+function macheteHitSound() { noiseBurst(0.09, 0.3, 1400); blip(180, 0.1, 0.3, 'sine', 90); } // machete: chop
 function fireHand(hand) {
   const name = handWeapon[hand];
   if (!name || handCooldown[hand] > 0) return;
@@ -1508,6 +1647,7 @@ function fireHand(hand) {
   if (w.melee) {
     handSwing[hand] = 0.28;
     swingSound(name);
+    let hitAny = false;
     for (const z of zombies) {
       if (z.dead) continue;
       const gp = z.grp.position, s = z.scale;
@@ -1518,12 +1658,20 @@ function fireHand(hand) {
       if (dot < 0.65) continue; // must be in front of that hand
       tmpB.set(gp.x, gp.y + 1.1 * s, gp.z);
       spawnBurst(tmpB, 5, 0x5a0a0a, 2.5);
-      z.hp -= w.dmg; if (name === 'axe') thudSound(); else if (name === 'knife') sliceSound(); else hitSound();
+      z.hp -= w.dmg; hitAny = true;
+      if (name === 'axe') thudSound(); else if (name === 'knife') sliceSound();
+      else if (name === 'katana') katanaHitSound(); else if (name === 'machete') macheteHitSound(); else hitSound();
       if (z.hp <= 0) killZombie(z);
     }
+    if (hitAny) hapticPulse(hand, 40, 0.5); // DH5: melee connect buzz
     return;
   }
   shotSound(name);
+  // DH5: gun haptics on the firing controller's actuator, scaled by weapon
+  if (name === 'pistol') hapticPulse(hand, 50, 0.6);
+  else if (name === 'rifle') hapticPulse(hand, 90, 0.8);
+  else if (name === 'shotgun') hapticPulse(hand, 140, 1.0);
+  else if (name === 'sniper') hapticPulse(hand, 160, 1.0);
   const flash = mount.userData.flash;
   if (flash) flash.material.opacity = 1;
   for (let p = 0; p < w.pellets; p++) {
@@ -1637,7 +1785,7 @@ function updatePickups(dt, t) {
     if (d < 1.3) {
       p.taken = true; p.grp.visible = false;
       pickupSound();
-      if (p.kind === 'shotgun' || p.kind === 'rifle' || p.kind === 'axe' || p.kind === 'knife') {
+      if (p.kind === 'shotgun' || p.kind === 'rifle' || p.kind === 'axe' || p.kind === 'knife' || p.kind === 'katana' || p.kind === 'machete' || p.kind === 'sniper') {
         if (!owned[p.kind]) {
           owned[p.kind] = true;
           if (handWeapon.left === null) { handWeapon.left = p.kind; buildHandWeapon('left'); showBanner(WEAPONS[p.kind].label + ' FOUND — LEFT HAND', 2000); }
@@ -1741,10 +1889,31 @@ function tick() {
         mount.lookAt(aimPoints[hand]);
         if (handSwing[hand] > 0) mount.rotateX(-Math.sin(handSwing[hand] / 0.28 * Math.PI) * 1.1);
       }
+      // DH5: laser sight — exact firing ray from this hand's gun muzzle
+      // (same mount world transform fireHand uses). 25m thin red beam.
+      const wNow = WEAPONS[handWeapon[hand]];
+      const lz = laserMeshes[hand];
+      if (wNow && !wNow.melee) {
+        mount.getWorldPosition(tmpV); mount.getWorldQuaternion(tmpQ);
+        tmpDir.set(0, 0, 1).applyQuaternion(tmpQ);
+        lz.visible = true;
+        lz.position.set(tmpV.x + tmpDir.x * 13.05, tmpV.y + tmpDir.y * 13.05, tmpV.z + tmpDir.z * 13.05);
+        lz.quaternion.setFromUnitVectors(UP_Y, tmpDir);
+        lz.scale.set(1, 25, 1);
+      } else lz.visible = false;
     }
     // firing: each trigger fires its own hand's weapon; no reloading, ammo is unlimited
     if (inp.fire.right) fireHand('right');
     if (inp.fire.left) fireHand('left');
+    // DH5: sniper scope — hold GRIP (squeeze) on the hand holding the sniper
+    // (or hold right-click on desktop) to aim down sights.
+    const wantScope = (inp.grip.right && handWeapon.right === 'sniper') || (inp.grip.left && handWeapon.left === 'sniper') || (scopeMouse && handWeapon.right === 'sniper');
+    if (wantScope !== scoped) {
+      scoped = wantScope;
+      crossQuad.visible = scoped;
+      camera.fov = scoped ? 30 : 72;
+      camera.updateProjectionMatrix();
+    }
     handCooldown.right = Math.max(0, handCooldown.right - dt);
     handCooldown.left = Math.max(0, handCooldown.left - dt);
     handSwing.right = Math.max(0, handSwing.right - dt);
@@ -1787,7 +1956,7 @@ function tick() {
         playerGroup.position.set(0, 0, 0); yaw = 0; playerGroup.rotation.y = 0;
         hp = 100; hurtCd = 0;
         for (const z of zombies) scene.remove(z.grp);
-        zombies.length = 0; spawnTimer = 4;
+        zombies.length = 0; wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 2.5; // DH5: waves restart
         blackoutT = -1; blackMat.opacity = 0;
         showBanner('YOU BLACKED OUT — you wake up in the square.', 3000);
         updateHUD();
@@ -1803,7 +1972,7 @@ renderer.setAnimationLoop(tick);
 
 // ============ menu / start / VR ============
 const menuEl = document.getElementById('menu');
-document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · hold LEFT stick click to RUN · right stick Y also walks · right stick X snap-turns instantly · each trigger fires its own hand · A/X on a controller swaps THAT hand\'s weapon · unlimited ammo, no reloading · comfort vignette darkens edges while you move. Desktop: WASD moves · hold Shift to run · mouse looks · click fires right hand · Q swaps right hand · E swaps left hand.';
+document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · hold LEFT stick click to RUN · right stick Y also walks · right stick X snap-turns instantly · each trigger fires its own hand — grab a second gun to dual wield · A/X on a controller swaps THAT hand\'s weapon · hold the GRIP (squeeze) button with the SNIPER equipped to aim down sights · guns buzz when fired · unlimited ammo, no reloading · comfort vignette darkens edges while you move. Desktop: WASD moves · hold Shift to run · mouse looks · click fires right hand · hold right-click with the SNIPER to aim down sights · Q swaps right hand · E swaps left hand.';
 function startGame() {
   startAudio();
   mode = 'play';
