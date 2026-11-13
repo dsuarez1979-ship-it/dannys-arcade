@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="LEAPS IQ — daily LEAPS research. Delayed data, paper trading only, not financial advice.">
+<meta name="theme-color" content="#0a0f0d">
+<title>LEAPS IQ — Daily Top 10</title>
+<style>
+  :root { --bg: #0a0f0d; --panel: #101613; --ink: #e8f0ea; --muted: #9fb3a4;
+          --green: #10b981; --green-dim: #0d8a61; --red: #ef4444; --amber: #f59e0b;
+          --line: #223028; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         font-size: 16px; line-height: 1.5; }
+  header, main, footer { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+  header { padding-top: 20px; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: .04em; color: var(--green); }
+  h1 small { display: block; font-size: 14px; color: var(--muted); letter-spacing: 0; margin-top: 4px; }
+  h2 { font-size: 20px; margin: 28px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  h3 { font-size: 16px; margin: 18px 0 6px; color: var(--green); }
+  .notice { border: 1px solid var(--amber); background: #1d1607; color: #fde68a;
+            border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-weight: 600; }
+  .notice.public { border-color: var(--green-dim); background: #06231a; color: #a7f3d0; }
+  .error { border: 1px solid var(--red); background: #2a0d0d; color: #fecaca;
+           border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-weight: 600; }
+  .advisory { border: 1px solid var(--red); background: #2a0d0d; color: #fecaca;
+           border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-weight: 600; }
+  .stale { border: 1px solid var(--red); background: #2a0d0d; color: #fecaca;
+           border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-weight: 700; }
+  #feed-meta { color: var(--muted); font-size: 14px; }
+  ol.top10, ul.others { list-style: none; margin: 0; padding: 0; }
+  .cand { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          margin: 8px 0; padding: 4px 0; }
+  .cand-btn { display: flex; align-items: center; gap: 10px; width: 100%;
+              background: none; border: 0; color: var(--ink); font-size: 16px;
+              padding: 10px 12px; cursor: pointer; text-align: left; min-height: 48px; }
+  .cand-btn .sym { font-weight: 700; min-width: 64px; }
+  .cand-btn .score { font-size: 20px; font-weight: 700; color: var(--green); min-width: 48px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .03em;
+           padding: 3px 8px; border-radius: 999px; background: #223028; color: var(--ink); }
+  .badge-buy { background: var(--green); color: #04150e; }
+  .badge-wait { background: #334155; color: #e2e8f0; }
+  .badge-hold { background: #1d4ed8; color: #fff; }
+  .badge-profit { background: #059669; color: #fff; }
+  .badge-exit { background: var(--red); color: #fff; }
+  .badge-blocked { background: #7f1d1d; color: #fecaca; }
+  .badge-delayed { background: #78350f; color: #fde68a; }
+  .elig { display: block; padding: 0 12px 4px; color: var(--muted); font-size: 13px; }
+  .reasons { padding: 0 12px 10px; color: #fca5a5; font-size: 14px; }
+  .empty { color: var(--muted); }
+  .detail { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-size: 13px; }
+  dl dt { font-weight: 700; margin-top: 10px; color: var(--green); }
+  dl dd { margin: 2px 0 0; }
+  .plan { border-top: 1px solid var(--line); margin-top: 12px; }
+  .plan-note, .fine { color: var(--muted); font-size: 14px; }
+  #diagnostics { background: var(--panel); border: 1px solid var(--line);
+                 border-radius: 8px; padding: 12px 14px; font-size: 14px; }
+  #diagnostics p { margin: 6px 0; }
+  #diagnostics ul { margin: 4px 0; padding-left: 20px; }
+  ol.steps li { margin: 8px 0; }
+  footer { color: var(--muted); font-size: 13px; padding: 24px 16px 40px; }
+  a { color: var(--green); }
+</style>
+</head>
+<body>
+<header>
+  <h1>LEAPS IQ <small>Daily LEAPS research — delayed data, paper trading only</small></h1>
+  <div class="notice">Data is delayed 15 min — research only, paper trading only, not financial advice.</div>
+  <div class="notice public">Public file — no brokerage tokens, no personal data. This page asks for no login and stores no credentials.</div>
+  <div class="advisory" id="malware-advisory" role="alert">Security warning: a &ldquo;cracked&rdquo; or &ldquo;reverse-engineered&rdquo; TradingView Premium app promoted on social media is confirmed malware — security firm SlowMist (Nov 9, 2026) found it steals browser logins, crypto wallet data, and Telegram info. Do not download it, and never type brokerage or wallet credentials into unofficial trading software. LEAPS IQ links to no downloads.</div>
+  <div id="app-error" class="error" hidden></div>
+  <div id="stale-banner" class="stale" hidden></div>
+  <p id="feed-meta">Loading feed…</p>
+</header>
+
+<main>
+  <section aria-labelledby="top10-h">
+    <h2 id="top10-h">Daily Top 10</h2>
+    <p class="fine">BUY SETUPs only, ranked by canonical score. Fewer than ten when fewer qualify — no setup is ever invented.</p>
+    <div id="top10"><p class="empty">Loading…</p></div>
+  </section>
+
+  <section aria-labelledby="others-h">
+    <h2 id="others-h">Other candidates — listed, never hidden</h2>
+    <p class="fine">WAIT / HOLD / TAKE PROFIT / EXIT candidates, plus anything blocked, with the feed&rsquo;s reasons shown verbatim.</p>
+    <div id="others"><p class="empty">Loading…</p></div>
+  </section>
+
+  <section aria-labelledby="detail-h">
+    <h2 id="detail-h">Candidate detail</h2>
+    <div id="detail"><p class="empty">Select a candidate above to see its detail.</p></div>
+  </section>
+
+  <section aria-labelledby="diag-h">
+    <h2 id="diag-h">Diagnostics</h2>
+    <div id="diagnostics"><p class="empty">No fetch yet.</p></div>
+  </section>
+
+  <section aria-labelledby="install-h">
+    <h2 id="install-h">Bookmark &amp; add to Home screen (Android Chrome)</h2>
+    <ol class="steps">
+      <li>Open this page in Chrome on your phone.</li>
+      <li><strong>Bookmark:</strong> tap the star in the address bar, or tap ⋮ → <em>Bookmark</em>. The bookmark opens this page directly next time.</li>
+      <li><strong>Add to Home screen (app-like icon):</strong> tap ⋮ → <em>Add to Home screen</em> → <em>Add</em>. The icon opens this page full-screen, like an app. No install, no login, no notifications.</li>
+      <li>Check daily — the feed is re-published once a day. Pull down / reload the page to fetch the newest file.</li>
+    </ol>
+  </section>
+</main>
+
+<footer>
+  <p>Educational research only — not financial advice, not a recommendation to buy or sell anything. All data is delayed 15 minutes. Paper trading only; no live orders are placed from this page.</p>
+  <p>Feed: <code>candidates.json</code> in the same directory as this page. The site validates the feed and refuses it (showing an error, never invented data) if the dataset marker, dates, sources block, or per-candidate shape is wrong, if <code>data_sanitized</code> is not <code>true</code>, or if any per-contract price, IV, or Greek field appears. Statuses and blocking reasons are shown exactly as the feed states them. Feed timestamps (<code>generated_at</code>, <code>as_of_date</code>) come from the feed, never from this device&rsquo;s clock.</p>
+  <p>Planned-exit rule is unvalidated (see the Trade Plan preview). No login, no credentials, no web push on this page.</p>
+</footer>
+
+<noscript><p style="max-width:720px;margin:0 auto;padding:0 16px;color:#fecaca;font-weight:700;">This page needs JavaScript enabled to load and validate the daily feed. Without it, no data is shown.</p></noscript>
+<script src="app.js" defer></script>
+</body>
+</html>
