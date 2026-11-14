@@ -1,0 +1,2134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>DEAD HOLLOW VR — Danny's Arcade</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #05070d; height: 100%; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 12px; left: 12px; z-index: 5; pointer-events: none;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: rgba(5, 8, 15, 0.62); border: 1px solid rgba(255, 60, 60, 0.45); border-radius: 10px;
+    padding: 10px 12px; color: #f5f2ff; min-width: 190px;
+  }
+  #hud .row { display: flex; justify-content: space-between; gap: 14px; font-size: 15px; line-height: 1.5; }
+  #hud .label { color: #c9c0ee; }
+  #hud .val { font-weight: 700; }
+  #hpbar { height: 10px; background: rgba(255,255,255,0.14); border-radius: 6px; overflow: hidden; margin-top: 6px; }
+  #hpfill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff3d3d, #ff7e47); transition: width .2s; }
+  #dot {
+    position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+    background: rgba(255,255,255,0.85); border-radius: 50%; z-index: 5; pointer-events: none;
+    box-shadow: 0 0 6px rgba(255,255,255,0.7);
+  }
+  #banner {
+    position: fixed; left: 50%; top: 18%; transform: translateX(-50%); z-index: 6; pointer-events: none;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff;
+    font-size: clamp(20px, 4vw, 34px); font-weight: 800; letter-spacing: 1px; text-align: center;
+    text-shadow: 0 2px 18px rgba(255, 40, 40, 0.65), 0 1px 3px rgba(0,0,0,0.9);
+    opacity: 0; transition: opacity .25s; max-width: 92vw;
+  }
+  #hint {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5; pointer-events: none;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: rgba(245,242,255,0.75);
+    font-size: 13px; text-align: center; text-shadow: 0 1px 3px #000; max-width: 94vw; line-height: 1.4;
+  }
+  #menu {
+    position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(900px 600px at 50% 20%, rgba(80, 10, 10, 0.55), rgba(3, 4, 10, 0.92));
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f5f2ff; text-align: center;
+    padding: 20px;
+  }
+  #menu .card { max-width: 560px; }
+  #menu h1 { font-size: clamp(40px, 9vw, 68px); letter-spacing: 3px; margin: 0 0 4px; color: #ff4a3d; text-shadow: 0 0 30px rgba(255, 40, 40, 0.5); }
+  #menu h2 { font-size: clamp(15px, 3vw, 20px); font-weight: 600; color: #c9c0ee; margin: 0 0 16px; }
+  #menu p { color: #d8d2f0; line-height: 1.55; font-size: 15px; }
+  #menu .ctl { color: #9d8fd0; font-size: 13.5px; line-height: 1.7; margin: 14px 0 20px; }
+  #menu button {
+    font-size: 18px; font-weight: 800; letter-spacing: 1px; padding: 14px 26px; margin: 6px;
+    border: none; border-radius: 12px; cursor: pointer; color: #0b0618; background: #ff4a3d;
+  }
+  #menu button.secondary { background: #e8e2ff; }
+  #menu button:active { transform: scale(0.97); }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="hud">
+  <div class="row"><span class="label">HEALTH</span><span class="val" id="hptext">100</span></div>
+  <div id="hpbar"><div id="hpfill"></div></div>
+  <div class="row" style="margin-top:6px"><span class="label">RIGHT HAND</span><span class="val" id="weapontext">PISTOL</span></div>
+  <div class="row"><span class="label">LEFT HAND</span><span class="val" id="leftweapontext">EMPTY</span></div>
+  <div class="row"><span class="label">AMMO</span><span class="val">UNLIMITED</span></div>
+  <div class="row"><span class="label">MODE</span><span class="val" id="modetext">WALK</span></div>
+  <div class="row"><span class="label">KILLS</span><span class="val" id="killtext">0</span></div>
+  <div class="row"><span class="label">WAVE</span><span class="val" id="wavetext">—</span></div>
+  <div class="row"><span class="label">LEFT</span><span class="val" id="wavelefttext">—</span></div>
+</div>
+<div id="dot"></div>
+<div id="banner"></div>
+<div id="hint"></div>
+<div id="menu">
+  <div class="card">
+    <h1>DEAD HOLLOW</h1>
+    <h2>Hollow Creek is overrun. Find weapons. Survive the night.</h2>
+    <p>Hollow Creek, population 812. Three days after the outbreak, you're the one still moving. Roam Main Street, go inside the shops, and don't let them corner you. The town is big now — follow the tall glowing beams to the weapons.</p>
+    <p style="font-size:13.5px;color:#ffe6a0"><b>WEAPONS — follow the glowing beams:</b><br>SHOTGUN — Hank's Hardware, back room &nbsp;·&nbsp; RIFLE — Sheriff's Office, back room &nbsp;·&nbsp; SNIPER — Fire Station, back room<br>AXE — Hank's Hardware, just inside the front &nbsp;·&nbsp; MACHETE — Hank's Hardware, front aisle &nbsp;·&nbsp; KNIFE — Hollow Creek Diner, kitchen area &nbsp;·&nbsp; KATANA — Public Library, main room<br>New: Hollow Woods, a walkable forest in the north-west — look for the HOLLOW WOODS trail sign.</p>
+    <div class="ctl" id="ctltext"></div>
+    <button id="vrBtn">ENTER VR</button>
+    <button id="startBtn" class="secondary">PLAY ON THIS SCREEN</button>
+    <p style="font-size:12.5px;color:#8d82b8">No game over — if they overwhelm you, you black out and wake up back in the square, keeping your weapons.</p>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+// ============ helpers ============
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+const randi = (a, b) => Math.floor(rand(a, b + 1));
+// MARKER-DH5-HAPTICS-WAVES: gun haptics, laser sights, katana/machete/sniper,
+// zombie waves, dual-wield clarity, grip-button scope.
+// MARKER-DH5-ONEHIT-MELEE: all melee weapons (axe/knife/katana/machete) deal
+// 99 dmg — one melee hit kills any zombie; guns unchanged.
+
+// ============ renderer / scene ============
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25)); // Quest perf: lower fill-rate cost
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070d);
+scene.fog = new THREE.FogExp2(0x0a0e18, 0.016);
+const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 400);
+camera.position.set(0, 1.6, 0);
+
+// Player rig: group holds position + yaw; camera is the head inside it.
+const playerGroup = new THREE.Group();
+playerGroup.position.set(0, 0, 0);
+scene.add(playerGroup);
+playerGroup.add(camera);
+let yaw = 0; // facing -z (north shops) at spawn
+playerGroup.rotation.y = yaw;
+
+// ============ lights ============
+scene.add(new THREE.HemisphereLight(0x2a3550, 0x0a0806, 0.55));
+const moon = new THREE.DirectionalLight(0x8fa8d8, 0.35);
+moon.position.set(-30, 50, -20);
+scene.add(moon);
+const flash = new THREE.SpotLight(0xffe8b8, 30, 26, 0.55, 0.5, 1.2);
+flash.position.set(0, 0, 0);
+scene.add(flash);
+const flashTarget = new THREE.Object3D();
+scene.add(flashTarget);
+flash.target = flashTarget;
+
+// ============ sky: stars + moon sprite ============
+function glowTexture(inner, outer) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  grad.addColorStop(0, inner); grad.addColorStop(1, outer);
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+{
+  const starGeo = new THREE.BufferGeometry();
+  const pos = new Float32Array(900 * 3);
+  for (let i = 0; i < 900; i++) {
+    const a = Math.random() * Math.PI * 2, e = rand(0.12, 1.4), r = 320;
+    pos[i * 3] = Math.cos(a) * Math.cos(e) * r;
+    pos[i * 3 + 1] = Math.sin(e) * r;
+    pos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xcdd8ff, size: 1.6, sizeAttenuation: false, fog: false })));
+  const moonSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(235,240,255,1)', 'rgba(150,170,220,0)'), transparent: true, fog: false, depthWrite: false }));
+  moonSpr.scale.set(42, 42, 1);
+  moonSpr.position.set(-160, 150, -220);
+  scene.add(moonSpr);
+}
+
+// ============ procedural surface textures (all original canvas art) ============
+function mkTex(w, h, draw, rx, ry) {
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  draw(cv.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(rx || 1, ry || 1);
+  return tex;
+}
+function speckle(g, w, h, n, colors, aMax, sMax) {
+  for (let i = 0; i < n; i++) {
+    g.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+    g.globalAlpha = Math.random() * aMax;
+    const s = 1 + Math.random() * sMax;
+    g.fillRect(Math.random() * w, Math.random() * h, s, s);
+  }
+  g.globalAlpha = 1;
+}
+const asphaltTex = mkTex(512, 128, (g, w, h) => {
+  g.fillStyle = '#191b21'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 2600, ['#22242c', '#121318', '#2a2d36', '#0e0f13'], 0.5, 2);
+  g.fillStyle = 'rgba(190,160,60,0.35)'; // faded double-yellow centerline, worn
+  for (let x = 0; x < w; x += 128) { g.fillRect(x, 56, 64, 4); g.fillRect(x, 68, 64, 4); }
+  g.fillStyle = 'rgba(220,220,220,0.13)'; g.fillRect(0, 6, w, 2); g.fillRect(0, 120, w, 2); // faint edge lines
+  g.strokeStyle = 'rgba(8,8,10,0.7)'; g.lineWidth = 2; // cracks
+  for (let i = 0; i < 7; i++) {
+    g.beginPath(); let x = Math.random() * w, y = Math.random() * h;
+    g.moveTo(x, y);
+    for (let j = 0; j < 4; j++) { x += (Math.random() - 0.5) * 90; y += (Math.random() - 0.5) * 30; g.lineTo(x, y); }
+    g.stroke();
+  }
+  for (let i = 0; i < 6; i++) { // dark patches + oil stains
+    g.fillStyle = 'rgba(10,10,12,0.35)';
+    g.fillRect(Math.random() * w, Math.random() * h, 30 + Math.random() * 70, 12 + Math.random() * 30);
+  }
+}, 16, 1);
+const grassTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#0e1c11'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 2400, ['#122614', '#0a150c', '#1a2e18', '#16240f'], 0.6, 3);
+  for (let i = 0; i < 10; i++) { // dirt / dead-grass patches
+    g.fillStyle = i % 2 ? 'rgba(46,38,22,0.4)' : 'rgba(30,34,14,0.45)';
+    g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, 14 + Math.random() * 30, 10 + Math.random() * 22, Math.random() * 3, 0, 7); g.fill();
+  }
+}, 20, 10);
+function drawConcrete(g, w, h) {
+  g.fillStyle = '#26282f'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 1400, ['#2e3038', '#1e2026', '#34363e'], 0.5, 2);
+  g.strokeStyle = 'rgba(10,10,12,0.55)'; g.lineWidth = 2;
+  for (let x = 0; x <= w; x += 85) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle = 'rgba(12,12,14,0.25)';
+    g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, 12 + Math.random() * 26, 8 + Math.random() * 18, Math.random() * 3, 0, 7); g.fill();
+  }
+}
+const concreteGroundTex = mkTex(256, 256, drawConcrete, 16, 1);
+const plazaTex = concreteGroundTex.clone(); plazaTex.repeat.set(2, 2); plazaTex.needsUpdate = true;
+const concreteWallTex = mkTex(256, 256, drawConcrete, 4, 2);
+const brickTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#3c3c40'; g.fillRect(0, 0, w, h); // mortar (light brick tinted by wall color)
+  const bh = 16, bw = 42;
+  for (let row = 0, y = 0; y < h; row++, y += bh) {
+    const off = row % 2 ? bw / 2 : 0;
+    for (let x = -bw; x < w + bw; x += bw) {
+      const v = 190 + Math.floor(Math.random() * 40);
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(x + off + 1.5, y + 1.5, bw - 3, bh - 3);
+      g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x + off + 1.5, y + bh - 5, bw - 3, 3.5);
+    }
+  }
+}, 5, 2);
+const sidingTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#cfcfcf'; g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 16) {
+    const v = 200 + Math.floor(Math.random() * 30);
+    g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(0, y, w, 14);
+    g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, y + 14, w, 2);
+    g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(0, y, w, 1.5);
+  }
+  speckle(g, w, h, 300, ['#9a9a9a'], 0.25, 2);
+}, 5, 2);
+const shingleTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#262932'; g.fillRect(0, 0, w, h);
+  for (let row = 0, y = 0; y < h; row++, y += 32) {
+    const off = row % 2 ? 21 : 0;
+    for (let x = -42; x < w + 42; x += 42) {
+      const v = 34 + Math.floor(Math.random() * 14);
+      g.fillStyle = `rgb(${v},${v + 2},${v + 6})`;
+      g.beginPath(); g.arc(x + off + 21, y + 32, 21, Math.PI, 0); g.fill();
+      g.fillRect(x + off, y + 4, 42, 28);
+      g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(x + off, y + 30, 42, 2);
+    }
+  }
+}, 1, 1);
+const paintWearTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#d2d2d2'; g.fillRect(0, 0, w, h); // light base so paint color multiplies cleanly
+  speckle(g, w, h, 900, ['#e2e2e2', '#b8b8b8'], 0.4, 2);
+  for (let i = 0; i < 26; i++) { // rust blotches
+    const x = Math.random() * w, y = Math.random() * h, r = 6 + Math.random() * 26;
+    const gr = g.createRadialGradient(x, y, 1, x, y, r);
+    gr.addColorStop(0, 'rgba(122,62,26,0.55)'); gr.addColorStop(0.6, 'rgba(96,50,22,0.28)'); gr.addColorStop(1, 'rgba(96,50,22,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  }
+  g.strokeStyle = 'rgba(60,60,60,0.35)'; g.lineWidth = 1; // scratches / grime streaks
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * w, y = Math.random() * h;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 60, y + (Math.random() - 0.5) * 20); g.stroke();
+  }
+}, 1, 1);
+function drawWinFrame(g, w, h, glass) {
+  g.fillStyle = '#14161c'; g.fillRect(0, 0, w, h); // frame
+  g.fillStyle = glass; g.fillRect(10, 10, w - 20, h - 20); // glass
+  g.fillStyle = '#14161c';
+  g.fillRect(w / 2 - 3, 10, 6, h - 20); // muntin vertical
+  g.fillRect(10, h / 2 - 3, w - 20, 6); // muntin horizontal
+  g.fillStyle = 'rgba(255,255,255,0.10)'; // faint reflection streak
+  g.beginPath(); g.moveTo(18, h - 14); g.lineTo(52, 14); g.lineTo(70, 14); g.lineTo(36, h - 14); g.fill();
+  g.fillStyle = '#2e323c'; g.fillRect(4, h - 12, w - 8, 8); // sill
+}
+const winDarkTex = mkTex(128, 160, (g, w, h) => drawWinFrame(g, w, h, '#0d1622'), 1, 1);
+const winLitTex = mkTex(128, 160, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, 0, h);
+  gr.addColorStop(0, '#ffd489'); gr.addColorStop(1, '#c07a2a');
+  drawWinFrame(g, w, h, gr);
+}, 1, 1);
+const winDarkMat = new THREE.MeshStandardMaterial({ map: winDarkTex, roughness: 0.4, metalness: 0.2 });
+const winLitMat = new THREE.MeshStandardMaterial({ map: winLitTex, emissive: 0xffb85c, emissiveMap: winLitTex, emissiveIntensity: 1.1, roughness: 0.6 });
+const doorTex = mkTex(128, 256, (g, w, h) => {
+  g.fillStyle = '#4a3520'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#2c1e10'; g.lineWidth = 5;
+  g.strokeRect(14, 16, w - 28, 92); g.strokeRect(14, 132, w - 28, 92);
+  g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(14, 16, w - 28, 10);
+  g.fillStyle = '#c8b060'; g.beginPath(); g.arc(w - 26, h / 2, 6, 0, 7); g.fill();
+}, 1, 1);
+const doorMat = new THREE.MeshStandardMaterial({ map: doorTex, roughness: 0.9 });
+const roofMat = new THREE.MeshStandardMaterial({ map: shingleTex, roughness: 1 });
+const porchGlowTex = glowTexture('rgba(255,190,90,0.9)', 'rgba(255,150,40,0)');
+const porchBulbMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.6 });
+const carGlassMat = new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.15, metalness: 0.5 });
+const headlightMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffe6a0, emissiveIntensity: 0.8 });
+const taillightMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2211, emissiveIntensity: 0.6 });
+function flatTex(w, d, x, z, y, tex, color) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: tex, color: color || 0xffffff, roughness: 1 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, y, z);
+  scene.add(m);
+  return m;
+}
+
+// ============ ground, road, sidewalks, plaza ============
+function flat(w, d, x, z, y, color) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color, roughness: 1 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, y, z);
+  scene.add(m);
+  return m;
+}
+flatTex(480, 240, 0, 0, 0, grassTex);                 // grass with variation
+flatTex(440, 10, 0, 0, 0.02, asphaltTex);            // Main Street asphalt w/ faded markings
+flatTex(440, 2.4, 0, -6.2, 0.04, concreteGroundTex); // north sidewalk
+flatTex(440, 2.4, 0, 6.2, 0.04, concreteGroundTex);  // south sidewalk
+flatTex(16, 14, 0, 0, 0.03, plazaTex);               // town square plaza
+// curbs along the street edges (visual only, no collider — ground stays flat)
+addBox(440, 0.14, 0.3, 0, 0.07, -5.0, 0x2a2c36);
+addBox(440, 0.14, 0.3, 0, 0.07, 5.0, 0x2a2c36);
+// Cross street at x = 64: a second road running north-south across the whole town
+flatTex(10, 220, 64, 0, 0.02, asphaltTex);
+flatTex(2.4, 220, 57.8, 0, 0.04, concreteGroundTex);
+flatTex(2.4, 220, 70.2, 0, 0.04, concreteGroundTex);
+addBox(0.3, 0.14, 220, 58.8, 0.07, 0, 0x2a2c36);
+addBox(0.3, 0.14, 220, 69.2, 0.07, 0, 0x2a2c36);
+for (let i = 0; i < 5; i++) flat(8, 1.2, 64, -20 + i * 2.2, 0.05, 0x3a3d48);
+for (let i = 0; i < 5; i++) flat(1.2, 8, -30 + i * 2.2, 0, 0.05, 0x3a3d48);
+// crosswalk stripes
+for (let i = 0; i < 5; i++) flat(1.2, 8, -14 + i * 2.2, 0, 0.05, 0x3a3d48);
+// scattered grass / dirt patches off the road
+for (let i = 0; i < 22; i++) {
+  const patch = new THREE.Mesh(new THREE.CircleGeometry(rand(0.8, 2.2), 12),
+    new THREE.MeshStandardMaterial({ color: i % 2 ? 0x0a140c : 0x171208, roughness: 1 }));
+  patch.rotation.x = -Math.PI / 2;
+  const side = Math.random() < 0.5 ? -1 : 1;
+  patch.position.set(rand(-215, 215), 0.01, side * rand(8.5, 105));
+  scene.add(patch);
+}
+
+// ============ sign textures ============
+function signTexture(text, sub, bg, fg) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, 512, 128);
+  g.strokeStyle = fg; g.lineWidth = 6; g.strokeRect(6, 6, 500, 116);
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '800 52px system-ui, sans-serif';
+  g.fillText(text, 256, sub ? 50 : 64);
+  if (sub) { g.font = '600 30px system-ui, sans-serif'; g.fillText(sub, 256, 96); }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function labelSprite(text, color) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64;
+  const g = cv.getContext('2d');
+  g.font = '800 34px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = color; g.fillText(text, 128, 32);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  s.scale.set(1.6, 0.4, 1);
+  return s;
+}
+
+// ============ collision ============
+// AABBs: {x0, x1, z0, z1}. colliders block everyone; furniture blocks only the player.
+const colliders = [];
+const furniture = [];
+function addBox(w, h, d, x, y, z, color, opts) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, ...(opts || {}) }));
+  m.position.set(x, y, z);
+  scene.add(m);
+  return m;
+}
+function collideCircle(p, r, list) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const b of list) {
+      const cx = clamp(p.x, b.x0, b.x1), cz = clamp(p.z, b.z0, b.z1);
+      const dx = p.x - cx, dz = p.z - cz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < r * r) {
+        if (d2 > 1e-8) {
+          const d = Math.sqrt(d2);
+          p.x = cx + dx / d * r; p.z = cz + dz / d * r;
+        } else {
+          // center inside the box: push out along the smallest penetration axis
+          const pl = p.x - b.x0, pr = b.x1 - p.x, pn = p.z - b.z0, pf = b.z1 - p.z;
+          const m = Math.min(pl, pr, pn, pf);
+          if (m === pl) p.x = b.x0 - r; else if (m === pr) p.x = b.x1 + r;
+          else if (m === pn) p.z = b.z0 - r; else p.z = b.z1 + r;
+        }
+      }
+    }
+  }
+}
+function rayVsBox(ox, oy, oz, dx, dy, dz, b, top) {
+  // slab test against an AABB extruded 0..top in y; returns t or Infinity
+  let tmin = 0, tmax = Infinity;
+  const axes = [[ox, dx, b.x0, b.x1], [oy, dy, 0, top], [oz, dz, b.z0, b.z1]];
+  for (const [o, d, lo, hi] of axes) {
+    if (Math.abs(d) < 1e-8) { if (o < lo || o > hi) return Infinity; }
+    else {
+      let t1 = (lo - o) / d, t2 = (hi - o) / d;
+      if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+      if (t1 > tmin) tmin = t1;
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) return Infinity;
+    }
+  }
+  return tmin;
+}
+
+// ============ town: buildings ============
+const BUILDINGS = [
+  { name: 'HOLLOW CREEK DINER', sub: 'EAT', bg: '#5a1f1a', fg: '#ffd9a0', x0: -48, x1: -32, side: 'N', color: 0x6e3b2e, kind: 'diner', weapon: null },
+  { name: "DOC'S PHARMACY", sub: 'DRUGS · FIRST AID', bg: '#14352a', fg: '#d8ffe8', x0: -28, x1: -14, side: 'N', color: 0x4a5248, kind: 'pharmacy', weapon: null },
+  { name: "HANK'S HARDWARE", sub: 'TOOLS', bg: '#3a2a12', fg: '#ffe6a0', x0: -10, x1: 6, side: 'N', color: 0x5d4a30, kind: 'hardware', weapon: 'shotgun' },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 10, x1: 22, side: 'N', color: 0x4e4a55, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 26, x1: 38, side: 'N', color: 0x55504a, kind: 'house', weapon: null },
+  { name: "SHERIFF'S OFFICE", sub: 'HOLLOW CREEK', bg: '#1a2a44', fg: '#d8e4ff', x0: -40, x1: -26, side: 'S', color: 0x3a4252, kind: 'sheriff', weapon: 'rifle' },
+  { name: 'HOLLOW CREEK CHURCH', sub: '', bg: '#3a3a3a', fg: '#f0e8d8', x0: -18, x1: -2, side: 'S', color: 0x4a4642, kind: 'church', weapon: null },
+  { name: 'CREEK GAS', sub: 'MART', bg: '#40200a', fg: '#ffe0b0', x0: 8, x1: 24, side: 'S', color: 0x5d4630, kind: 'gas', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 28, x1: 40, side: 'S', color: 0x4a5058, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 44, x1: 56, side: 'S', color: 0x54484a, kind: 'house', weapon: null },
+  { name: 'HOLLOW CREEK SCHOOL', sub: 'EST. 1962', bg: '#7a2a12', fg: '#ffe8c0', x0: 74, x1: 94, side: 'N', color: 0x6e4a30, kind: 'school', weapon: null },
+  { name: 'PUBLIC LIBRARY', sub: 'READ', bg: '#1a3a52', fg: '#d8ecff', x0: 98, x1: 110, side: 'N', color: 0x4a4a58, kind: 'library', weapon: null },
+  { name: 'HOLLOW CREEK MOTEL', sub: 'VACANCY', bg: '#2a4a3a', fg: '#d8ffe8', x0: -102, x1: -84, side: 'N', color: 0x5a5a48, kind: 'motel', weapon: null },
+  { name: 'POST OFFICE', sub: 'HOLLOW CREEK', bg: '#24344a', fg: '#e8ecff', x0: -80, x1: -66, side: 'N', color: 0x4a525e, kind: 'post', weapon: null },
+  { name: 'FIRST CREEK BANK', sub: '', bg: '#2a3a22', fg: '#e8ffd8', x0: 74, x1: 88, side: 'S', color: 0x4a5240, kind: 'bank', weapon: null },
+  { name: 'CREEK GROCERY', sub: 'FOOD · SUPPLIES', bg: '#5a2a1a', fg: '#ffe0c0', x0: 92, x1: 108, side: 'S', color: 0x5d4630, kind: 'grocery', weapon: null },
+  { name: 'FIRE STATION', sub: 'STATION 7', bg: '#6a1a12', fg: '#ffd8c8', x0: -102, x1: -86, side: 'S', color: 0x5a3830, kind: 'fire', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -82, x1: -70, side: 'S', color: 0x4e4a55, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -64, x1: -52, side: 'S', color: 0x55504a, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -62, x1: -50, side: 'N', color: 0x4a5058, kind: 'house', weapon: null },
+  // DH4 east + west extensions along Main Street (town doubled to x ±220)
+  { name: 'HOLLOW DEPOT', sub: 'RAIL', bg: '#24344a', fg: '#e8ecff', x0: 124, x1: 142, side: 'N', color: 0x4a525e, kind: 'gas', weapon: null },
+  { name: 'CREEK BAKERY', sub: 'BREAD', bg: '#5a3a1a', fg: '#ffe0b0', x0: 146, x1: 164, side: 'N', color: 0x5d4a30, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 168, x1: 182, side: 'N', color: 0x4e4a55, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 186, x1: 200, side: 'N', color: 0x55504a, kind: 'house', weapon: null },
+  { name: 'ROADHOUSE BAR', sub: 'DRINKS', bg: '#3a1a12', fg: '#ffd8c8', x0: 124, x1: 140, side: 'S', color: 0x5a3830, kind: 'gas', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 144, x1: 158, side: 'S', color: 0x4a5058, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: 162, x1: 176, side: 'S', color: 0x54484a, kind: 'house', weapon: null },
+  { name: 'CREEK CLINIC', sub: 'FIRST AID', bg: '#14352a', fg: '#d8ffe8', x0: -196, x1: -178, side: 'N', color: 0x4a5248, kind: 'pharmacy', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -174, x1: -160, side: 'N', color: 0x4e4a55, kind: 'house', weapon: null },
+  { name: 'HOUSE', sub: '', bg: '#2c2c38', fg: '#c9c0ee', x0: -196, x1: -182, side: 'S', color: 0x4a5058, kind: 'house', weapon: null },
+];
+const WALL_H = 3.4, WALL_T = 0.3;
+function buildBuilding(b) {
+  const frontZ = b.side === 'N' ? -7 : 7;
+  const backZ = b.side === 'N' ? -17 : 17;
+  const zMin = Math.min(frontZ, backZ), zMax = Math.max(frontZ, backZ);
+  const cx = (b.x0 + b.x1) / 2, doorW = 2.4, dL = cx - doorW / 2, dR = cx + doorW / 2;
+  const dir = b.side === 'N' ? 1 : -1; // front faces the street (+z for N, -z for S)
+  const wallTex = b.kind === 'diner' || b.kind === 'gas' ? brickTex : b.kind === 'hardware' || b.kind === 'house' ? sidingTex : concreteWallTex;
+  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, color: b.color, roughness: 1 });
+  function wall(x0, x1, z0, z1) {
+    colliders.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), z0: Math.min(z0, z1), z1: Math.max(z0, z1), h: WALL_H });
+    const w = Math.abs(x1 - x0) || WALL_T, d = Math.abs(z1 - z0) || WALL_T;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_H, d), wallMat);
+    m.position.set((x0 + x1) / 2, WALL_H / 2, (z0 + z1) / 2);
+    scene.add(m);
+  }
+  wall(b.x0, b.x1, backZ - dir * WALL_T / 2, backZ + dir * WALL_T / 2); // back
+  wall(b.x0 - WALL_T / 2, b.x0 + WALL_T / 2, zMin, zMax); // left
+  wall(b.x1 - WALL_T / 2, b.x1 + WALL_T / 2, zMin, zMax); // right
+  wall(b.x0, dL, frontZ - WALL_T / 2, frontZ + WALL_T / 2); // front left of door
+  wall(dR, b.x1, frontZ - WALL_T / 2, frontZ + WALL_T / 2); // front right of door
+  // roof: pitched + shingled for houses + church, flat slab + parapet block for shops
+  const bw = b.x1 - b.x0 + 0.8;
+  const mid = (frontZ + backZ) / 2;
+  if (b.kind === 'house' || b.kind === 'church') {
+    const roofH = b.kind === 'church' ? 1.7 : 1.0;
+    const shape = new THREE.Shape();
+    shape.moveTo(-bw / 2, 0); shape.lineTo(bw / 2, 0); shape.lineTo(0, roofH); shape.closePath();
+    const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 10.8, bevelEnabled: false }), roofMat);
+    roof.position.set(cx, WALL_H, mid - 5.4);
+    scene.add(roof);
+    if (b.kind === 'house') {
+      // chimney sitting on the roof slope
+      const ox = bw * 0.3;
+      const slopeY = WALL_H + roofH * (1 - Math.abs(ox) / (bw / 2));
+      addBox(0.5, 0.9, 0.5, cx + ox, slopeY + 0.35, mid, 0x4a3330);
+    } else {
+      // cross on the front gable peak
+      const gz = frontZ + dir * 0.55;
+      addBox(0.09, 0.9, 0.09, cx, WALL_H + roofH + 0.35, gz, 0xd8d2c4);
+      addBox(0.55, 0.09, 0.09, cx, WALL_H + roofH + 0.55, gz, 0xd8d2c4);
+    }
+  } else {
+    addBox(bw, 0.3, 10.8, cx, WALL_H + 0.15, mid, 0x11131a);
+    addBox(bw + 0.2, 0.5, 11.0, cx, WALL_H + 0.55, mid, 0x9a928a); // parapet block (one mesh)
+  }
+  // sign (unchanged texture + street-facing orientation)
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(10, b.x1 - b.x0 - 2), 1.5),
+    new THREE.MeshBasicMaterial({ map: signTexture(b.name, b.sub, b.bg, b.fg) }));
+  sign.position.set(cx, 2.9, frontZ + dir * 0.25);
+  if (b.side === 'S') sign.rotation.y = Math.PI;
+  scene.add(sign);
+  // windows: framed canvas-texture planes (lit = warm glow), front + both side walls
+  function addWin(x, y, z, rotY) {
+    const lit = Math.random() < 0.4;
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 1.0), lit ? winLitMat : winDarkMat);
+    win.position.set(x, y, z); win.rotation.y = rotY; scene.add(win);
+  }
+  for (let i = 0; i < 3; i++) {
+    const wx = b.x0 + (i + 0.5) * (b.x1 - b.x0) / 3;
+    if (Math.abs(wx - cx) < 1.6) continue;
+    addWin(wx, 1.8, frontZ + dir * 0.17, b.side === 'S' ? Math.PI : 0);
+  }
+  addWin(b.x0 - WALL_T / 2 - 0.02, 1.8, zMin + 2.5, -Math.PI / 2);
+  addWin(b.x0 - WALL_T / 2 - 0.02, 1.8, zMax - 2.5, -Math.PI / 2);
+  addWin(b.x1 + WALL_T / 2 + 0.02, 1.8, zMin + 2.5, Math.PI / 2);
+  addWin(b.x1 + WALL_T / 2 + 0.02, 1.8, zMax - 2.5, Math.PI / 2);
+  // door frame + open panels lying flat against the front wall (never block the gap)
+  addBox(0.18, 2.9, WALL_T + 0.2, dL, 1.45, frontZ, 0x2a2018);
+  addBox(0.18, 2.9, WALL_T + 0.2, dR, 1.45, frontZ, 0x2a2018);
+  addBox(doorW + 0.36, 0.25, WALL_T + 0.2, cx, 2.95, frontZ, 0x2a2018);
+  const panelGeo = new THREE.BoxGeometry(1.15, 2.6, 0.06);
+  for (const px of [dL - 0.62, dR + 0.62]) {
+    const p = new THREE.Mesh(panelGeo, doorMat);
+    p.position.set(px, 1.3, frontZ + dir * 0.19);
+    scene.add(p);
+  }
+  // porch light by the door (emissive bulb + warm glow sprite)
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), porchBulbMat);
+  bulb.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
+  scene.add(bulb);
+  if (b.kind !== 'house') { // Quest perf: skip porch glow sprites on houses (bulbs stay)
+    const pglow = new THREE.Sprite(new THREE.SpriteMaterial({ map: porchGlowTex, transparent: true, opacity: 0.3, depthWrite: false }));
+    pglow.scale.set(1.1, 1.1, 1); pglow.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
+    scene.add(pglow);
+  }
+  // interior furniture (player collision only — zombies shamble through it, v1 kink)
+  const fz = (dz) => b.side === 'N' ? -7 - dz : 7 + dz;
+  function furn(w, d, x, dz, color, h) {
+    addBox(w, h || 0.9, d, x, (h || 0.9) / 2, fz(dz), color);
+    furniture.push({ x0: x - w / 2, x1: x + w / 2, z0: Math.min(fz(dz) - d / 2, fz(dz) + d / 2), z1: Math.max(fz(dz) - d / 2, fz(dz) + d / 2) });
+  }
+  if (b.kind === 'diner') {
+    furn(10, 0.8, cx, 8.6, 0x5a4632, 1.0);
+    for (let i = 0; i < 3; i++) furn(1.7, 1.0, cx - 4 + i * 4, 4.5, 0x6b4a3a, 0.75);
+  } else if (b.kind === 'pharmacy' || b.kind === 'hardware' || b.kind === 'gas') {
+    furn(8, 0.7, cx - 2, 4.0, 0x3a3f45, 1.6);
+    furn(8, 0.7, cx + 1, 6.5, 0x3a3f45, 1.6);
+    furn(4, 0.8, cx - 4, 8.6, 0x54402c, 1.0);
+  } else if (b.kind === 'sheriff') {
+    furn(2.0, 1.0, cx - 3, 4.5, 0x3a3f45, 0.8);
+    furn(2.0, 1.0, cx + 3, 4.5, 0x3a3f45, 0.8);
+    furn(5, 0.8, cx, 8.6, 0x54402c, 1.0);
+  } else if (b.kind === 'church') {
+    for (let r = 0; r < 2; r++) for (let i = 0; i < 3; i++) furn(2.2, 0.6, cx - 4 + i * 4, 3.5 + r * 2.2, 0x4a3226, 0.9);
+  } else {
+    furn(1.8, 1.0, cx - 2, 4.5, 0x54402c, 0.75);
+    furn(2.2, 0.9, cx + 2.5, 5.0, 0x2e3a4a, 0.7);
+    furn(1.4, 2.0, cx - 3, 8.0, 0x3a3230, 0.5);
+  }
+}
+BUILDINGS.forEach(buildBuilding);
+
+// map bounds + street-end barricades
+colliders.push({ x0: -220, x1: 220, z0: -110.4, z1: -110, h: 3.4 });
+colliders.push({ x0: -220, x1: 220, z0: 110, z1: 110.4, h: 3.4 });
+colliders.push({ x0: -220.4, x1: -220, z0: -110, z1: 110, h: 3.4 });
+colliders.push({ x0: 220, x1: 220.4, z0: -110, z1: 110, h: 3.4 });
+for (const sx of [-1, 1]) {
+  addBox(0.4, 1.1, 9, sx * 214, 0.55, 0, 0x4a3b22);
+  addBox(0.3, 0.25, 9, sx * 214, 1.1, 0, 0xd8c840);
+  addBox(0.3, 0.25, 9, sx * 214, 0.45, 0, 0xd8c840);
+  colliders.push({ x0: sx * 214 - 0.3, x1: sx * 214 + 0.3, z0: -4.5, z1: 4.5, h: 1.2 });
+}
+
+
+// ============ lake, park, street furniture (bigger town) ============
+const waterTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#0d2a3a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 60; i++) {
+    g.strokeStyle = `rgba(140,200,230,${0.08 + Math.random() * 0.2})`; g.lineWidth = 1 + Math.random() * 2;
+    g.beginPath(); const y = Math.random() * h, x = Math.random() * w;
+    g.moveTo(x, y); g.bezierCurveTo(x + 20, y - 4, x + 40, y + 4, x + 70, y); g.stroke();
+  }
+  speckle(g, w, h, 500, ['#123a4e', '#0a2230'], 0.4, 2);
+}, 6, 4);
+const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25, metalness: 0.35 });
+{ // Hollow Lake, east side: water you cannot walk into (colliders leave a dock corridor)
+  const lake = new THREE.Mesh(new THREE.CircleGeometry(17, 28), waterMat);
+  lake.rotation.x = -Math.PI / 2; lake.position.set(93, 0.06, -25); lake.scale.set(1.25, 0.85, 1); scene.add(lake);
+  const shore = new THREE.Mesh(new THREE.CircleGeometry(18.5, 28), new THREE.MeshStandardMaterial({ color: 0x8a7a52, roughness: 1 }));
+  shore.rotation.x = -Math.PI / 2; shore.position.set(93, 0.03, -25); shore.scale.set(1.25, 0.85, 1); scene.add(shore);
+  lake.position.y = 0.06; // water sits just above the sand ring edge
+  colliders.push({ x0: 80, x1: 110, z0: -36, z1: -27, h: 1 });
+  colliders.push({ x0: 80, x1: 110, z0: -23, z1: -14, h: 1 });
+  const reedMat = new THREE.MeshStandardMaterial({ color: 0x2a4a22, roughness: 1 });
+  const reedGeo = new THREE.CylinderGeometry(0.02, 0.035, 1.1, 5);
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2, r = 19 + Math.random() * 2;
+    const rx = 93 + Math.cos(a) * r * 1.25, rz = -25 + Math.sin(a) * r * 0.85;
+    if (rx > 220 || rz < -110) continue;
+    const reed = new THREE.Mesh(reedGeo, reedMat);
+    reed.position.set(rx, 0.55, rz); reed.rotation.z = rand(-0.25, 0.25); scene.add(reed);
+  }
+  // small wooden dock reaching in from the west shore (walkable corridor z -27..-23)
+  for (let i = 0; i < 6; i++) addBox(1.6, 0.12, 2.6, 75 + i * 1.7, 0.12, -25, 0x5a4632);
+  addBox(0.18, 0.9, 0.18, 84, 0.45, -26.2, 0x3a2e22);
+  addBox(0.18, 0.9, 0.18, 84, 0.45, -23.8, 0x3a2e22);
+}
+{ // Creekside Park, north-west: grass, trees, benches, playground, paths
+  flatTex(34, 20, -78, -33, 0.03, grassTex);
+  flat(3, 20, -78, -33, 0.04, 0x2a2c36); // paths
+  flat(34, 2.5, -78, -33, 0.04, 0x2a2c36);
+  const benchGeo = new THREE.BoxGeometry(1.8, 0.1, 0.5);
+  const benchMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
+  for (const [bx, bz] of [[-88, -28], [-68, -28], [-78, -40]]) {
+    const b = new THREE.Mesh(benchGeo, benchMat); b.position.set(bx, 0.5, bz); scene.add(b);
+    furniture.push({ x0: bx - 0.9, x1: bx + 0.9, z0: bz - 0.25, z1: bz + 0.25 });
+  }
+  // playground: swing frame + two swings, slide with ladder
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a3a4a, roughness: 0.5, metalness: 0.4 });
+  const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 2.4, 8);
+  for (const px of [-86, -82]) { const p = new THREE.Mesh(postGeo, frameMat); p.position.set(px, 1.2, -38); scene.add(p); }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 4.4, 8), frameMat);
+  bar.rotation.z = Math.PI / 2; bar.position.set(-84, 2.4, -38); scene.add(bar);
+  for (const sx of [-85.5, -82.5]) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.3), benchMat);
+    seat.position.set(sx, 0.7, -38); scene.add(seat);
+  }
+  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 3.2), new THREE.MeshStandardMaterial({ color: 0xb03030, roughness: 0.6 }));
+  slide.position.set(-72, 0.9, -38); slide.rotation.x = -0.45; scene.add(slide);
+  addBox(0.5, 1.6, 0.5, -72, 0.8, -39.8, 0x2a3a4a);
+  // park trees (rounded foliage, reused geometry)
+  const parkTrunk = new THREE.CylinderGeometry(0.16, 0.26, 3.2, 8);
+  const parkTrunkMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
+  const parkLeaf = new THREE.SphereGeometry(1.9, 12, 10);
+  const parkLeafMat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
+  for (const [tx, tz] of [[-92, -42], [-64, -42], [-92, -24], [-64, -24], [-78, -44]]) {
+    const tr = new THREE.Mesh(parkTrunk, parkTrunkMat); tr.position.set(tx, 1.6, tz); scene.add(tr);
+    const lf = new THREE.Mesh(parkLeaf, parkLeafMat); lf.position.set(tx, 4.0, tz); lf.scale.y = 1.25; scene.add(lf);
+    const lf2 = new THREE.Mesh(parkLeaf, parkLeafMat); lf2.position.set(tx + 0.7, 3.2, tz); lf2.scale.setScalar(0.7); scene.add(lf2);
+  }
+  // low wooden fence along the park's south edge
+  for (let x = -94; x <= -62; x += 4) addBox(0.14, 0.9, 0.14, x, 0.45, -22.5, 0x6a5a40);
+  addBox(32, 0.1, 0.1, -78, 0.75, -22.5, 0x6a5a40);
+}
+// fire hydrants, mailboxes, fences (shared, cheap)
+{
+  const hydGeo = new THREE.CylinderGeometry(0.16, 0.18, 0.7, 10);
+  const hydMat = new THREE.MeshStandardMaterial({ color: 0xa02020, roughness: 0.6 });
+  const hydTop = new THREE.SphereGeometry(0.17, 10, 8);
+  for (const [hx, hz] of [[-8, 5.6], [24, -5.6], [58, 5.6], [-58, -5.6], [90, 5.6]]) {
+    const h = new THREE.Mesh(hydGeo, hydMat); h.position.set(hx, 0.35, hz); scene.add(h);
+    const t = new THREE.Mesh(hydTop, hydMat); t.position.set(hx, 0.75, hz); scene.add(t);
+  }
+  const mbGeo = new THREE.BoxGeometry(0.5, 0.3, 0.3);
+  const mbMat = new THREE.MeshStandardMaterial({ color: 0x2a4a6a, roughness: 0.6, metalness: 0.3 });
+  const postGeo2 = new THREE.BoxGeometry(0.1, 0.9, 0.1);
+  const postMat2 = new THREE.MeshStandardMaterial({ color: 0x4a3a28, roughness: 1 });
+  for (const [mx2, mz2] of [[12, -6.8], [30, 6.8], [-60, -6.8], [80, 6.8], [-90, -6.8]]) {
+    const p2 = new THREE.Mesh(postGeo2, postMat2); p2.position.set(mx2, 0.45, mz2); scene.add(p2);
+    const m2 = new THREE.Mesh(mbGeo, mbMat); m2.position.set(mx2, 0.95, mz2); scene.add(m2);
+  }
+}
+
+
+// ============ DH4: doubled-town districts + Hollow Woods forest ============
+// Two more cross streets (north-south) for the doubled town, plus a second
+// park, a second pond, a churchyard, and a rail crossing at the depot.
+// Shared geometries/materials throughout; no shadow maps.
+for (const cx2 of [-128, 180]) {
+  flatTex(10, 220, cx2, 0, 0.02, asphaltTex);
+  flatTex(2.4, 220, cx2 - 6.2, 0, 0.04, concreteGroundTex);
+  flatTex(2.4, 220, cx2 + 6.2, 0, 0.04, concreteGroundTex);
+  addBox(0.3, 0.14, 220, cx2 - 5.2, 0.07, 0, 0x2a2c36);
+  addBox(0.3, 0.14, 220, cx2 + 5.2, 0.07, 0, 0x2a2c36);
+  for (let i = 0; i < 5; i++) flat(1.2, 8, cx2 - 4.4 + i * 2.2, 0, 0.05, 0x3a3d48);
+}
+{ // East park (second park/plaza) at x ~160, z ~-33
+  flatTex(30, 18, 160, -33, 0.03, grassTex);
+  const bGeo = new THREE.BoxGeometry(1.8, 0.1, 0.5);
+  const bMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
+  for (const [bx, bz] of [[152, -28], [168, -28], [160, -40]]) {
+    const b = new THREE.Mesh(bGeo, bMat); b.position.set(bx, 0.5, bz); scene.add(b);
+    furniture.push({ x0: bx - 0.9, x1: bx + 0.9, z0: bz - 0.25, z1: bz + 0.25 });
+  }
+}
+{ // Second pond, south-west at (-160, 45): water you cannot walk into
+  const pond = new THREE.Mesh(new THREE.CircleGeometry(12, 24), waterMat);
+  pond.rotation.x = -Math.PI / 2; pond.position.set(-160, 0.06, 45); pond.scale.set(1.3, 0.9, 1); scene.add(pond);
+  const sand = new THREE.Mesh(new THREE.CircleGeometry(13.5, 24), new THREE.MeshStandardMaterial({ color: 0x8a7a52, roughness: 1 }));
+  sand.rotation.x = -Math.PI / 2; sand.position.set(-160, 0.03, 45); sand.scale.set(1.3, 0.9, 1); scene.add(sand);
+  colliders.push({ x0: -176, x1: -144, z0: 34, z1: 56, h: 1 });
+}
+{ // Churchyard stones near the church (south side, x -18..-2, z 22..36)
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6a6a72, roughness: 1 });
+  const stoneGeo = new THREE.BoxGeometry(0.6, 0.9, 0.15);
+  for (let i = 0; i < 8; i++) {
+    const st = new THREE.Mesh(stoneGeo, stoneMat);
+    st.position.set(-16 + (i % 4) * 4, 0.45, 24 + Math.floor(i / 4) * 6);
+    st.rotation.y = rand(-0.2, 0.2); st.rotation.z = rand(-0.12, 0.12); scene.add(st);
+  }
+}
+{ // Rail crossing at the depot (rails run north-south, crossing Main at x = 133)
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.4, metalness: 0.7 });
+  for (const rz of [-0.8, 0.8]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 220), railMat);
+    rail.position.set(133 + rz, 0.08, 0); scene.add(rail);
+  }
+  for (let z = -108; z <= 108; z += 6) addBox(3.4, 0.08, 1.2, 133, 0.05, z, 0x4a3524);
+}
+{ // HOLLOW WOODS — walkable forest, north-west: x -215..-135, z -105..-50.
+  // Trees are spaced ~7-8 m apart on a jittered grid so the player can walk
+  // between them; trunk colliders are small (0.3 m) and foliage sits high
+  // (leaf centres ~4.2 m) so it never blocks view or movement.
+  flatTex(80, 55, -175, -77, 0.03, grassTex);
+  const fTrunkGeo = new THREE.CylinderGeometry(0.18, 0.3, 3.6, 8);
+  const fTrunkMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
+  const fLeafGeo = new THREE.SphereGeometry(2.0, 12, 10);
+  const fLeafMat = new THREE.MeshStandardMaterial({ color: 0x16261a, roughness: 1 });
+  const fLeafMat2 = new THREE.MeshStandardMaterial({ color: 0x1e3320, roughness: 1 });
+  const fBushGeo = new THREE.SphereGeometry(0.7, 10, 8);
+  const fBushMat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
+  for (let gx = -212; gx <= -138; gx += 7) {
+    for (let gz = -102; gz <= -53; gz += 8) {
+      const tx = gx + rand(-1.8, 1.8), tz = gz + rand(-2, 2);
+      if (Math.abs(tx + 175) < 5 && Math.abs(tz + 77) < 5) continue; // keep the main clearing open
+      const tr = new THREE.Mesh(fTrunkGeo, fTrunkMat); tr.position.set(tx, 1.8, tz); scene.add(tr);
+      const lf = new THREE.Mesh(fLeafGeo, (gx + gz) % 2 ? fLeafMat : fLeafMat2);
+      lf.position.set(tx, 4.3, tz); lf.scale.y = 1.3; scene.add(lf);
+      colliders.push({ x0: tx - 0.3, x1: tx + 0.3, z0: tz - 0.3, z1: tz + 0.3, h: 3.6 });
+    }
+  }
+  // Winding dirt paths through the forest (flat planes, rotated in plan view)
+  function dirtPath(x, z, w, d, rotZ) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: 0x3a2e20, roughness: 1 }));
+    m.rotation.x = -Math.PI / 2; m.rotation.z = rotZ; m.position.set(x, 0.04, z); scene.add(m);
+  }
+  dirtPath(-175, -77, 78, 2.6, 0.12); dirtPath(-195, -88, 30, 2.4, -0.5);
+  dirtPath(-155, -66, 30, 2.4, 0.6); dirtPath(-175, -95, 40, 2.4, 0.05);
+  // Clearings, fallen logs, stumps, bushes, mushrooms, rocks
+  for (const [cx, cz] of [[-175, -77], [-195, -65]]) {
+    const cl = new THREE.Mesh(new THREE.CircleGeometry(6, 20), new THREE.MeshStandardMaterial({ color: 0x1a2e14, roughness: 1 }));
+    cl.rotation.x = -Math.PI / 2; cl.position.set(cx, 0.05, cz); scene.add(cl);
+  }
+  const logGeo = new THREE.CylinderGeometry(0.35, 0.4, 4, 10);
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 1 });
+  for (const [lx, lz, lr] of [[-185, -70, 0.7], [-165, -88, -0.4], [-200, -80, 1.2]]) {
+    const log = new THREE.Mesh(logGeo, logMat);
+    log.rotation.z = Math.PI / 2; log.rotation.y = lr; log.position.set(lx, 0.35, lz); scene.add(log);
+  }
+  const stumpGeo = new THREE.CylinderGeometry(0.5, 0.6, 0.7, 10);
+  for (const [sx, sz] of [[-170, -72], [-190, -92], [-160, -80]]) {
+    const st = new THREE.Mesh(stumpGeo, logMat); st.position.set(sx, 0.35, sz); scene.add(st);
+  }
+  for (let i = 0; i < 18; i++) {
+    const b = new THREE.Mesh(fBushGeo, fBushMat);
+    b.position.set(rand(-212, -138), 0.4, rand(-102, -53)); b.scale.y = 0.7; scene.add(b);
+  }
+  const mushStem = new THREE.CylinderGeometry(0.06, 0.08, 0.25, 6);
+  const mushCap = new THREE.SphereGeometry(0.22, 8, 6);
+  const mushCapMat = new THREE.MeshStandardMaterial({ color: 0xa03028, roughness: 1 });
+  for (let i = 0; i < 10; i++) {
+    const mx = rand(-210, -140), mz = rand(-100, -55);
+    const st2 = new THREE.Mesh(mushStem, fTrunkMat); st2.position.set(mx, 0.12, mz); scene.add(st2);
+    const cp = new THREE.Mesh(mushCap, mushCapMat); cp.position.set(mx, 0.28, mz); cp.scale.y = 0.6; scene.add(cp);
+  }
+  const rockGeo = new THREE.SphereGeometry(0.6, 8, 6);
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x5a5a60, roughness: 1 });
+  for (const [rx, rz] of [[-180, -62], [-205, -95], [-150, -70]]) {
+    const rk = new THREE.Mesh(rockGeo, rockMat); rk.position.set(rx, 0.25, rz); rk.scale.y = 0.6; scene.add(rk);
+  }
+  // Entrance sign at the south edge of the forest, facing the town
+  const fsign = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05), new THREE.MeshBasicMaterial({ map: signTexture('HOLLOW WOODS', 'TRAIL', '#1a2e18', '#d8ffe8') }));
+  fsign.position.set(-140, 2.2, -49); scene.add(fsign);
+  addBox(0.14, 2.2, 0.14, -142, 1.1, -49, 0x4a3524);
+  addBox(0.14, 2.2, 0.14, -138, 1.1, -49, 0x4a3524);
+}
+
+// ============ cars, lamps, trees, stains, square ============
+const carColors = [0x5a2e22, 0x3a3d42, 0x22384a, 0x4a3b28, 0x1c1c20, 0x4a2020, 0x37402e, 0x2e2a33];
+const carSpots = [[-24, -2.5, 0.3], [-8, 2.8, -0.2], [14, -3, 0.5], [30, 2.5, -0.4], [-40, 3, 0.15], [44, -2, 0.9], [52, 3.2, -0.3], [-55, -1, 0.2]];
+const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 12);
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 });
+const hubGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.26, 10);
+const hubMat = new THREE.MeshStandardMaterial({ color: 0x8a8d92, roughness: 0.4, metalness: 0.6 });
+const bumperGeo = new THREE.BoxGeometry(0.14, 0.18, 1.72);
+const bumperMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5, metalness: 0.4 });
+// lower body: side profile with hood/trunk shaping + beveled edges (no more slab)
+const bodyShape = new THREE.Shape();
+bodyShape.moveTo(-2.15, 0.30); bodyShape.lineTo(-2.15, 0.66); bodyShape.lineTo(-1.20, 0.78);
+bodyShape.lineTo(1.15, 0.78); bodyShape.lineTo(2.15, 0.60); bodyShape.lineTo(2.15, 0.30);
+bodyShape.closePath();
+const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, { depth: 1.58, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 2 });
+bodyGeo.translate(0, 0, -0.79);
+// cabin: sloped windshield + rear-window profile, beveled edges
+const cabShape = new THREE.Shape();
+cabShape.moveTo(-1.15, 0.78); cabShape.lineTo(-0.82, 1.32); cabShape.lineTo(0.45, 1.32); cabShape.lineTo(0.88, 0.78);
+cabShape.closePath();
+const cabGeo = new THREE.ExtrudeGeometry(cabShape, { depth: 1.42, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2 });
+cabGeo.translate(0, 0, -0.71);
+const sideGlassGeo = new THREE.BoxGeometry(1.45, 0.34, 0.02);
+const shieldGeo = new THREE.BoxGeometry(0.69, 0.02, 1.30); // sloped windshield pane
+const rearGlassGeo = new THREE.BoxGeometry(0.63, 0.02, 1.30); // sloped rear pane
+const lampBoxGeo = new THREE.BoxGeometry(0.08, 0.16, 0.36);
+carSpots.forEach(([x, z, rot], i) => {
+  const g = new THREE.Group();
+  const paintMat = new THREE.MeshStandardMaterial({ map: paintWearTex, color: carColors[i], roughness: 0.65, metalness: 0.25 });
+  g.add(new THREE.Mesh(bodyGeo, paintMat));
+  g.add(new THREE.Mesh(cabGeo, paintMat));
+  for (const sz of [1, -1]) { // dark side-window insets
+    const sg = new THREE.Mesh(sideGlassGeo, carGlassMat);
+    sg.position.set(-0.14, 1.08, sz * 0.77); g.add(sg);
+  }
+  const shield = new THREE.Mesh(shieldGeo, carGlassMat); // windshield on the front slope
+  shield.position.set(0.665, 1.05, 0); shield.rotation.z = 2.243; g.add(shield);
+  const rear = new THREE.Mesh(rearGlassGeo, carGlassMat); // rear window on the back slope
+  rear.position.set(-0.985, 1.05, 0); rear.rotation.z = 1.022; g.add(rear);
+  for (const sz of [1, -1]) { // headlights + taillights (dim emissive: readable at night)
+    const hl = new THREE.Mesh(lampBoxGeo, headlightMat); hl.position.set(2.22, 0.55, sz * 0.55); g.add(hl);
+    const tl = new THREE.Mesh(lampBoxGeo, taillightMat); tl.position.set(-2.22, 0.55, sz * 0.55); g.add(tl);
+  }
+  for (const sx of [1, -1]) {
+    const b1 = new THREE.Mesh(bumperGeo, bumperMat); b1.position.set(sx * 2.22, 0.38, 0); g.add(b1);
+  }
+  [[1.35, 0.9], [1.35, -0.9], [-1.35, 0.9], [-1.35, -0.9]].forEach(([wx, wz]) => {
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.x = Math.PI / 2; w.position.set(wx, 0.34, wz); g.add(w);
+    const hub = new THREE.Mesh(hubGeo, hubMat);
+    hub.rotation.x = Math.PI / 2; hub.position.set(wx, 0.34, wz); g.add(hub);
+  });
+  g.position.set(x, 0, z); g.rotation.y = rot;
+  scene.add(g);
+  // axis-aligned bounds from rotated corners (UNCHANGED footprint: 4.6 x 2.2, h 1.6)
+  const c = Math.cos(rot), s = Math.sin(rot), hx = 2.3, hz = 1.1;
+  const corners = [[hx, hz], [hx, -hz], [-hx, hz], [-hx, -hz]].map(([px, pz]) => [x + px * c + pz * s, z - px * s + pz * c]);
+  colliders.push({ x0: Math.min(...corners.map(p => p[0])), x1: Math.max(...corners.map(p => p[0])), z0: Math.min(...corners.map(p => p[1])), z1: Math.max(...corners.map(p => p[1])), h: 1.6 });
+});
+const lampGlowTex = glowTexture('rgba(255,190,90,0.9)', 'rgba(255,150,40,0)');
+const sharedLampPoleMat = new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 1 });
+const sharedLampHeadMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 });
+const lamps = [];
+[[-50, -5.2], [-25, 5.2], [0, -5.2], [25, 5.2], [50, -5.2], [-85, -5.2], [-85, 5.2], [85, -5.2], [85, 5.2], [64, -35], [64, 35], [-100, -5.2], [100, 5.2]].forEach(([x, z], i) => {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.4, 8), sharedLampPoleMat);
+  pole.position.set(x, 2.2, z); scene.add(pole);
+  const headMat = i === 2 ? new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 }) : sharedLampHeadMat; // only the flickering lamp needs its own material
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.3), headMat);
+  head.position.set(x, 4.45, z); scene.add(head);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, transparent: true, opacity: 0.55, depthWrite: false }));
+  glow.scale.set(3.2, 3.2, 1); glow.position.set(x, 4.35, z); scene.add(glow);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), porchBulbMat);
+  bulb.position.set(x, 4.32, z); scene.add(bulb);
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(3.4, 20),
+    new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0.18, depthWrite: false }));
+  pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.05, z); scene.add(pool);
+  lamps.push({ headMat, glow, pool, flicker: i === 2, t: 0 });
+});
+const sharedLeafMat = new THREE.MeshStandardMaterial({ color: 0x16240f, roughness: 1 });
+const sharedLeaf2Mat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
+for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62, -12]]) {
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 3.4, 7), new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 }));
+  trunk.position.set(x, 1.7, z); scene.add(trunk);
+  for (let i = 0; i < 2; i++) {
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.08, 1.8, 6), new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 }));
+    br.position.set(x + rand(-0.8, 0.8), 3.2 + i * 0.7, z + rand(-0.8, 0.8));
+    br.rotation.z = rand(-0.9, 0.9); br.rotation.x = rand(-0.9, 0.9);
+    scene.add(br);
+  }
+  const leaf = new THREE.Mesh(new THREE.SphereGeometry(1.7, 12, 10), sharedLeafMat);
+  leaf.position.set(x, 4.6, z); leaf.scale.y = 1.3; scene.add(leaf);
+  const leaf2 = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), sharedLeaf2Mat);
+  leaf2.position.set(x + 0.6, 3.6, z + 0.4); scene.add(leaf2);
+}
+for (let i = 0; i < 7; i++) {
+  const stain = new THREE.Mesh(new THREE.CircleGeometry(rand(0.5, 1.1), 10), new THREE.MeshStandardMaterial({ color: 0x2a0505, roughness: 1 }));
+  stain.rotation.x = -Math.PI / 2; stain.rotation.z = Math.random() * Math.PI;
+  stain.position.set(rand(-55, 55), 0.06, rand(-4, 4));
+  scene.add(stain);
+}
+// square monument + benches
+addBox(1.2, 2.6, 1.2, 0, 1.3, -2.5, 0x2a2d36);
+addBox(2.2, 0.3, 2.2, 0, 0.15, -2.5, 0x23252e);
+addBox(1.8, 0.45, 0.5, -3.5, 0.45, 2.5, 0x3a2e22);
+addBox(1.8, 0.45, 0.5, 3.5, 0.45, 2.5, 0x3a2e22);
+furniture.push({ x0: -0.7, x1: 0.7, z0: -3.2, z1: -1.8 }, { x0: -4.4, x1: -2.6, z0: 2.2, z1: 2.8 }, { x0: 2.6, x1: 4.4, z0: 2.2, z1: 2.8 });
+
+// ============ weapons: dual wield, unlimited ammo, no reloading ============
+// MARKER-DH2-DUALWIELD-UNLIMITED
+const WEAPONS = {
+  pistol: { label: 'PISTOL', dmg: 1, rate: 0.28, spread: 0.012, pellets: 1, melee: false },
+  shotgun: { label: 'SHOTGUN', dmg: 1, rate: 0.9, spread: 0.085, pellets: 6, melee: false },
+  rifle: { label: 'RIFLE', dmg: 3, rate: 0.45, spread: 0.003, pellets: 1, melee: false },
+  axe: { label: 'AXE', dmg: 99, rate: 0.7, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  knife: { label: 'KNIFE', dmg: 99, rate: 0.35, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  katana: { label: 'KATANA', dmg: 99, rate: 0.85, spread: 0, pellets: 1, melee: true, range: 2.6 },
+  machete: { label: 'MACHETE', dmg: 99, rate: 0.4, spread: 0, pellets: 1, melee: true, range: 2.2 },
+  sniper: { label: 'SNIPER', dmg: 8, rate: 1.2, spread: 0.001, pellets: 1, melee: false },
+};
+const WEAPON_ORDER = ['pistol', 'shotgun', 'rifle', 'axe', 'knife', 'katana', 'machete', 'sniper'];
+const owned = { pistol: true, shotgun: false, rifle: false, axe: false, knife: false, katana: false, machete: false, sniper: false };
+const handWeapon = { right: 'pistol', left: null };
+const handCooldown = { right: 0, left: 0 };
+const handSwing = { right: 0, left: 0 };
+const gunMounts = { right: new THREE.Group(), left: new THREE.Group() };
+const HANDS = ['right', 'left'];
+scene.add(gunMounts.right, gunMounts.left);
+const steelMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.35, metalness: 0.7 });
+const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x141418, roughness: 0.5, metalness: 0.5 });
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.9 });
+const gripMat = new THREE.MeshStandardMaterial({ color: 0x2e1c10, roughness: 0.95 });
+function buildHandWeapon(hand) {
+  const mount = gunMounts[hand];
+  while (mount.children.length) mount.remove(mount.children[0]);
+  mount.userData.flash = null;
+  const name = handWeapon[hand];
+  if (!name) return;
+  const g = new THREE.Group();
+  const box = (w, h, d, mat, x, y, z, rz) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); if (rz) m.rotation.z = rz; g.add(m); return m;
+  };
+  const cyl = (rt, rb, len, mat, x, y, z, rx) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, 12), mat);
+    m.position.set(x, y, z); if (rx) m.rotation.x = rx; g.add(m); return m;
+  };
+  if (name === 'pistol') {
+    box(0.07, 0.09, 0.24, darkMetalMat, 0, 0, 0); // frame
+    box(0.06, 0.05, 0.27, steelMat, 0, 0.055, 0.01); // slide
+    cyl(0.018, 0.018, 0.1, steelMat, 0, 0.02, 0.17, Math.PI / 2); // barrel
+    box(0.055, 0.14, 0.07, gripMat, 0, -0.09, -0.09, 0.25); // grip
+    box(0.05, 0.06, 0.02, darkMetalMat, 0, -0.055, 0.05); // trigger guard
+    box(0.02, 0.02, 0.03, steelMat, 0, 0.085, 0.12); // front sight
+  } else if (name === 'shotgun') {
+    cyl(0.024, 0.024, 0.55, steelMat, 0, 0.03, 0.22, Math.PI / 2); // long barrel
+    cyl(0.032, 0.032, 0.2, darkMetalMat, 0, -0.02, 0.12, Math.PI / 2); // pump
+    box(0.07, 0.09, 0.3, darkMetalMat, 0, 0, -0.08); // receiver
+    box(0.06, 0.12, 0.28, woodMat, 0, -0.01, -0.32); // wooden stock
+  } else if (name === 'rifle') {
+    cyl(0.02, 0.02, 0.6, steelMat, 0, 0.02, 0.28, Math.PI / 2); // barrel
+    box(0.07, 0.1, 0.34, darkMetalMat, 0, 0, -0.05); // receiver
+    cyl(0.025, 0.025, 0.14, darkMetalMat, 0, 0.08, 0.02, Math.PI / 2); // scope
+    box(0.05, 0.14, 0.06, darkMetalMat, 0, -0.1, -0.02, 0.2); // magazine
+    box(0.06, 0.11, 0.26, woodMat, 0, -0.01, -0.3); // stock
+  } else if (name === 'axe') {
+    cyl(0.022, 0.026, 0.55, woodMat, 0, 0, 0.05, Math.PI / 2); // wooden handle
+    box(0.03, 0.16, 0.2, steelMat, 0, 0.06, 0.3); // steel head
+    box(0.035, 0.1, 0.05, steelMat, 0, 0.06, 0.22); // head wedge
+  } else if (name === 'knife') {
+    box(0.015, 0.05, 0.34, steelMat, 0, 0, 0.22); // steel blade
+    box(0.05, 0.06, 0.04, darkMetalMat, 0, 0, 0.04); // guard
+    cyl(0.024, 0.024, 0.14, gripMat, 0, 0, -0.05, Math.PI / 2); // grip
+  } else if (name === 'katana') {
+    box(0.018, 0.07, 0.72, steelMat, 0, 0, 0.42); // long blade
+    box(0.09, 0.09, 0.03, darkMetalMat, 0, 0, 0.05); // round guard
+    cyl(0.024, 0.024, 0.26, gripMat, 0, 0, -0.1, Math.PI / 2); // wrapped two-hand grip
+  } else if (name === 'machete') {
+    box(0.025, 0.13, 0.52, steelMat, 0, 0, 0.34); // broad blade
+    box(0.04, 0.06, 0.18, woodMat, 0, 0, 0.0); // handle
+  } else if (name === 'sniper') {
+    cyl(0.022, 0.022, 0.85, steelMat, 0, 0.03, 0.32, Math.PI / 2); // long barrel
+    cyl(0.045, 0.045, 0.3, darkMetalMat, 0, 0.1, -0.05, Math.PI / 2); // scope tube
+    cyl(0.055, 0.055, 0.1, darkMetalMat, 0, 0.1, 0.12, Math.PI / 2); // scope bell
+    box(0.07, 0.1, 0.3, darkMetalMat, 0, 0, -0.1); // receiver
+    box(0.06, 0.13, 0.3, woodMat, 0, -0.02, -0.36); // stock
+    box(0.05, 0.05, 0.12, darkMetalMat, 0, -0.08, 0.05); // bipod stub
+  }
+  mount.add(g);
+  if (!WEAPONS[name].melee) {
+    const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(255,220,120,1)', 'rgba(255,120,0,0)'), transparent: true, opacity: 0, depthWrite: false }));
+    flash.scale.set(0.4, 0.4, 1);
+    flash.position.set(0, 0.02, name === 'pistol' ? 0.3 : name === 'shotgun' ? 0.55 : name === 'sniper' ? 0.85 : 0.62);
+    g.add(flash);
+    mount.userData.flash = flash;
+  }
+}
+buildHandWeapon('right');
+buildHandWeapon('left');
+
+// DH5: laser sights — thin red beam from each gun's muzzle along the exact
+// firing ray (same mount transform fireHand uses). Shared geometry/material;
+// updated every frame in tick().
+const laserGeo = new THREE.CylinderGeometry(0.005, 0.005, 1, 6);
+const laserMat = new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.55, depthWrite: false });
+const laserMeshes = { right: new THREE.Mesh(laserGeo, laserMat), left: new THREE.Mesh(laserGeo, laserMat) };
+const UP_Y = new THREE.Vector3(0, 1, 0);
+scene.add(laserMeshes.right, laserMeshes.left);
+laserMeshes.right.visible = laserMeshes.left.visible = false;
+
+// In-VR stick debug readout: attached to the camera, low in view, VR only.
+// Diagnostic only — it hides permanently once the player has moved > 2 metres.
+let movedTotal = 0, debugDone = false;
+const debugCanvas = document.createElement('canvas'); debugCanvas.width = 512; debugCanvas.height = 256;
+const debugCtx = debugCanvas.getContext('2d');
+const debugTex = new THREE.CanvasTexture(debugCanvas); debugTex.colorSpace = THREE.SRGBColorSpace;
+const debugSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: debugTex, transparent: true, depthTest: false }));
+debugSprite.scale.set(0.95, 0.48, 1);
+debugSprite.position.set(0, -0.45, -1.1);
+debugSprite.renderOrder = 997;
+debugSprite.visible = false;
+camera.add(debugSprite);
+function updateDebugText(lx, ly, rx, ry, mx, mz, camYawDeg, grpYawDeg) {
+  if (debugDone) return;
+  if (!renderer.xr.isPresenting) { debugSprite.visible = false; return; }
+  if (movedTotal > 2) { debugSprite.visible = false; debugDone = true; return; }
+  debugSprite.visible = true;
+  const g = debugCtx;
+  g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, 512, 256);
+  g.fillStyle = '#eaffea'; g.font = '700 26px monospace'; g.textAlign = 'left';
+  g.fillText('STICK DEBUG (hides after 2m moved)', 16, 36);
+  g.font = '400 24px monospace';
+  g.fillText('L axes: ' + lx.toFixed(2) + ' , ' + ly.toFixed(2), 16, 76);
+  g.fillText('R axes: ' + rx.toFixed(2) + ' , ' + ry.toFixed(2), 16, 112);
+  g.fillText('move: ' + mx.toFixed(2) + ' , ' + mz.toFixed(2), 16, 148);
+  g.fillText('pos: ' + playerGroup.position.x.toFixed(1) + ' , ' + playerGroup.position.z.toFixed(1) + ' | cam ' + (camYawDeg || 0).toFixed(0) + ' grp ' + (grpYawDeg || 0).toFixed(0), 16, 184);
+  g.fillText('moved: ' + movedTotal.toFixed(2) + ' m', 16, 220);
+  debugTex.needsUpdate = true;
+}
+
+// ============ particles (pooled) ============
+const particles = [];
+{
+  const pGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+  for (let i = 0; i < 40; i++) {
+    const m = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ color: 0x5a0a0a }));
+    m.visible = false; scene.add(m);
+    particles.push({ m, vel: new THREE.Vector3(), life: 0 });
+  }
+}
+let pNext = 0;
+function spawnBurst(p, n, color, speed) {
+  for (let i = 0; i < n; i++) {
+    const pt = particles[pNext]; pNext = (pNext + 1) % particles.length;
+    pt.m.visible = true;
+    pt.m.material.color.setHex(color);
+    pt.m.position.copy(p);
+    pt.vel.set(rand(-1, 1), rand(0.5, 2), rand(-1, 1)).normalize().multiplyScalar(rand(0.5, 1) * speed);
+    pt.life = rand(0.3, 0.6);
+  }
+}
+function updateParticles(dt) {
+  for (const pt of particles) {
+    if (pt.life <= 0) continue;
+    pt.life -= dt;
+    if (pt.life <= 0) { pt.m.visible = false; continue; }
+    pt.vel.y -= 6 * dt;
+    pt.m.position.addScaledVector(pt.vel, dt);
+  }
+}
+
+// ============ zombies ============
+const ZTYPES = {
+  // DH4: dead skin — pale grey-green, never healthy. Eye glow by type.
+  walker: { hp: 3, speed: 1.15, scale: 1, skin: 0x8a9684, shirt: 0x2a2d33, eye: 0xff2222 },
+  runner: { hp: 2, speed: 2.6, scale: 0.95, skin: 0x7d8a72, shirt: 0x4a2020, eye: 0xffaa22 },
+  brute: { hp: 10, speed: 0.85, scale: 1.35, skin: 0x6e7d68, shirt: 0x1c1c24, eye: 0xff5522 },
+};
+// Human proportions: tapered limbs pivoted at hip/shoulder, elliptical torso.
+// Hitbox anchors are preserved exactly: head center y 1.68, body center y 1.1.
+const legGeo = new THREE.CapsuleGeometry(0.095, 0.5, 4, 10); legGeo.translate(0, -0.36, 0);
+const shoeGeo = new THREE.BoxGeometry(0.13, 0.09, 0.26);
+const shoeMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
+const torsoGeo = new THREE.SphereGeometry(0.32, 14, 12); torsoGeo.scale(1, 1.35, 0.62); // rounded torso, not a slab
+const neckGeo = new THREE.CylinderGeometry(0.09, 0.10, 0.14, 8);
+const headGeo = new THREE.SphereGeometry(0.19, 12, 10); headGeo.scale(1, 1.15, 0.95);
+const noseGeo = new THREE.BoxGeometry(0.07, 0.09, 0.08);
+const armUpGeo = new THREE.CapsuleGeometry(0.075, 0.24, 4, 10); armUpGeo.translate(0, -0.17, 0);
+const armLoGeo = new THREE.CapsuleGeometry(0.055, 0.22, 4, 10); armLoGeo.translate(0, -0.16, 0);
+const handGeo = new THREE.SphereGeometry(0.065, 8, 6);
+// DH4: rounded bodies, not boxes — capsule/sphere geometry throughout (torso
+// is a scaled sphere, head a sphere, limbs tapered cylinders with sphere
+// hands). Hit spheres are UNCHANGED (head y 1.68, body y 1.1 in fire code),
+// so the rounder look never changes hit fairness.
+const eyeGeo = new THREE.SphereGeometry(0.04, 8, 6);
+const socketGeo = new THREE.SphereGeometry(0.058, 8, 6);
+const socketMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+const eyeMats = {};
+for (const k in ZTYPES) eyeMats[k] = new THREE.MeshBasicMaterial({ color: ZTYPES[k].eye, toneMapped: false });
+const skinPalette = [0x93a08a, 0x7f8a76, 0xa89a86, 0x6f7f6a, 0x8f9a7e].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+const pantsPalette = [0x1e2126, 0x26221e, 0x1a222b, 0x2a2018].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+const bloodMat = new THREE.MeshStandardMaterial({ color: 0x3a0808, roughness: 1 });
+const bloodGeo = new THREE.SphereGeometry(0.13, 8, 6);
+const typeMats = {};
+for (const k in ZTYPES) {
+  const base = new THREE.Color(ZTYPES[k].shirt);
+  typeMats[k] = {
+    shirt: new THREE.MeshStandardMaterial({ color: ZTYPES[k].shirt, roughness: 1 }),
+    torn: new THREE.MeshStandardMaterial({ color: base.clone().multiplyScalar(0.55), roughness: 1 }),
+  };
+}
+const zombies = [];
+function spawnZombie(type) {
+  const t = ZTYPES[type];
+  const grp = new THREE.Group();
+  const skinMat = skinPalette[Math.floor(Math.random() * skinPalette.length)];
+  const pantsMat = pantsPalette[Math.floor(Math.random() * pantsPalette.length)];
+  // DH4 variation: torn/darker shirt on some zombies, and one exposed
+  // (skin) sleeve on others — texture/material variation only, no extra
+  // meshes for the torn look, so zombies stop looking like clones.
+  const torn = Math.random() < 0.45;
+  const shirtMat = torn ? typeMats[type].torn : typeMats[type].shirt;
+  const tornArm = Math.random() < 0.4 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+  const eyeMat = eyeMats[type];
+  function leg(side) { // hip-pivoted group: tapered pant leg + shoe
+    const lg = new THREE.Group();
+    lg.position.set(0.14 * side, 0.72, 0);
+    lg.add(new THREE.Mesh(legGeo, pantsMat));
+    const shoe = new THREE.Mesh(shoeGeo, shoeMat);
+    shoe.position.set(0, -0.70, 0.04);
+    lg.add(shoe);
+    grp.add(lg);
+    return lg;
+  }
+  function arm(side) { // shoulder-pivoted group: sleeve + skin forearm + rounded hand
+    const ag = new THREE.Group();
+    ag.position.set(0.36 * side, 1.40, 0);
+    ag.add(new THREE.Mesh(armUpGeo, side === tornArm ? skinMat : shirtMat)); // torn sleeve = exposed arm
+    const fore = new THREE.Mesh(armLoGeo, skinMat); fore.position.y = -0.34; ag.add(fore);
+    const hand = new THREE.Mesh(handGeo, skinMat); hand.position.y = -0.68; ag.add(hand);
+    grp.add(ag);
+    return ag;
+  }
+  const legL = leg(-1), legR = leg(1);
+  const torso = new THREE.Mesh(torsoGeo, shirtMat); torso.position.y = 1.11; grp.add(torso);
+  // Dark blood patch on the torso (one shared geometry/material, 1 mesh)
+  const blood = new THREE.Mesh(bloodGeo, bloodMat);
+  blood.position.set(rand(-0.12, 0.12), rand(1.0, 1.3), 0.19); blood.scale.set(rand(0.8, 1.4), rand(0.8, 1.4), 0.25); grp.add(blood);
+  const neck = new THREE.Mesh(neckGeo, skinMat); neck.position.y = 1.52; grp.add(neck);
+  const armL = arm(-1), armR = arm(1);
+  const head = new THREE.Mesh(headGeo, skinMat); head.position.y = 1.68; grp.add(head);
+  const nose = new THREE.Mesh(noseGeo, skinMat); nose.position.set(0, 1.65, 0.185); grp.add(nose);
+  // Dark sunken sockets with glowing eyes (per-type colour)
+  for (const sx of [-1, 1]) {
+    const sock = new THREE.Mesh(socketGeo, socketMat); sock.position.set(0.075 * sx, 1.71, 0.15); grp.add(sock);
+    const eye = new THREE.Mesh(eyeGeo, eyeMat); eye.position.set(0.075 * sx, 1.71, 0.175); grp.add(eye);
+  }
+  grp.scale.setScalar(t.scale);
+  scene.add(grp);
+  zombies.push({ grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL, legR, armL, armR, head, torso, tilt: rand(-0.25, 0.25) });
+}
+const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [-20, -22], [20, 22], [-62, -10], [62, 12], [-100, 0], [104, 0], [-90, -32], [90, 32], [-70, 40], [70, 40], [-20, -45], [20, 45], [-105, 25], [105, -45], [64, -40], [64, 42], [-40, -45], [40, -45], [200, 0], [-200, 0], [160, 40], [-160, -40], [200, 45], [-200, 45], [140, -45], [-140, 60], [180, -60], [-180, 80], [64, -90], [-128, 90], [-180, -70], [-200, -90], [-150, -85], [-210, -60], [-165, -100]];
+const playerPos = new THREE.Vector3(0, 0, 0);
+const playerCollide = { x: 0, z: 0 }; // reused every frame: no per-frame object in tick()
+const zombieCollide = { x: 0, z: 0 };
+let wave = 0, waveToSpawn = 0, waveTimer = 2.5, waveSpawning = false, spawnTimer = 0, kills = 0;
+// DH5: zombie WAVES. Wave N fields 6 + N*3 zombies (queued beyond the
+// concurrent-alive cap of 12), spawning faster and moving faster each wave.
+// 4s breather between waves with a "WAVE N INCOMING" banner + horn.
+// Runner/brute mix, hit spheres, and the >25m spawn rule are unchanged.
+function spawnDirector(dt) {
+  const active = zombies.filter(z => !z.dead).length;
+  if (!waveSpawning) {
+    waveTimer -= dt;
+    if (waveTimer <= 0) {
+      wave++;
+      waveToSpawn = 6 + wave * 3;
+      waveSpawning = true;
+      spawnTimer = 0.5;
+      showBanner('WAVE ' + wave + ' INCOMING', 2500);
+      hornSound();
+    }
+    return;
+  }
+  spawnTimer -= dt;
+  if (spawnTimer <= 0 && waveToSpawn > 0 && active < 12) {
+    spawnTimer = Math.max(2.6 - wave * 0.15, 0.8);
+    const far = SPAWNS.filter(([x, z]) => Math.hypot(x - playerPos.x, z - playerPos.z) > 25);
+    const [sx, sz] = (far.length ? far : SPAWNS)[Math.floor(Math.random() * (far.length ? far.length : SPAWNS.length))];
+    let type = 'walker';
+    if (kills >= 8) type = Math.random() < 0.2 ? 'runner' : 'walker';
+    if (kills >= 20) { const r = Math.random(); type = r < 0.1 ? 'brute' : r < 0.4 ? 'runner' : 'walker'; }
+    spawnZombie(type);
+    const z = zombies[zombies.length - 1];
+    z.speed *= Math.min(1 + wave * 0.04, 1.4); // later waves are faster (capped 1.4x)
+    z.grp.position.set(sx, 0, sz);
+    waveToSpawn--;
+  }
+  if (waveToSpawn <= 0 && active <= 0) {
+    waveSpawning = false;
+    waveTimer = 4;
+    showBanner('WAVE ' + wave + ' CLEARED', 2200);
+  }
+}
+
+// ============ pickups ============
+const pickups = [];
+function addPickup(kind, x, z) {
+  const g = new THREE.Group();
+  let label = '';
+  if (kind === 'shotgun') {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.9), new THREE.MeshStandardMaterial({ color: 0x2a1c10, roughness: 0.7 }));
+    g.add(b); label = 'SHOTGUN';
+  } else if (kind === 'rifle') {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.15), new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.5, metalness: 0.4 }));
+    g.add(b); label = 'RIFLE';
+  } else if (kind === 'axe') {
+    const h = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.9 }));
+    h.rotation.x = Math.PI / 2; g.add(h);
+    const hd = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.26), new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.35, metalness: 0.7 }));
+    hd.position.set(0, 0.1, 0.32); g.add(hd); label = 'AXE';
+  } else if (kind === 'knife') {
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.45), new THREE.MeshStandardMaterial({ color: 0x9aa2ae, roughness: 0.25, metalness: 0.8 }));
+    bl.position.z = 0.25; g.add(bl);
+    const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.18, 8), new THREE.MeshStandardMaterial({ color: 0x2e1c10, roughness: 0.95 }));
+    gr.rotation.x = Math.PI / 2; gr.position.z = -0.05; g.add(gr); label = 'KNIFE';
+  } else if (kind === 'katana') {
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.08, 0.85), new THREE.MeshStandardMaterial({ color: 0xb8c0cc, roughness: 0.2, metalness: 0.85 }));
+    bl.position.z = 0.42; g.add(bl);
+    const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 8), new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.9 }));
+    gr.rotation.x = Math.PI / 2; gr.position.z = -0.12; g.add(gr); label = 'KATANA';
+  } else if (kind === 'machete') {
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.15, 0.6), new THREE.MeshStandardMaterial({ color: 0x9aa2ae, roughness: 0.3, metalness: 0.8 }));
+    bl.position.z = 0.32; g.add(bl);
+    const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.18, 8), new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.9 }));
+    gr.rotation.x = Math.PI / 2; gr.position.z = -0.02; g.add(gr); label = 'MACHETE';
+  } else if (kind === 'sniper') {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 1.25), new THREE.MeshStandardMaterial({ color: 0x1c1e24, roughness: 0.5, metalness: 0.4 }));
+    g.add(b);
+    const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.34, 10), new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.4, metalness: 0.6 }));
+    sc.rotation.x = Math.PI / 2; sc.position.y = 0.11; g.add(sc); label = 'SNIPER';
+  } else if (kind === 'ammo') {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.24), new THREE.MeshStandardMaterial({ color: 0x2a4a22, roughness: 0.8 }));
+    g.add(b); label = 'SUPPLY';
+  } else if (kind === 'medkit') {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.26, 0.26), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.6 }));
+    g.add(b);
+    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.06, 0.02), new THREE.MeshBasicMaterial({ color: 0xcc2222 }));
+    c1.position.z = 0.14; g.add(c1);
+    const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.02), new THREE.MeshBasicMaterial({ color: 0xcc2222 }));
+    c2.position.z = 0.14; g.add(c2);
+    label = 'MEDKIT';
+  } else if (kind === 'food') {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.7 }));
+    g.add(b); label = 'FOOD';
+  }
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(140,255,170,0.85)', 'rgba(60,255,120,0)'), transparent: true, opacity: 0.6, depthWrite: false }));
+  glow.scale.set(1.4, 1.4, 1); g.add(glow);
+  const lab = labelSprite(label, '#eaffea'); lab.position.y = 0.55; g.add(lab);
+  // DH4: tall glowing beacon beam on every weapon pickup, so it is visible
+  // from far across the (now doubled) town. Hidden automatically on pickup
+  // because the whole pickup group is hidden (p.grp.visible = false).
+  if (kind === 'shotgun' || kind === 'rifle' || kind === 'axe' || kind === 'knife' || kind === 'katana' || kind === 'machete' || kind === 'sniper') {
+    const beamColor = kind === 'shotgun' ? 0xffc040 : kind === 'rifle' ? 0x40c0ff : kind === 'axe' ? 0xff7020 :
+      kind === 'knife' ? 0x60ff80 : kind === 'katana' ? 0xb040ff : kind === 'machete' ? 0xff3030 : 0xe8ecff; // DH5: katana purple, machete red, sniper white
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 9, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: beamColor, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide }));
+    beam.position.y = 4.5; g.add(beam);
+    lab.scale.set(3.2, 0.8, 1); lab.position.y = 1.1;
+    glow.scale.set(3, 3, 1);
+  }
+  g.position.set(x, 0.7, z);
+  scene.add(g);
+  pickups.push({ grp: g, kind, taken: false, phase: Math.random() * 6 });
+}
+// weapons in their homes
+addPickup('shotgun', -2, -15.6);
+addPickup('rifle', -33, 15.6);
+addPickup('axe', 0, -9.5);
+addPickup('knife', -46.5, -13.5);
+addPickup('machete', 3.5, -9.5); // DH5: Hank's Hardware, front aisle (next to the axe)
+addPickup('katana', 104, -9.5); // DH5: Public Library, main room
+addPickup('sniper', -94, 15.6); // DH5: Fire Station, back room
+// ammo / health / food scattered around town
+for (const [k, x, z] of [
+  ['ammo', -40, -12], ['ammo', -20, -12], ['ammo', 16, 12], ['ammo', 16, -12], ['ammo', -10, 12], ['ammo', 50, 12],
+  ['medkit', -21, -15], ['medkit', -10, 14.5], ['medkit', -38, -14],
+  ['food', -44, -11], ['food', 12, 13], ['food', 32, -12], ['food', 34, 13],
+]) addPickup(k, x, z);
+
+// ============ audio (synthesized, no assets) ============
+let AC = null, masterGain = null;
+function startAudio() {
+  if (AC) { AC.resume(); return; }
+  try {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = AC.createGain(); masterGain.gain.value = 0.5; masterGain.connect(AC.destination);
+    const len = AC.sampleRate * 2;
+    const buf = AC.createBuffer(1, len, AC.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = AC.createBufferSource(); src.buffer = buf; src.loop = true;
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 400;
+    const g = AC.createGain(); g.gain.value = 0.05;
+    src.connect(lp); lp.connect(g); g.connect(masterGain); src.start();
+    const dg = AC.createGain(); dg.gain.value = 0.02; dg.connect(masterGain);
+    for (const f of [55, 55.7]) {
+      const o = AC.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      o.connect(dg); o.start();
+    }
+  } catch (e) { /* audio unavailable */ }
+}
+function blip(freq, dur, vol, type, slideTo, delay) {
+  if (!AC) return;
+  const t = AC.currentTime + (delay || 0);
+  const o = AC.createOscillator(); o.type = type || 'sine';
+  o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.linearRampToValueAtTime(slideTo, t + dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.linearRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(masterGain);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function noiseBurst(dur, vol, filterFreq) {
+  if (!AC) return;
+  const len = Math.floor(AC.sampleRate * dur);
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = filterFreq;
+  const g = AC.createGain(); g.gain.value = vol;
+  src.connect(lp); lp.connect(g); g.connect(masterGain); src.start();
+}
+function shotSound(type) {
+  // Distinct per weapon, pitch varied slightly every shot so fire never sounds looped.
+  // Peak volumes are unchanged from before — no louder overall.
+  const v = rand(0.92, 1.08);
+  if (type === 'shotgun') { // deep boom: low body + long low noise tail
+    noiseBurst(0.4, 0.5, 700); blip(70 * v, 0.3, 0.4, 'sine', 35); blip(50, 0.2, 0.25, 'sine', 30, 0.05);
+  } else if (type === 'rifle') { // louder crack with more body than the pistol
+    noiseBurst(0.16, 0.45, 2600); blip(210 * v, 0.1, 0.28, 'square', 80); noiseBurst(0.08, 0.2, 1200);
+  } else if (type === 'sniper') { // DH5: loud long crack — heavy body + drawn-out echo tail
+    noiseBurst(0.25, 0.55, 1800); blip(160 * v, 0.18, 0.35, 'sawtooth', 60);
+    blip(150 * v, 0.25, 0.12, 'sine', 70, 0.12); noiseBurst(0.1, 0.22, 900);
+  } else { // pistol: sharp crack + short echo tail (two quiet delayed repeats)
+    noiseBurst(0.09, 0.35, 3400); blip(310 * v, 0.06, 0.2, 'square', 120);
+    blip(300 * v, 0.12, 0.08, 'sine', 140, 0.09); blip(300 * v, 0.12, 0.04, 'sine', 140, 0.18);
+  }
+}
+function groanSound(vol) {
+  if (!AC) return;
+  const t = AC.currentTime;
+  const o = AC.createOscillator(); o.type = 'sawtooth';
+  o.frequency.setValueAtTime(rand(42, 62), t);
+  o.frequency.linearRampToValueAtTime(rand(30, 45), t + 0.7);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.15); g.gain.linearRampToValueAtTime(0, t + 0.8);
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 300;
+  o.connect(lp); lp.connect(g); g.connect(masterGain);
+  o.start(t); o.stop(t + 0.85);
+}
+function hitSound() { blip(120, 0.12, 0.25, 'sine', 60); noiseBurst(0.05, 0.15, 800); }
+function pickupSound() { blip(660, 0.1, 0.2, 'sine'); blip(990, 0.14, 0.2, 'sine', null, 0.09); }
+// no reload: unlimited ammo, so no reload sound is used
+function thumpSound(delay) { blip(50, 0.16, 0.5, 'sine', 35, delay); }
+function hornSound() { // DH5: two low horn blasts announce a wave
+  if (!AC) return;
+  blip(98, 0.5, 0.4, 'sawtooth', 65); blip(147, 0.5, 0.3, 'sawtooth', 98);
+  blip(98, 0.5, 0.4, 'sawtooth', 65, 0.55); blip(147, 0.5, 0.3, 'sawtooth', 98, 0.55);
+}
+
+// ============ HUD / banner / damage ============
+const hptext = document.getElementById('hptext'), hpfill = document.getElementById('hpfill');
+const weapontext = document.getElementById('weapontext'), leftweapontext = document.getElementById('leftweapontext');
+const killtext = document.getElementById('killtext'), bannerEl = document.getElementById('banner');
+const wavetext = document.getElementById('wavetext'), wavelefttext = document.getElementById('wavelefttext');
+const modetext = document.getElementById('modetext');
+let bannerT = 0;
+function showBanner(text, ms) { bannerEl.textContent = text; bannerEl.style.opacity = 1; bannerT = (ms || 2200) / 1000; }
+function updateHUD() {
+  hptext.textContent = Math.max(0, Math.ceil(hp));
+  hpfill.style.width = Math.max(0, hp) + '%';
+  weapontext.textContent = handWeapon.right ? WEAPONS[handWeapon.right].label : 'EMPTY';
+  leftweapontext.textContent = handWeapon.left ? WEAPONS[handWeapon.left].label : 'EMPTY';
+  killtext.textContent = kills;
+  wavetext.textContent = wave > 0 ? wave : '—';
+  wavelefttext.textContent = waveSpawning ? (waveToSpawn + zombies.filter(z => !z.dead).length) : '—';
+}
+let hp = 100, hurtCd = 0, shakeT = 0, blackoutT = -1;
+const hurtMat = new THREE.MeshBasicMaterial({ color: 0xcc0000, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
+const hurtQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), hurtMat);
+hurtQuad.position.z = -0.35; hurtQuad.renderOrder = 998; camera.add(hurtQuad);
+const blackMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
+const blackQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), blackMat);
+blackQuad.position.z = -0.34; blackQuad.renderOrder = 999; camera.add(blackQuad);
+// MARKER-DH4-RUN-FOREST: comfort vignette — a camera-attached plane with a
+// radial-gradient texture (clear centre, dark soft edges), so it is visible
+// inside the headset, not only as a DOM overlay (DOM HUD is invisible in VR).
+const vigCanvas = document.createElement('canvas'); vigCanvas.width = vigCanvas.height = 256;
+{
+  const vg = vigCanvas.getContext('2d');
+  const grad = vg.createRadialGradient(128, 128, 40, 128, 128, 128);
+  grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(0.55, 'rgba(0,0,0,0)');
+  grad.addColorStop(0.85, 'rgba(0,0,0,0.85)'); grad.addColorStop(1, 'rgba(0,0,0,1)');
+  vg.fillStyle = grad; vg.fillRect(0, 0, 256, 256);
+}
+const vigTex = new THREE.CanvasTexture(vigCanvas);
+const vigMat = new THREE.MeshBasicMaterial({ map: vigTex, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
+const vigQuad = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), vigMat);
+vigQuad.position.z = -0.35; vigQuad.renderOrder = 996; camera.add(vigQuad);
+// DH5: sniper scope — crosshair overlay (canvas drawn once), camera-attached.
+// Holding GRIP (squeeze) on the hand holding the sniper narrows FOV to ~30
+// for ~3x zoom + shows this reticle; releasing restores the normal view.
+// Honest limit: a real magnified scope lens can't work inside WebXR, so the
+// zoom is a view zoom + reticle (same approach as Longshot VR).
+const chCanvas = document.createElement('canvas'); chCanvas.width = chCanvas.height = 256;
+{
+  const g = chCanvas.getContext('2d');
+  g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = 4;
+  g.beginPath(); g.arc(128, 128, 46, 0, 7); g.stroke();
+  g.beginPath();
+  g.moveTo(128, 20); g.lineTo(128, 100); g.moveTo(128, 156); g.lineTo(128, 236);
+  g.moveTo(20, 128); g.lineTo(100, 128); g.moveTo(156, 128); g.lineTo(236, 128);
+  g.stroke();
+  g.fillStyle = 'rgba(255,60,60,0.95)'; g.beginPath(); g.arc(128, 128, 5, 0, 7); g.fill();
+}
+const chTex = new THREE.CanvasTexture(chCanvas);
+const crossQuad = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1),
+  new THREE.MeshBasicMaterial({ map: chTex, transparent: true, depthTest: false, toneMapped: false }));
+crossQuad.position.z = -0.35; crossQuad.renderOrder = 995; crossQuad.visible = false;
+camera.add(crossQuad);
+let scoped = false;
+let vigOpacity = 0, prevRunning = false;
+// DH5: haptics — pulse the firing hand's controller actuator. Quest touch
+// controllers expose gamepad.hapticActuators[0].playEffect('dual-rumble').
+// Feature-detected: silently skipped on desktop or unsupported hardware.
+function hapticPulse(hand, durMs, intensity) {
+  const gp = handGamepad[hand];
+  if (!gp || !gp.hapticActuators || !gp.hapticActuators.length) return;
+  try {
+    const a = gp.hapticActuators[0];
+    if (a && a.playEffect) {
+      const p = a.playEffect('dual-rumble', { duration: durMs, strongMagnitude: intensity, weakMagnitude: intensity * 0.6 });
+      if (p && p.catch) p.catch(() => {});
+    }
+  } catch (e) { /* haptics unavailable — ignore */ }
+}
+function damagePlayer(d) {
+  if (hurtCd > 0 || blackoutT >= 0) return;
+  hp -= d; hurtCd = 0.8; hurtMat.opacity = 0.55; shakeT = 0.35;
+  hitSound();
+  hapticPulse('left', 120, 0.8); hapticPulse('right', 120, 0.8); // DH5: damage buzz
+  if (hp <= 0) { hp = 0; blackoutT = 0; }
+  updateHUD();
+}
+
+// ============ input ============
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyQ') cycleHandWeapon('right');
+  if (e.code === 'KeyE') cycleHandWeapon('left');
+  if (e.code === 'Digit1') switchHandWeapon('right', 'pistol');
+  if (e.code === 'Digit2') switchHandWeapon('right', 'shotgun');
+  if (e.code === 'Digit3') switchHandWeapon('right', 'rifle');
+  if (e.code === 'Digit4') switchHandWeapon('right', 'axe');
+  if (e.code === 'Digit5') switchHandWeapon('right', 'knife');
+  if (e.code === 'Digit6') switchHandWeapon('right', 'katana');
+  if (e.code === 'Digit7') switchHandWeapon('right', 'machete');
+  if (e.code === 'Digit8') switchHandWeapon('right', 'sniper');
+});
+addEventListener('keyup', e => keys[e.code] = false);
+let mouseDown = false, dragging = false, lastMX = 0, lastMY = 0, pitch = 0;
+let scopeMouse = false; // DH5: hold right mouse button = sniper scope on desktop
+const dom = renderer.domElement;
+dom.addEventListener('contextmenu', e => e.preventDefault()); // right-click scopes, never menus
+dom.addEventListener('mousedown', e => {
+  if (e.button === 2) { scopeMouse = true; return; } // right button is scope, not fire
+  mouseDown = true; dragging = true; lastMX = e.clientX; lastMY = e.clientY;
+  if (mode === 'play' && !renderer.xr.isPresenting && document.pointerLockElement !== dom) {
+    const pr = dom.requestPointerLock();
+    if (pr && pr.catch) pr.catch(() => {});
+  }
+});
+addEventListener('mouseup', e => { if (e.button === 2) scopeMouse = false; else { mouseDown = false; dragging = false; } });
+addEventListener('mousemove', e => {
+  if (mode !== 'play' || renderer.xr.isPresenting) return;
+  if (document.pointerLockElement === dom) {
+    yaw -= e.movementX * 0.0022;
+    pitch = clamp(pitch - e.movementY * 0.0022, -1.2, 1.2);
+  } else if (dragging) {
+    yaw -= (e.clientX - lastMX) * 0.005;
+    pitch = clamp(pitch - (e.clientY - lastMY) * 0.005, -1.2, 1.2);
+    lastMX = e.clientX; lastMY = e.clientY;
+  }
+});
+// MARKER-DH3-GUNSYNC: controllers ride INSIDE the moving rig (playerGroup),
+// so their pose — and any gun mounted on them — inherits rig movement + yaw.
+// Previously the guns were scene-root objects positioned from the controller's
+// reference-space matrixWorld each frame, so they stayed at spawn while the
+// player walked. Now each hand's gun mount is a child of its controller.
+const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
+playerGroup.add(ctlL, ctlR);
+let rightCtl = null, leftCtl = null;
+[ctlL, ctlR].forEach(c => {
+  c.addEventListener('connected', e => { if (e.data.handedness === 'right') rightCtl = c; if (e.data.handedness === 'left') leftCtl = c; });
+  c.addEventListener('disconnected', () => { if (rightCtl === c) rightCtl = null; if (leftCtl === c) leftCtl = null; });
+});
+let prevCycleL = false, prevCycleR = false, snapCd = 0, snapArm = true; // DH4: snap turn is INSTANT (comfort) — easing removed
+const handGamepad = { left: null, right: null }; // DH5: per-hand gamepad refs for haptics + grip
+// MARKER-DH2-MOVEFIX
+const pairBuf = { x: 0, y: 0 };
+function pickPair(axes) {
+  // Some Quest profiles report the thumbstick on axes (0,1), others on (2,3).
+  // Take whichever pair is being pushed harder; writes into pairBuf (no per-frame array).
+  const m1 = Math.hypot(axes[0] || 0, axes[1] || 0);
+  const m2 = axes.length > 3 ? Math.hypot(axes[2] || 0, axes[3] || 0) : 0;
+  if (m2 > m1) { pairBuf.x = axes[2] || 0; pairBuf.y = axes[3] || 0; }
+  else { pairBuf.x = axes[0] || 0; pairBuf.y = axes[1] || 0; }
+}
+function dead(v) { return Math.abs(v) < 0.15 ? 0 : v; }
+function pollInput(dt) {
+  let fireL = false, fireR = false, mx = 0, mz = 0, lx = 0, ly = 0, rx = 0, ry = 0, running = false;
+  let gripL = false, gripR = false; // DH5: squeeze button per hand (sniper scope)
+  handGamepad.left = handGamepad.right = null; // refreshed every frame from live sources
+  if (keys['KeyW'] || keys['ArrowUp']) mz += 1;
+  if (keys['KeyS'] || keys['ArrowDown']) mz -= 1;
+  if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
+  if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
+  if (mouseDown && !renderer.xr.isPresenting) fireR = true;
+  if (keys['ShiftLeft'] || keys['ShiftRight']) running = true; // desktop run: hold Shift
+  let cycleL = false, cycleR = false, axisSeen = false;
+  const applyHand = (hand, axes, buttons, gp) => {
+    pickPair(axes); const ax = pairBuf.x, ay = pairBuf.y;
+    const dx = dead(ax), dy = dead(ay);
+    if (dx !== 0 || dy !== 0) axisSeen = true;
+    if (hand === 'left') {
+      lx = dx; ly = dy;
+      mx = dx; mz += -dy; // left stick: strafe + forward/back
+    } else if (hand === 'right') {
+      rx = dx; ry = dy;
+      mz += -dy; // right stick Y ALSO walks forward/back (covers the wrong-stick case)
+      if (Math.abs(dx) > 0.7) {
+        if (snapArm && snapCd <= 0) { yaw -= Math.sign(dx) * Math.PI / 4; snapCd = 0.25; snapArm = false; } // instant 45-degree snap: no smooth-turn sickness
+      } else if (Math.abs(dx) < 0.3) snapArm = true;
+    }
+    if (buttons && buttons[0] && buttons[0].value > 0.35) {
+      if (hand === 'left') fireL = true; else fireR = true;
+    }
+    // DH5: grip (squeeze, buttons[1]) — held with the sniper equipped = aim down sights.
+    if (buttons && buttons[1] && buttons[1].pressed) {
+      if (hand === 'left') gripL = true; else gripR = true;
+    }
+    if (gp) handGamepad[hand] = gp; // DH5: stash live gamepad for haptics
+    // DH4 run: hold the LEFT thumbstick click (buttons[3]) while moving.
+    // Full-forward stick alone is still walk only — running is opt-in.
+    if (hand === 'left' && buttons && buttons[3] && buttons[3].pressed) running = true;
+    if (buttons && buttons[4] && buttons[4].pressed) {
+      if (hand === 'left') cycleL = true; else cycleR = true;
+    }
+  };
+  if (renderer.xr.isPresenting) {
+    const session = renderer.xr.getSession();
+    if (session) {
+      for (const src of session.inputSources) {
+        const gp = src.gamepad; if (!gp) continue;
+        if (gp.axes && gp.axes.length > 1) applyHand(src.handedness, gp.axes, gp.buttons, gp);
+      }
+    }
+    // Fallback: controller objects' gamepads, if the session sources gave nothing.
+    if (!axisSeen) {
+      for (const [c, hand] of [[leftCtl, 'left'], [rightCtl, 'right'], [ctlL, 'left'], [ctlR, 'right']]) {
+        if (!c) continue;
+        const gp = c.gamepad || (c.userData && c.userData.inputSource && c.userData.inputSource.gamepad);
+        if (gp && gp.axes && gp.axes.length > 1) applyHand(hand, gp.axes, gp.buttons, gp);
+      }
+    }
+    snapCd = Math.max(0, snapCd - dt);
+  }
+  if (cycleL && !prevCycleL) cycleHandWeapon('left');
+  if (cycleR && !prevCycleR) cycleHandWeapon('right');
+  prevCycleL = cycleL; prevCycleR = cycleR;
+  const len = Math.hypot(mx, mz);
+  if (len > 1) { mx /= len; mz /= len; }
+  return { fire: { left: fireL, right: fireR }, mx, mz, lx, ly, rx, ry, running, grip: { left: gripL, right: gripR } };
+}
+
+// ============ weapons: switch ============
+function switchHandWeapon(hand, name) {
+  if (!owned[name]) return;
+  const other = hand === 'right' ? 'left' : 'right';
+  if (handWeapon[other] === name) { // same weapon on both hands: swap instead of duplicating
+    const cur = handWeapon[hand];
+    handWeapon[other] = cur; handWeapon[hand] = name;
+    buildHandWeapon('right'); buildHandWeapon('left');
+  } else {
+    handWeapon[hand] = name;
+    buildHandWeapon(hand);
+  }
+  handCooldown[hand] = 0.2;
+  showBanner(WEAPONS[name].label + (hand === 'left' ? ' — LEFT' : ' — RIGHT'), 1200);
+  updateHUD();
+}
+function cycleHandWeapon(hand) {
+  const other = hand === 'right' ? 'left' : 'right';
+  const list = WEAPON_ORDER.filter(w => owned[w] && w !== handWeapon[other]);
+  if (!list.length) return;
+  const cur = handWeapon[hand];
+  const next = cur === null || !list.includes(cur) ? list[0] : list[(list.indexOf(cur) + 1) % list.length];
+  switchHandWeapon(hand, next);
+}
+const aimPoints = { right: new THREE.Vector3(0, 1.6, -14), left: new THREE.Vector3(0, 1.6, -14) };
+const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion(), tmpDir = new THREE.Vector3();
+const camForward = new THREE.Vector3(), camRight = new THREE.Vector3();
+function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
+  const lx = cx - ox, ly = cy - oy, lz = cz - oz;
+  const tca = lx * dx + ly * dy + lz * dz;
+  if (tca < 0) return Infinity;
+  const d2 = lx * lx + ly * ly + lz * lz - tca * tca;
+  if (d2 > r * r) return Infinity;
+  return tca - Math.sqrt(r * r - d2);
+}
+function killZombie(z) {
+  z.dead = true; z.deadT = 0; kills++;
+  tmpB.copy(z.grp.position); tmpB.y += 1;
+  spawnBurst(tmpB, 10, 0x5a0a0a, 3);
+  updateHUD();
+}
+function whooshSound(dur, vol) {
+  // Filtered-noise whoosh: bandpass sweeps up then down. Synthesized, no assets.
+  if (!AC) return;
+  const len = Math.floor(AC.sampleRate * dur);
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2;
+  const t = AC.currentTime;
+  bp.frequency.setValueAtTime(400, t);
+  bp.frequency.linearRampToValueAtTime(2000, t + dur * 0.5);
+  bp.frequency.linearRampToValueAtTime(500, t + dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + dur * 0.4); g.gain.linearRampToValueAtTime(0, t + dur);
+  src.connect(bp); bp.connect(g); g.connect(masterGain); src.start(t); src.stop(t + dur + 0.02);
+}
+function swingSound(kind) {
+  if (kind === 'knife') whooshSound(0.14, 0.16); // quick swish
+  else if (kind === 'katana') whooshSound(0.22, 0.2); // katana: longer whoosh, ring lands on hit
+  else if (kind === 'machete') whooshSound(0.18, 0.2); // machete: quick heavy whoosh
+  else whooshSound(0.28, 0.22); // axe whoosh
+}
+function thudSound() { blip(70, 0.16, 0.4, 'sine', 38); noiseBurst(0.08, 0.25, 400); } // axe hit: solid thud
+function sliceSound() { noiseBurst(0.06, 0.2, 5200); blip(1400, 0.05, 0.08, 'sine', 900); } // knife hit: slice
+function katanaHitSound() { noiseBurst(0.05, 0.18, 6000); blip(2400, 0.3, 0.12, 'sine', 1800); } // katana: metallic ring
+function macheteHitSound() { noiseBurst(0.09, 0.3, 1400); blip(180, 0.1, 0.3, 'sine', 90); } // machete: chop
+function fireHand(hand) {
+  const name = handWeapon[hand];
+  if (!name || handCooldown[hand] > 0) return;
+  const w = WEAPONS[name];
+  handCooldown[hand] = w.rate;
+  const mount = gunMounts[hand];
+  mount.getWorldPosition(tmpV);
+  mount.getWorldQuaternion(tmpQ);
+  tmpDir.set(0, 0, 1).applyQuaternion(tmpQ); // mount +z faces the aim point after lookAt
+  const ox = tmpV.x, oy = tmpV.y, oz = tmpV.z;
+  if (w.melee) {
+    handSwing[hand] = 0.28;
+    swingSound(name);
+    let hitAny = false;
+    for (const z of zombies) {
+      if (z.dead) continue;
+      const gp = z.grp.position, s = z.scale;
+      const vx = gp.x - ox, vy = gp.y + 1.1 * s - oy, vz = gp.z - oz;
+      const dist = Math.hypot(vx, vy, vz);
+      if (dist > w.range + 0.6) continue;
+      const dot = (vx * tmpDir.x + vy * tmpDir.y + vz * tmpDir.z) / (dist || 0.001);
+      if (dot < 0.65) continue; // must be in front of that hand
+      tmpB.set(gp.x, gp.y + 1.1 * s, gp.z);
+      spawnBurst(tmpB, 5, 0x5a0a0a, 2.5);
+      z.hp -= w.dmg; hitAny = true;
+      if (name === 'axe') thudSound(); else if (name === 'knife') sliceSound();
+      else if (name === 'katana') katanaHitSound(); else if (name === 'machete') macheteHitSound(); else hitSound();
+      if (z.hp <= 0) killZombie(z);
+    }
+    if (hitAny) hapticPulse(hand, 40, 0.5); // DH5: melee connect buzz
+    return;
+  }
+  shotSound(name);
+  // DH5: gun haptics on the firing controller's actuator, scaled by weapon
+  if (name === 'pistol') hapticPulse(hand, 50, 0.6);
+  else if (name === 'rifle') hapticPulse(hand, 90, 0.8);
+  else if (name === 'shotgun') hapticPulse(hand, 140, 1.0);
+  else if (name === 'sniper') hapticPulse(hand, 160, 1.0);
+  const flash = mount.userData.flash;
+  if (flash) flash.material.opacity = 1;
+  for (let p = 0; p < w.pellets; p++) {
+    tmpA.copy(tmpDir);
+    tmpA.x += rand(-w.spread, w.spread); tmpA.y += rand(-w.spread, w.spread); tmpA.z += rand(-w.spread, w.spread);
+    tmpA.normalize();
+    let wallT = Infinity;
+    for (const b of colliders) {
+      const t = rayVsBox(ox, oy, oz, tmpA.x, tmpA.y, tmpA.z, b, b.h || 3.4);
+      if (t < wallT) wallT = t;
+    }
+    let bestT = Infinity, bestZ = null, headshot = false;
+    for (const z of zombies) {
+      if (z.dead) continue;
+      const gp = z.grp.position, s = z.scale;
+      const th = raySphere(ox, oy, oz, tmpA.x, tmpA.y, tmpA.z, gp.x, gp.y + 1.68 * s, gp.z, 0.3 * s);
+      const tb = raySphere(ox, oy, oz, tmpA.x, tmpA.y, tmpA.z, gp.x, gp.y + 1.1 * s, gp.z, 0.55 * s);
+      const t = Math.min(th, tb);
+      if (t < bestT) { bestT = t; bestZ = z; headshot = th < tb; }
+    }
+    if (bestZ && bestT < wallT && bestT < 60) {
+      tmpB.set(ox + tmpA.x * bestT, oy + tmpA.y * bestT, oz + tmpA.z * bestT);
+      spawnBurst(tmpB, headshot ? 8 : 5, 0x5a0a0a, 2.5);
+      if (headshot) { if (bestZ.type === 'brute') bestZ.hp -= 5; else bestZ.hp = 0; }
+      else bestZ.hp -= w.dmg;
+      hitSound();
+      if (bestZ.hp <= 0 && !bestZ.dead) killZombie(bestZ);
+    } else if (wallT < 60) {
+      tmpB.set(ox + tmpA.x * wallT, oy + tmpA.y * wallT, oz + tmpA.z * wallT);
+      spawnBurst(tmpB, 3, 0xd8c840, 1.5);
+    }
+  }
+  updateHUD();
+}
+
+// ============ zombie updates ============
+function updateZombies(dt) {
+  for (let i = zombies.length - 1; i >= 0; i--) {
+    const z = zombies[i];
+    if (z.dead) {
+      z.deadT += dt;
+      const k = Math.min(1, z.deadT / 0.35);
+      z.grp.rotation.x = -Math.PI / 2 * k;
+      z.grp.position.y = -0.1 * k;
+      if (z.deadT > 1.4) { scene.remove(z.grp); zombies.splice(i, 1); }
+      continue;
+    }
+    z.attackCd = Math.max(0, z.attackCd - dt);
+    z.groanT -= dt;
+    const dx = playerPos.x - z.grp.position.x, dz = playerPos.z - z.grp.position.z;
+    const dist = Math.hypot(dx, dz) || 0.001;
+    if (dist > 1.0) {
+      z.grp.position.x += dx / dist * z.speed * dt;
+      z.grp.position.z += dz / dist * z.speed * dt;
+      z.grp.rotation.y = Math.atan2(dx, dz);
+      zombieCollide.x = z.grp.position.x; zombieCollide.z = z.grp.position.z;
+      const p = zombieCollide;
+      collideCircle(p, 0.4, colliders);
+      z.grp.position.x = p.x; z.grp.position.z = p.z;
+      z.phase += dt * z.speed * 3.4;
+      // DH4 horror walk: hunched torso, arms reaching forward, jerky uneven
+      // leg timing (offset phases + a second harmonic), head lolling on its
+      // own tilt. Hit spheres are computed from grp position only, so this
+      // never changes hit fairness.
+      z.torso.rotation.x = 0.22;
+      const swL = Math.sin(z.phase) + 0.25 * Math.sin(z.phase * 2.3);
+      const swR = Math.sin(z.phase + 1.3) + 0.25 * Math.sin(z.phase * 2.1 + 1.0);
+      z.legL.rotation.x = swL * 0.8; z.legR.rotation.x = swR * 0.8;
+      z.armL.rotation.x = -1.35 - swL * 0.3; z.armR.rotation.x = -1.35 + swR * 0.3; // reaching forward, swaying
+      z.armL.rotation.z = 0.25 + Math.sin(z.phase * 0.7) * 0.1; z.armR.rotation.z = -0.25 - Math.sin(z.phase * 0.7) * 0.1;
+      z.head.rotation.x = 0.35; z.head.rotation.z = z.tilt + Math.sin(z.phase * 0.9) * 0.12;
+      z.grp.position.y = Math.abs(Math.cos(z.phase)) * 0.05;
+      z.grp.rotation.z = Math.sin(z.phase * 0.5) * 0.05;
+    } else {
+      // Attacking: arms swing fast at the player
+      const atk = Math.sin(elapsed * 20) * 0.4;
+      z.armL.rotation.x = -1.6 + atk; z.armR.rotation.x = -1.6 - atk;
+      if (z.attackCd <= 0) {
+        z.attackCd = 1.0;
+        damagePlayer(12);
+        groanSound(0.4);
+      }
+    }
+    if (z.groanT <= 0) {
+      z.groanT = rand(4, 9);
+      groanSound(clamp(1.2 - dist / 25, 0.05, 0.5));
+    }
+  }
+  for (let i = 0; i < zombies.length; i++) {
+    for (let j = i + 1; j < zombies.length; j++) {
+      const a = zombies[i], b = zombies[j];
+      if (a.dead || b.dead) continue;
+      const dx = b.grp.position.x - a.grp.position.x, dz = b.grp.position.z - a.grp.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.001 && d < 0.8) {
+        const push = (0.8 - d) / 2;
+        a.grp.position.x -= dx / d * push; a.grp.position.z -= dz / d * push;
+        b.grp.position.x += dx / d * push; b.grp.position.z += dz / d * push;
+      }
+    }
+  }
+}
+
+// ============ pickup updates ============
+function updatePickups(dt, t) {
+  for (const p of pickups) {
+    if (p.taken) continue;
+    p.grp.position.y = 0.7 + Math.sin(t * 2 + p.phase) * 0.1;
+    p.grp.rotation.y += dt * 0.8;
+    const d = Math.hypot(p.grp.position.x - playerPos.x, p.grp.position.z - playerPos.z);
+    if (d < 1.3) {
+      p.taken = true; p.grp.visible = false;
+      pickupSound();
+      if (p.kind === 'shotgun' || p.kind === 'rifle' || p.kind === 'axe' || p.kind === 'knife' || p.kind === 'katana' || p.kind === 'machete' || p.kind === 'sniper') {
+        if (!owned[p.kind]) {
+          owned[p.kind] = true;
+          if (handWeapon.left === null) { handWeapon.left = p.kind; buildHandWeapon('left'); showBanner(WEAPONS[p.kind].label + ' FOUND — LEFT HAND', 2000); }
+          else showBanner(WEAPONS[p.kind].label + ' FOUND — A/X TO EQUIP', 2000);
+        } else showBanner(WEAPONS[p.kind].label + ' ALREADY OWNED', 1200);
+      } else if (p.kind === 'ammo') {
+        hp = Math.min(100, hp + 15); // supply crate: ammo is unlimited, so supplies top up health
+      } else if (p.kind === 'medkit') { hp = Math.min(100, hp + 40); }
+      else if (p.kind === 'food') { hp = Math.min(100, hp + 15); }
+      updateHUD();
+    }
+  }
+}
+
+// ============ main loop ============
+let mode = 'menu';
+let elapsed = 0, hudT = 0, hbT = 0;
+const clock = new THREE.Clock();
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
+  if (mode === 'play') {
+    // desktop head reset (VR pose owns the camera when presenting)
+    if (!renderer.xr.isPresenting) {
+      camera.position.set(0, 1.6, 0);
+      camera.rotation.order = 'YXZ'; camera.rotation.y = 0; camera.rotation.x = pitch;
+    }
+    const prevPX = playerGroup.position.x, prevPZ = playerGroup.position.z;
+    const inp = pollInput(dt);
+    // Movement is relative to where the HEAD is actually looking (group yaw +
+    // headset yaw), not group yaw alone — that was the wrong-direction bug:
+    // physically turning your head/body must turn stick-forward with you.
+    // Snap turns are instant now, so yaw is already applied when we read the
+    // camera's world direction below.
+    playerGroup.rotation.y = yaw;
+    camera.getWorldDirection(camForward);
+    let fx = camForward.x, fz = camForward.z;
+    const fl = Math.hypot(fx, fz);
+    if (fl < 0.01) { fx = -Math.sin(yaw); fz = -Math.cos(yaw); } else { fx /= fl; fz /= fl; }
+    const rx = -fz, rz = fx; // camera-right, projected onto XZ: push right = move right
+    const camYawDeg = Math.atan2(-fx, -fz) * 180 / Math.PI;
+    const grpYawDeg = yaw * 180 / Math.PI;
+    const isRunning = !!inp.running; // DH5.1 run: 8.5 m/s only while the left stick click (or Shift) is held
+    const sp = isRunning ? 8.5 : 4.2;
+    playerGroup.position.x += (fx * inp.mz + rx * inp.mx) * sp * dt;
+    playerGroup.position.z += (fz * inp.mz + rz * inp.mx) * sp * dt;
+    // locomotion lives on the rig: the stick drives the group directly and
+    // collision runs on the group, so nothing can wipe the movement out.
+    // (The old per-frame headset re-anchor could reset the rig position,
+    // which is why the stick seemed dead while the trigger still worked.)
+    // The headset rides inside the group, so physical walking still moves
+    // the view on top of stick movement.
+    playerCollide.x = playerGroup.position.x; playerCollide.z = playerGroup.position.z;
+    collideCircle(playerCollide, 0.35, colliders);
+    collideCircle(playerCollide, 0.35, furniture);
+    playerGroup.position.x = playerCollide.x;
+    playerGroup.position.z = playerCollide.z;
+    playerPos.set(playerCollide.x, 0, playerCollide.z);
+    movedTotal += Math.hypot(playerCollide.x - prevPX, playerCollide.z - prevPZ);
+    // Comfort vignette: fades in with movement (stronger while running),
+    // fades out when standing still. No head-bob or VR camera shake exists.
+    {
+      const moving = Math.hypot(inp.mx, inp.mz) > 0.05;
+      const target = moving ? (isRunning ? 0.5 : 0.28) : 0;
+      vigOpacity += (target - vigOpacity) * Math.min(1, dt * 4);
+      vigMat.opacity = vigOpacity;
+    }
+    if (isRunning !== prevRunning) { modetext.textContent = isRunning ? 'RUNNING' : 'WALK'; prevRunning = isRunning; }
+    updateDebugText(inp.lx, inp.ly, inp.rx, inp.ry, inp.mx, inp.mz, camYawDeg, grpYawDeg);
+    // flashlight follows the head
+    camera.getWorldPosition(tmpV);
+    flash.position.copy(tmpV);
+    camera.getWorldDirection(camForward);
+    flashTarget.position.copy(tmpV).addScaledVector(camForward, 10);
+    // gun mounts: one per hand. In VR each mount is a CHILD of its controller,
+    // and each controller is a child of playerGroup — so the gun inherits rig
+    // movement + yaw AND controller pose together, and can never be left at
+    // spawn while the player walks. The mount is rotated PI about Y so the
+    // gun model's +Z barrel points along the controller's -Z aim direction.
+    // (No code here sets a mount's world position from a reference-space
+    // matrixWorld — that was the DH2 desync bug, and it is gone.)
+    // On desktop (or if a controller disconnects) the mount falls back to a
+    // scene-root mount aimed by the head, as before.
+    for (const hand of HANDS) {
+      const mount = gunMounts[hand];
+      const ctl = hand === 'right' ? rightCtl : leftCtl;
+      if (renderer.xr.isPresenting && ctl) {
+        if (mount.parent !== ctl) ctl.add(mount);
+        mount.position.set(0, -0.02, 0);
+        const sw = handSwing[hand] > 0 ? -Math.sin(handSwing[hand] / 0.28 * Math.PI) * 1.1 : 0;
+        mount.rotation.set(sw, Math.PI, 0);
+      } else {
+        if (mount.parent !== scene) scene.add(mount);
+        camera.getWorldPosition(tmpV);
+        camera.getWorldDirection(camForward);
+        camRight.crossVectors(camForward, camera.up).normalize();
+        const side = hand === 'right' ? 0.22 : -0.22;
+        mount.position.copy(tmpV).addScaledVector(camForward, 0.45).addScaledVector(camRight, side);
+        mount.position.y -= 0.22;
+        aimPoints[hand].copy(tmpV).addScaledVector(camForward, 14);
+        mount.lookAt(aimPoints[hand]);
+        if (handSwing[hand] > 0) mount.rotateX(-Math.sin(handSwing[hand] / 0.28 * Math.PI) * 1.1);
+      }
+      // DH5: laser sight — exact firing ray from this hand's gun muzzle
+      // (same mount world transform fireHand uses). 25m thin red beam.
+      const wNow = WEAPONS[handWeapon[hand]];
+      const lz = laserMeshes[hand];
+      if (wNow && !wNow.melee) {
+        mount.getWorldPosition(tmpV); mount.getWorldQuaternion(tmpQ);
+        tmpDir.set(0, 0, 1).applyQuaternion(tmpQ);
+        lz.visible = true;
+        lz.position.set(tmpV.x + tmpDir.x * 13.05, tmpV.y + tmpDir.y * 13.05, tmpV.z + tmpDir.z * 13.05);
+        lz.quaternion.setFromUnitVectors(UP_Y, tmpDir);
+        lz.scale.set(1, 25, 1);
+      } else lz.visible = false;
+    }
+    // firing: each trigger fires its own hand's weapon; no reloading, ammo is unlimited
+    if (inp.fire.right) fireHand('right');
+    if (inp.fire.left) fireHand('left');
+    // DH5: sniper scope — hold GRIP (squeeze) on the hand holding the sniper
+    // (or hold right-click on desktop) to aim down sights.
+    const wantScope = (inp.grip.right && handWeapon.right === 'sniper') || (inp.grip.left && handWeapon.left === 'sniper') || (scopeMouse && handWeapon.right === 'sniper');
+    if (wantScope !== scoped) {
+      scoped = wantScope;
+      crossQuad.visible = scoped;
+      camera.fov = scoped ? 30 : 72;
+      camera.updateProjectionMatrix();
+    }
+    handCooldown.right = Math.max(0, handCooldown.right - dt);
+    handCooldown.left = Math.max(0, handCooldown.left - dt);
+    handSwing.right = Math.max(0, handSwing.right - dt);
+    handSwing.left = Math.max(0, handSwing.left - dt);
+    for (const hand of HANDS) {
+      const fl = gunMounts[hand].userData.flash;
+      if (fl) fl.material.opacity = Math.max(0, fl.material.opacity - dt * 18);
+    }
+    hurtMat.opacity = Math.max(0, hurtMat.opacity - dt * 1.6);
+    hurtCd = Math.max(0, hurtCd - dt);
+    if (shakeT > 0 && !renderer.xr.isPresenting) {
+      shakeT = Math.max(0, shakeT - dt);
+      const a = shakeT * 0.06;
+      camera.position.x += (Math.random() - 0.5) * a;
+      camera.position.y += (Math.random() - 0.5) * a;
+    }
+    // world updates
+    spawnDirector(dt);
+    updateZombies(dt);
+    updatePickups(dt, elapsed);
+    updateParticles(dt);
+    for (const l of lamps) {
+      if (l.flicker) {
+        l.t += dt;
+        const on = Math.sin(l.t * 37) > -0.6 && Math.random() > 0.12;
+        l.headMat.emissiveIntensity = on ? 1.4 : 0.15;
+        l.glow.material.opacity = on ? 0.55 : 0.06;
+        l.pool.material.opacity = on ? 0.18 : 0.02;
+      }
+    }
+    if (hp <= 30 && hp > 0) {
+      hbT -= dt;
+      if (hbT <= 0) { hbT = 0.9; thumpSound(0); thumpSound(0.22); }
+    }
+    if (blackoutT >= 0) {
+      blackoutT += dt;
+      if (blackoutT < 1.0) blackMat.opacity = Math.min(1, blackoutT);
+      else if (blackoutT < 1.3) blackMat.opacity = 1;
+      else {
+        playerGroup.position.set(0, 0, 0); yaw = 0; playerGroup.rotation.y = 0;
+        hp = 100; hurtCd = 0;
+        for (const z of zombies) scene.remove(z.grp);
+        zombies.length = 0; wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 2.5; // DH5: waves restart
+        blackoutT = -1; blackMat.opacity = 0;
+        showBanner('YOU BLACKED OUT — you wake up in the square.', 3000);
+        updateHUD();
+      }
+    }
+    if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) bannerEl.style.opacity = 0; }
+    hudT += dt;
+    if (hudT > 0.15) { hudT = 0; updateHUD(); }
+  }
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(tick);
+
+// ============ menu / start / VR ============
+const menuEl = document.getElementById('menu');
+document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · hold LEFT stick click to RUN · right stick Y also walks · right stick X snap-turns instantly · each trigger fires its own hand — grab a second gun to dual wield · A/X on a controller swaps THAT hand\'s weapon · hold the GRIP (squeeze) button with the SNIPER equipped to aim down sights · guns buzz when fired · unlimited ammo, no reloading · comfort vignette darkens edges while you move. Desktop: WASD moves · hold Shift to run · mouse looks · click fires right hand · hold right-click with the SNIPER to aim down sights · Q swaps right hand · E swaps left hand.';
+function startGame() {
+  startAudio();
+  mode = 'play';
+  menuEl.style.display = 'none';
+  document.getElementById('hint').textContent = renderer.xr.isPresenting
+    ? 'Left stick moves where you look · hold left click to RUN · right stick turn · each trigger fires its hand · A/X swaps that hand'
+    : 'WASD move · hold Shift to run · mouse look · click fires right hand · Q swaps right · E swaps left';
+  showBanner('HOLLOW CREEK — find weapons. survive.', 3000);
+  updateHUD();
+}
+document.getElementById('startBtn').onclick = () => { startGame(); };
+document.getElementById('vrBtn').onclick = async () => {
+  startAudio();
+  if (!navigator.xr) { startGame(); return; }
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
+    renderer.xr.setSession(session);
+    startGame();
+    session.addEventListener('end', () => {
+      camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); pitch = 0;
+    });
+  } catch (e) { startGame(); }
+};
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+<!-- ================= BASELINE MEASUREMENT BUILD — injected readout only =================
+     Everything above this marker is the live game source, byte-for-byte.
+     This block adds ONLY: (1) a visible "BASELINE MEASUREMENT BUILD" label,
+     (2) a DOM readout panel (desktop), (3) a module script that wraps
+     WebGLRenderer.prototype.render to sample frame time + renderer.info and
+     show the numbers on an in-scene plane (readable in immersive VR).
+     No gameplay, rendering, audio, input, or logic is changed. The overlay
+     adds exactly 1 draw call + 2 triangles to renderer.info. -->
+<div id="bl-label" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none;background:#ffe600;color:#111;font:700 13px/1.4 system-ui,sans-serif;padding:6px 12px;border-radius:6px;box-shadow:0 2px 10px rgba(0,0,0,.5);text-align:center;">BASELINE MEASUREMENT BUILD — DEAD HOLLOW VR &middot; live game code + performance readout only &middot; no gameplay or rendering changes</div>
+<div id="bl-dom" style="position:fixed;left:10px;bottom:10px;z-index:2147483647;pointer-events:none;background:rgba(0,12,9,.78);color:#e8fff4;font:13px/1.5 monospace;white-space:pre;padding:8px 10px;border:1px solid rgba(64,255,170,.6);border-radius:6px;">DEAD HOLLOW VR — BASELINE starting&hellip;</div>
+<script type="module">
+import * as THREE from 'three';
+/* BASELINE MEASUREMENT OVERLAY — read-only readout. Game code above is untouched.
+   Wraps WebGLRenderer.prototype.render (same THREE module instance via the shared
+   importmap) to sample frame timing and renderer.info after each frame, and shows
+   the numbers on a DOM panel (desktop) and a camera-facing canvas plane inside
+   the scene (readable in immersive VR). The overlay adds exactly 1 draw call +
+   2 triangles to renderer.info — subtract when comparing against budgets.
+   No game state, rendering, audio, or input is modified. */
+const BL_GAME = 'DEAD HOLLOW VR';
+const BL_START = performance.now();
+let blLastT = 0, blEmaMs = 0, blCalls = 0, blTris = 0, blLastDraw = 0;
+let blHud = null, blHudScene = null;
+const blTmpPos = new THREE.Vector3();
+const blTmpDir = new THREE.Vector3();
+const blTmpQuat = new THREE.Quaternion();
+const blDom = document.getElementById('bl-dom');
+function blElapsed() {
+  const s = Math.floor((performance.now() - BL_START) / 1000);
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+function blMem() {
+  try {
+    const m = performance.memory;
+    if (m && m.usedJSHeapSize) return (m.usedJSHeapSize / 1048576).toFixed(0) + ' MB';
+  } catch (e) { /* performance.memory unavailable (non-Chromium): show n/a */ }
+  return 'n/a';
+}
+function blLayerSize(r) {
+  try {
+    if (!r.xr || !r.xr.isPresenting) return '—';
+    const layer = (r.xr.getBaseLayer) ? r.xr.getBaseLayer() : null;
+    if (!layer) return '—';
+    const w = layer.framebufferWidth || layer.textureWidth;
+    const h = layer.framebufferHeight || layer.textureHeight;
+    return (w && h) ? (w + 'x' + h) : '—';
+  } catch (e) { return '—'; }
+}
+function blLines(r) {
+  const fps = blEmaMs > 0 ? 1000 / blEmaMs : 0;
+  return [
+    BL_GAME + ' — BASELINE',
+    'FPS ' + fps.toFixed(1) + '  ·  ' + blEmaMs.toFixed(1) + ' ms avg',
+    'calls ' + blCalls + '  ·  tris ' + blTris,
+    'XR FB ' + blLayerSize(r) + '  ·  ' + ((r.xr && r.xr.isPresenting) ? 'VR' : 'DESKTOP'),
+    't+' + blElapsed() + '  ·  JS heap ' + blMem()
+  ];
+}
+function blMakeHud() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false, fog: false });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.28), mat);
+  mesh.renderOrder = 9999;
+  mesh.frustumCulled = false;
+  mesh.raycast = function () {}; // never intercept game raycasts (menus, aiming)
+  return { mesh: mesh, canvas: canvas, ctx: ctx, tex: tex };
+}
+function blDrawHud(hud, lines) {
+  const ctx = hud.ctx;
+  ctx.clearRect(0, 0, 512, 256);
+  ctx.fillStyle = 'rgba(0, 12, 9, 0.72)';
+  ctx.fillRect(0, 0, 512, 256);
+  ctx.strokeStyle = 'rgba(64, 255, 170, 0.9)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(4, 4, 504, 248);
+  ctx.fillStyle = '#7dffce';
+  ctx.font = 'bold 25px monospace';
+  ctx.fillText(lines[0], 18, 40);
+  ctx.fillStyle = '#e8fff4';
+  ctx.font = '23px monospace';
+  for (let i = 1; i < lines.length; i++) ctx.fillText(lines[i], 18, 40 + i * 44);
+  hud.tex.needsUpdate = true;
+}
+function blPlaceHud(hud, camera) {
+  camera.getWorldPosition(blTmpPos);
+  camera.getWorldQuaternion(blTmpQuat);
+  blTmpDir.set(0, 0, -1).applyQuaternion(blTmpQuat);
+  hud.mesh.position.copy(blTmpPos).addScaledVector(blTmpDir, 1.2);
+  hud.mesh.position.y -= 0.38;
+  hud.mesh.quaternion.copy(blTmpQuat);
+}
+const blOrigRender = THREE.WebGLRenderer.prototype.render;
+THREE.WebGLRenderer.prototype.render = function (scene, camera) {
+  const now = performance.now();
+  if (blLastT > 0) {
+    const dt = now - blLastT;
+    if (dt > 0 && dt < 1000) { // ignore background-tab gaps
+      blEmaMs = (blEmaMs === 0) ? dt : blEmaMs + 0.05 * (dt - blEmaMs);
+    }
+  }
+  blLastT = now;
+  const out = blOrigRender.call(this, scene, camera);
+  // renderer.info holds the just-rendered frame (both eyes summed in XR).
+  blCalls = this.info.render.calls;
+  blTris = this.info.render.triangles;
+  if (!blHud) blHud = blMakeHud();
+  if (blHudScene !== scene) {
+    if (blHudScene) blHudScene.remove(blHud.mesh);
+    scene.add(blHud.mesh);
+    blHudScene = scene;
+  }
+  if (camera && camera.isCamera) blPlaceHud(blHud, camera);
+  if (now - blLastDraw >= 250) {
+    blLastDraw = now;
+    const lines = blLines(this);
+    blDrawHud(blHud, lines);
+    if (blDom) blDom.textContent = lines.join('\n');
+  }
+  return out;
+};
+</script>
+</body>
+</html>
