@@ -163,14 +163,28 @@ function recordScore(level, diff, run) {
   return { isBest, prevBest: prev };
 }
 
-// --- Frame-time valve + adaptive resolution (Neon-style, with hysteresis) ---
+// --- Frame-time valve + adaptive quality (Neon-style, with hysteresis) ---
 // Rolling-average frame time. Degrades one level after 1s sustained above
 // 20ms; recovers one level after 3s sustained below 16ms. Level changes are
-// the ONLY times the pixel ratio is touched (a ratio change reallocates the
-// drawing buffer, so it must never happen per-frame).
+// the ONLY times the live levers are touched.
+// r160 REALITY (verified against the three.js r160 source, 2026-11-14,
+// SHA-256 prefix 76dea8151bc9352a): NEITHER setPixelRatio() NOR
+// setFramebufferScaleFactor() changes XR resolution during an active
+// immersive session — both are inert mid-session (warnings only); the scale
+// factor is consumed ONLY at layer creation inside setSession. The valve's
+// old pixel-ratio steps (1.25 → 1.0 → 0.9) therefore never changed VR
+// resolution. The live resolution lever mid-session is FIXED FOVEATION:
+// renderer.xr.setFoveation() writes directly to the live layer's
+// fixedFoveation property with no presenting guard. So the valve sheds
+// fragment work via foveation + particle/trail/glow scaling, and the
+// pixel-ratio steps are GONE. Session-start resolution presets are NOT
+// added here — they need a headset test first (Test B, baseline notes).
 const perfValve = {
   ema: 13.9, level: 0, overMs: 0, underMs: 0,
-  ratios: [1.25, 1.0, 0.9], // VR pixel ratios per level (desktop stays 1.5)
+  // Fixed-foveation steps per level (1.0 = no foveation, 0 = maximum).
+  // Initial values pending headset A/B: L1 mild, L2 moderate. Foveation
+  // only reduces peripheral resolution; the center stays full resolution.
+  foveation: [1.0, 0.75, 0.5],
   get particleScale() { return [1, 0.5, 0.25][this.level]; },
   get trailsOn() { return this.level < 2; },
   get glowsOn() { return this.level < 2; },
@@ -185,13 +199,31 @@ const perfValve = {
   },
   setLevel(l) {
     this.level = l; this.overMs = 0; this.underMs = 0;
-    if (renderer.xr.isPresenting) renderer.setPixelRatio(this.ratios[l]);
+    // setFoveation is safe to call any time: it stores the value and applies
+    // it to the live XR layer immediately when presenting.
+    renderer.xr.setFoveation(this.foveation[l]);
   },
   reset() {
     this.level = 0; this.ema = 13.9; this.overMs = 0; this.underMs = 0;
-    if (renderer.xr.isPresenting) renderer.setPixelRatio(this.ratios[0]);
+    renderer.xr.setFoveation(this.foveation[0]);
   },
 };
+// Warm-up window (seconds) after level start / resume during which the EMA
+// is not fed — load and resume hitches are not gameplay frame time.
+let perfWarmup = 0;
+
+// The XR layer's ACTUAL framebuffer size — the resolution the headset really
+// renders at. The stored pixel ratio is NOT the resolution: in r160 the
+// pixel ratio never changes the XR layer mid-session, so showing it would
+// mislead. Returns 'n/a' when no XR layer exists (desktop / not presenting).
+function xrLayerSize() {
+  try {
+    const s = renderer.xr.getSession ? renderer.xr.getSession() : null;
+    const l = s && s.renderState ? s.renderState.baseLayer : null;
+    if (l && l.framebufferWidth) return l.framebufferWidth + '×' + l.framebufferHeight;
+  } catch (e) { /* no layer readable */ }
+  return 'n/a';
+}
 
 // --- Controller haptics (Quest 2 Touch; no-op on desktop / without actuators) ---
 function pulseHaptics(hand, strength, ms) {
@@ -564,8 +596,18 @@ function drawButton(g, b) {
   g.fill(); g.stroke();
   // Font scales to button height so the compact Settings rows (38px) stay
   // legible; the big menu buttons (72–92px) render exactly as before.
-  const fs = Math.min(44, b.h - 8);
-  g.font = '900 ' + fs + 'px Arial'; g.textAlign = 'center';
+  // Auto-fit: the label must fit INSIDE the button rect. Measured widths
+  // (Liberation Bold ≈ Arial, 44px): '3 · OVERDRIVE' is 323px, 'SETTINGS'
+  // 220px, 'PRAC: OFF' 240px — all wider than a 200px button, so labels
+  // used to spill past their rects and the next button's fill covered the
+  // spill (desktop check 2026-11-14: START appeared to overlap SETTINGS /
+  // PRAC, and '1 · WARMUP' read as 'WARMU'). Shrink until it fits w-24px.
+  let fs = Math.min(44, b.h - 8, b.maxFs || 44);
+  g.font = '900 ' + fs + 'px Arial';
+  while (fs > 18 && g.measureText(b.label).width > b.w - 24) {
+    fs -= 2; g.font = '900 ' + fs + 'px Arial';
+  }
+  g.textAlign = 'center';
   g.fillStyle = b.selected ? '#06121f' : '#ffffff';
   g.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + fs * 0.35);
 }
@@ -585,21 +627,26 @@ function drawMenu() {
   menuButtons = [];
   const lvNames = ['1 · WARMUP', '2 · PULSE', '3 · OVERDRIVE'];
   for (let i = 0; i < 3; i++) {
-    const b = { id: 'lvl' + i, x: 172 + i * 240, y: 172, w: 200, h: 88, label: lvNames[i], selected: selLevel === i };
+    // Wide buttons (280px) + maxFs 36: the level names are long ('3 ·
+    // OVERDRIVE' is 323px at 44px), so the row uses a smaller uniform cap
+    // and drawButton's auto-fit guarantees no label ever spills its rect.
+    const b = { id: 'lvl' + i, x: 72 + i * 300, y: 172, w: 280, h: 88, label: lvNames[i], selected: selLevel === i, maxFs: 36 };
     menuButtons.push(b); drawButton(g, b);
   }
   g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
   g.fillText('DIFFICULTY', 512, 316);
   const dNames = ['EASY', 'NORMAL', 'HARD'];
   for (let i = 0; i < 3; i++) {
-    const b = { id: 'dif' + i, x: 172 + i * 240, y: 336, w: 200, h: 88, label: dNames[i], selected: selDiff === i };
+    const b = { id: 'dif' + i, x: 72 + i * 300, y: 336, w: 280, h: 88, label: dNames[i], selected: selDiff === i };
     menuButtons.push(b); drawButton(g, b);
   }
-  const st = { id: 'settings', x: 112, y: 452, w: 200, h: 92, label: 'SETTINGS', selected: false };
+  // Bottom row: SETTINGS 60–300, START 320–704, PRAC 724–964 — 20px gaps,
+  // no rect touches another, and auto-fit keeps every label inside its rect.
+  const st = { id: 'settings', x: 60, y: 452, w: 240, h: 92, label: 'SETTINGS', selected: false };
   menuButtons.push(st); drawButton(g, st);
-  const sb = { id: 'start', x: 332, y: 452, w: 360, h: 92, label: 'START', selected: true };
+  const sb = { id: 'start', x: 320, y: 452, w: 384, h: 92, label: 'START', selected: true };
   menuButtons.push(sb); drawButton(g, sb);
-  const pr = { id: 'practice', x: 712, y: 452, w: 200, h: 92, label: prefs.practice ? 'PRAC: ON' : 'PRAC: OFF', selected: prefs.practice };
+  const pr = { id: 'practice', x: 724, y: 452, w: 240, h: 92, label: prefs.practice ? 'PRAC: ON' : 'PRAC: OFF', selected: prefs.practice };
   menuButtons.push(pr); drawButton(g, pr);
   const best = getBest(selLevel, selDiff);
   g.font = '700 26px Arial'; g.fillStyle = '#ffd319'; g.textAlign = 'center';
@@ -676,7 +723,10 @@ function drawPause() {
     menuButtons.push(b); drawButton(g, b);
   }
   g.font = '400 24px Arial'; g.fillStyle = '#2bff88';
-  g.fillText('PERF ' + perfValve.ema.toFixed(1) + 'ms AVG · VALVE L' + perfValve.level + ' · PIXEL ' + renderer.getPixelRatio().toFixed(2), 512, 584);
+  // The EMA holds the last ACTIVE-PLAY average while paused (menu/paused
+  // frames are not fed to it), and FB is the XR layer's real framebuffer
+  // size — 'n/a' on desktop, where no XR layer exists.
+  g.fillText('PERF ' + perfValve.ema.toFixed(1) + 'ms AVG (PLAY) · VALVE L' + perfValve.level + ' · FB ' + xrLayerSize(), 512, 584);
   g.fillStyle = '#c9b8e8';
   g.fillText('B/Y or Esc to resume · Trigger to choose', 512, 614);
   menuTex.needsUpdate = true;
@@ -794,6 +844,8 @@ function pauseGame() {
 function resumeGame() {
   if (screen !== 'paused') return;
   screen = 'playing';
+  perfWarmup = 0.75; // resume hitches are not gameplay frame time
+  resyncDeskBlade(); // stale blade history would fake a supersonic swing
   audioSys.resume();
   menuPlane.visible = false;
   laser.visible = false;
@@ -1295,9 +1347,9 @@ const vignette = (() => {
   return m;
 })();
 // Optional in-VR frame-time readout (profiling aid; toggle in Settings).
-// Shows rolling-average frame time + valve level + pixel ratio. This is a
-// measurement display, not a performance claim — Quest 2 numbers come only
-// from the owner's headset.
+// Shows rolling-average ACTIVE-PLAY frame time + valve level + the XR
+// layer's actual framebuffer size. This is a measurement display, not a
+// performance claim — Quest 2 numbers come only from the owner's headset.
 const perfCanvas = document.createElement('canvas');
 perfCanvas.width = 512; perfCanvas.height = 96;
 const perfCtx = perfCanvas.getContext('2d');
@@ -1314,8 +1366,8 @@ function drawPerfCell() {
   g.clearRect(0, 0, 512, 96);
   g.fillStyle = 'rgba(8,6,20,0.72)'; g.fillRect(0, 0, 512, 96);
   g.strokeStyle = '#2bff88'; g.lineWidth = 3; g.strokeRect(3, 3, 506, 90);
-  g.font = '700 34px Arial'; g.textAlign = 'left'; g.fillStyle = '#ffffff';
-  g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · PR ' + renderer.getPixelRatio().toFixed(2), 16, 62);
+  g.font = '700 30px Arial'; g.textAlign = 'left'; g.fillStyle = '#ffffff';
+  g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 16, 60);
   perfTex.needsUpdate = true;
 }
 
@@ -1613,6 +1665,8 @@ function startLevel() {
   chart = built.evts; orbEvents = built.orbsE;
   chartIdx = 0; orbIdx = 0;
   screen = 'playing';
+  perfWarmup = 0.75; // load/compilation hitches are not gameplay frame time
+  resyncDeskBlade(); // stale blade history would fake a supersonic swing
   levelActive = true;
   menuPlane.visible = false;
   laser.visible = false;
@@ -1656,12 +1710,30 @@ function mouseBladePoint() {
   _ray.ray.intersectPlane(_planeZ, _hitP);
   return _hitP;
 }
+// Re-sync the desktop blade history to the current mouse point. The blade
+// speed gate compares tipCur to tipPrev, and the history is NOT updated
+// while paused or in the menu — so a mouse move across a pause used to look
+// like a supersonic swing on the first playing frame, defeating the gate
+// and letting the RESUME click itself slice an orb (+50, no combo —
+// desktop check 2026-11-14). Called on level start and on resume.
+function resyncDeskBlade() {
+  if (!mouseSeen) return;
+  mouseBladePoint();
+  tipPrev.desk.copy(_hitP); tipCur.desk.copy(_hitP);
+  basePrev.desk.copy(_hitP); baseCur.desk.copy(_hitP);
+}
 window.addEventListener('pointermove', e => {
   mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   mouseSeen = true;
 });
 renderer.domElement.addEventListener('pointerdown', e => {
-  mouseDown = true;
+  // The mouse button arms the blade ONLY if play is already in progress.
+  // A click on a menu button (START / RESUME / settings) must never arm
+  // it: the click that resumes the game used to leave mouseDown=true for
+  // the first playing tick, and the stale blade position from before the
+  // pause defeated the speed gate — a phantom slice (desktop check
+  // 2026-11-14). Read the screen BEFORE the menu tap can change it.
+  mouseDown = (screen === 'playing');
   mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   mouseSeen = true;
   audioSys.resume();
@@ -1744,8 +1816,11 @@ let xrSupported = false;
 function setStatus(msg) { statusEl.textContent = msg; }
 function hidePanel() { panel.style.display = 'none'; }
 function showPanel() { panel.style.display = 'flex'; }
-function xrPixelDown() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); }
-function xrPixelUp() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); }
+// NOTE: there is deliberately NO pixel-ratio change on session start/end.
+// In r160 setPixelRatio() cannot change XR resolution after setSession (the
+// layer already exists) — the old xrPixelDown()/xrPixelUp() pair was inert
+// and only produced console warnings. XR resolution is fixed at layer
+// creation; mid-session the valve sheds work via fixed foveation instead.
 if (navigator.xr && navigator.xr.isSessionSupported) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     xrSupported = ok;
@@ -1766,26 +1841,24 @@ vrBtn.addEventListener('click', async () => {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
     renderer.xr.setReferenceSpaceType('local-floor');
     await renderer.xr.setSession(session);
-    xrPixelDown();
     hidePanel();
     menuPlane.visible = true;
     perfValve.reset();
     // Re-entering after an auto-pause restores the pause menu, not the menu.
     if (screen === 'paused') { drawPause(); }
     else { screen = 'menu'; drawMenu(); audioSys.resume(); }
-    session.addEventListener('end', () => { xrPixelUp(); if (levelActive && screen === 'playing') pauseGame(); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+    session.addEventListener('end', () => { if (levelActive && screen === 'playing') pauseGame(); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
       renderer.xr.setReferenceSpaceType('local');
       await renderer.xr.setSession(session);
-      xrPixelDown();
       hidePanel();
       menuPlane.visible = true;
       perfValve.reset();
       if (screen === 'paused') { drawPause(); }
       else { screen = 'menu'; drawMenu(); audioSys.resume(); }
-      session.addEventListener('end', () => { xrPixelUp(); if (levelActive && screen === 'playing') pauseGame(); showPanel(); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { if (levelActive && screen === 'playing') pauseGame(); showPanel(); vrBtn.disabled = false; });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
@@ -1805,7 +1878,8 @@ window.addEventListener('resize', () => {
 // ============================== main loop ==============================
 const clock = new THREE.Clock();
 function tick() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
   const presenting = renderer.xr.isPresenting;
   // While paused the simulation clock is frozen (sdt = 0): notes hold their
   // audio-clock positions, particles/texts/flash hold still, and the beat
@@ -1814,7 +1888,14 @@ function tick() {
   const frozen = (screen === 'paused');
   const sdt = frozen ? 0 : dt;
   audioSys.tick();
-  perfValve.update(dt);
+  // Perf measurement hygiene: the valve EMA tracks ACTIVE PLAY only. Menu,
+  // paused, and warm-up frames are not gameplay frame time — feeding them
+  // in lets load hitches and menu rendering move the valve and mislabel the
+  // readout. While paused the EMA holds its last gameplay value, so the
+  // pause screen reports what play actually cost. Single frames over 100ms
+  // (background-tab return, OS hitch) are ignored as unrepresentative.
+  if (perfWarmup > 0) perfWarmup -= dt;
+  else if (screen === 'playing' && rawDt < 0.1) perfValve.update(dt);
   if (!frozen) beatPulse = Math.max(0, beatPulse - dt * 2.2);
 
   // V2: zero the rig height offset in VR (local-floor already reports true
