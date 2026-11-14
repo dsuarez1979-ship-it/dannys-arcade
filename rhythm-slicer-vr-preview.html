@@ -180,31 +180,39 @@ function recordScore(level, diff, run) {
 // pixel-ratio steps are GONE. Session-start resolution presets are NOT
 // added here — they need a headset test first (Test B, baseline notes).
 const perfValve = {
-  ema: 13.9, level: 0, overMs: 0, underMs: 0,
-  // Fixed-foveation steps per level (1.0 = no foveation, 0 = maximum).
-  // Initial values pending headset A/B: L1 mild, L2 moderate. Foveation
-  // only reduces peripheral resolution; the center stays full resolution.
-  foveation: [1.0, 0.75, 0.5],
+  ema: 13.9, level: 0, overMs: 0, underMs: 0, dwell: 0,
+  // Fixed-foveation steps per level. SEMANTICS (r160 source comment,
+  // lines 27350-27351): 0 = no foveation = full resolution, 1 = maximum
+  // foveation. The original mapping here was INVERTED (1.0/0.75/0.5) —
+  // caught by ChatGPT's status-review flag and verified against source
+  // 2026-11-14; L0 would have run at MAXIMUM foveation. Initial values
+  // pending headset A/B: L1 mild, L2 moderate. Foveation only reduces
+  // peripheral resolution; the center stays full resolution.
+  foveation: [0.0, 0.25, 0.5],
   get particleScale() { return [1, 0.5, 0.25][this.level]; },
   get trailsOn() { return this.level < 2; },
   get glowsOn() { return this.level < 2; },
   update(dt) {
     const ms = dt * 1000;
     this.ema += (ms - this.ema) * 0.05;
+    this.dwell += dt;
     if (this.ema > 20) { this.overMs += dt; this.underMs = 0; }
     else if (this.ema < 16) { this.underMs += dt; this.overMs = 0; }
     else { this.overMs = 0; this.underMs = 0; }
-    if (this.overMs > 1.0 && this.level < 2) this.setLevel(this.level + 1);
-    else if (this.underMs > 3.0 && this.level > 0) this.setLevel(this.level - 1);
+    // Minimum 2 s in a level before another change (ChatGPT status-review
+    // flag): stops oscillation from momentary spikes or menu transitions.
+    // Level changes are always one step at a time by construction.
+    if (this.dwell >= 2.0 && this.overMs > 1.0 && this.level < 2) this.setLevel(this.level + 1);
+    else if (this.dwell >= 2.0 && this.underMs > 3.0 && this.level > 0) this.setLevel(this.level - 1);
   },
   setLevel(l) {
-    this.level = l; this.overMs = 0; this.underMs = 0;
+    this.level = l; this.overMs = 0; this.underMs = 0; this.dwell = 0;
     // setFoveation is safe to call any time: it stores the value and applies
     // it to the live XR layer immediately when presenting.
     renderer.xr.setFoveation(this.foveation[l]);
   },
   reset() {
-    this.level = 0; this.ema = 13.9; this.overMs = 0; this.underMs = 0;
+    this.level = 0; this.ema = 13.9; this.overMs = 0; this.underMs = 0; this.dwell = 0;
     renderer.xr.setFoveation(this.foveation[0]);
   },
 };
@@ -221,6 +229,12 @@ function xrLayerSize() {
     const s = renderer.xr.getSession ? renderer.xr.getSession() : null;
     const l = s && s.renderState ? s.renderState.baseLayer : null;
     if (l && l.framebufferWidth) return l.framebufferWidth + '×' + l.framebufferHeight;
+    // Projection-layer path (XRWebGLBinding): baseLayer is null and the
+    // layer exposes textureWidth/textureHeight instead.
+    const layers = s && s.renderState ? s.renderState.layers : null;
+    if (layers && layers.length > 0 && layers[0] && layers[0].textureWidth) {
+      return layers[0].textureWidth + '×' + layers[0].textureHeight;
+    }
   } catch (e) { /* no layer readable */ }
   return 'n/a';
 }
