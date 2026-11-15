@@ -71,7 +71,7 @@
     <div class="sub">Neon Rhythm Slice &middot; original rhythm-slicing &middot; PROTOTYPE</div>
     <p class="small" style="color:#ffd319">Phase 2 prototype build — not the live version. Overhaul: energy blades, rebuilt hit detection, cinematic arena.</p>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
-    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. Any swing direction counts. Dodge the bombs.</p>
+    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. Cubes alternate sides, so follow the COLOR, not the side. Any swing direction counts. Dodge the bombs.</p>
     <p><b>Desktop:</b> hold the mouse button and drag — your blade cuts any color. M mutes.</p>
     <p class="small">No lives, no game over, ever — misses and bombs only reset your combo. Every track is original synth, generated live in your browser.</p>
     <button id="vrBtn">ENTER VR</button>
@@ -443,7 +443,10 @@ const LANES = [-0.62, -0.21, 0.21, 0.62];
 // V2: per-lane height offsets around the player's LIVE head height (the old
 // fixed LANE_Y = 1.3 is gone — notes anchor to eye level at spawn time).
 const LANE_YOFFS = [-0.45, -0.15, 0.15, 0.45];
-function handOfLane(x) { return x < 0 ? 'left' : 'right'; }
+// NOTE (2026-11-15): there is deliberately NO handOfLane helper any more.
+// Cube color tells the HAND, not the side — hands alternate sides, so no
+// lane belongs to a hand. Anything that needs a note's hand reads n.hand /
+// e.hand. (The old helper was removed with the alternating-pattern change.)
 // V2: strike-zone frame + lane guides live in a group that rides the smoothed
 // head height, so the target zone is always at eye level.
 const strikeFrame = new THREE.Group();
@@ -457,10 +460,11 @@ scene.add(strikeFrame);
   };
   mkBar(1.9, 0.05, 0, 0.55); mkBar(1.9, 0.05, 0, 2.05);
   mkBar(0.05, 1.55, -0.93, 1.3); mkBar(0.05, 1.55, 0.93, 1.3);
-  // Faint lane guide lines from spawn to hit plane (colored by hand)
+  // Faint lane guide lines from spawn to hit plane — NEUTRAL violet since
+  // 2026-11-15: hands alternate sides, so a hand-colored guide would lie.
   for (let li = 0; li < LANES.length; li++) {
     const lx = LANES[li];
-    const col = handOfLane(lx) === 'left' ? COL_CYAN : COL_MAG;
+    const col = 0xb9a8ff;
     const g = new THREE.BufferGeometry().setFromPoints(
       [new THREE.Vector3(lx, LANE_YOFFS[li], SPAWN_Z), new THREE.Vector3(lx, LANE_YOFFS[li], HIT_Z)]);
     strikeFrame.add(new THREE.Line(g, new THREE.LineBasicMaterial({
@@ -889,7 +893,7 @@ function drawMenu() {
   g.fillText(best ? ('BEST ' + best.score.toLocaleString() + ' PTS · ' + best.accuracy + '% ACC · COMBO ' + best.maxCombo)
     : 'NO BEST YET FOR THIS LEVEL + DIFFICULTY', 512, 578);
   g.font = '400 20px Arial'; g.fillStyle = '#c9b8e8';
-  let foot = 'VR: slice cyan LEFT / magenta RIGHT';
+  let foot = 'VR: slice cyan LEFT / magenta RIGHT — colors alternate sides, follow the color';
   if (prefs.colorblind) foot += ' (circle = LEFT, triangle = RIGHT)';
   foot += ' · Any swing direction counts · Desktop: hold mouse + drag.';
   g.fillText(foot, 512, 608);
@@ -1635,14 +1639,16 @@ function doFlash(a) {
 
 // ============================== prototype additions: approach markers, ring flashes, vignette, perf readout ==============================
 // Approach markers: one pulsing ring per lane at the hit plane, showing where
-// the next note in that lane will land (red ring = incoming bomb). Gameplay
-// feedback, so the valve never hides these — they are only 4 meshes.
+// the next note in that lane will land (red ring = incoming bomb). The ring
+// takes the incoming note's HAND color (cyan = left hand, magenta = right
+// hand), not the lane's side — hands alternate sides since 2026-11-15.
+// Gameplay feedback, so the valve never hides these — they are only 4 meshes.
 const approachMarkers = [];
 {
   const ringG = new THREE.TorusGeometry(0.2, 0.025, 8, 28);
   for (let li = 0; li < LANES.length; li++) {
     const m = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({
-      color: handOfLane(LANES[li]) === 'left' ? COL_CYAN : COL_MAG,
+      color: 0xffffff, // neutral default; updateApproachMarkers sets the live hand color
       transparent: true, opacity: 0, toneMapped: false, depthWrite: false
     }));
     m.position.set(LANES[li], LANE_YOFFS[li], HIT_Z);
@@ -1660,7 +1666,7 @@ function updateApproachMarkers(now) {
     if (li < 0) continue;
     const tLeft = n.hitTime - now;
     if (tLeft < 0 || tLeft > 0.9) continue;
-    if (!best[li] || tLeft < best[li].tLeft) best[li] = { tLeft, bomb: false };
+    if (!best[li] || tLeft < best[li].tLeft) best[li] = { tLeft, bomb: false, hand: n.hand };
   }
   for (const b of bombs) {
     if (!b.active || b.judged) continue;
@@ -1676,7 +1682,7 @@ function updateApproachMarkers(now) {
     if (!ev || screen !== 'playing') { m.visible = false; continue; }
     const k = 1 - ev.tLeft / 0.9; // 0 far -> 1 at the plane
     m.visible = true;
-    m.material.color.setHex(ev.bomb ? 0xff2222 : (handOfLane(LANES[li]) === 'left' ? COL_CYAN : COL_MAG));
+    m.material.color.setHex(ev.bomb ? 0xff2222 : (ev.hand === 'left' ? COL_CYAN : COL_MAG));
     m.material.opacity = 0.25 + 0.65 * k;
     const s = 1.35 - 0.45 * k;
     m.scale.set(s, s, 1);
@@ -1778,6 +1784,38 @@ function buildChart(lv, di, baseTime, speed = 1) {
   const rng = mulberry32(1234 + (selLevel + 1) * 77 + (di + 1) * 13);
   const beat = 60 / lv.bpm / speed;
   const nBeats = Math.floor(lv.dur / (60 / lv.bpm)) - 1;
+  // Alternating color/position patterns (2026-11-15, owner directive):
+  // the two cube colors ALTERNATE sides — color tells the HAND, not the
+  // side. A cyan cube can come down a right lane (left hand crosses over)
+  // and a magenta cube down a left lane. Sequences vary: same-side pairs,
+  // cross pairs, alternating hands on one side, short same-hand runs.
+  // FAIRNESS RULES (hard, pinned by chart-pattern-tests.js):
+  //  - Cross-body notes use ONLY the inner lanes (1 and 2), so every reach
+  //    stays comfortable — never a far cross to lane 0 or 3.
+  //  - Hands drum along the beat grid: mostly alternating, same-hand runs
+  //    capped at 3, so neither arm is overloaded and patterns stay musical.
+  //  - Cross rate rises with difficulty (EASY 15%, NORMAL 30%, HARD 40%).
+  const CROSS_RATE = { EASY: 0.15, NORMAL: 0.30, HARD: 0.40 }[diff.label] ?? 0.30;
+  let lastHand = null, runLength = 0;
+  function pickHand() {
+    let hand;
+    if (!lastHand) hand = rng() < 0.5 ? 'left' : 'right';
+    else if (runLength >= 3) hand = lastHand === 'left' ? 'right' : 'left';
+    else hand = rng() < 0.65 ? (lastHand === 'left' ? 'right' : 'left') : lastHand;
+    runLength = (hand === lastHand) ? runLength + 1 : 1;
+    lastHand = hand;
+    return hand;
+  }
+  // Lane for a hand: same side = either lane on that side; cross = the
+  // INNER lane of the opposite side only. Never a far cross, ever.
+  function pickLaneForHand(hand, usedLanes) {
+    const sideLanes = hand === 'left' ? [0, 1] : [2, 3];
+    const innerOpposite = hand === 'left' ? 2 : 1;
+    if (rng() < CROSS_RATE && !usedLanes.includes(innerOpposite)) return innerOpposite;
+    const free = sideLanes.filter(l => !usedLanes.includes(l));
+    if (free.length) return free[Math.floor(rng() * free.length)];
+    return sideLanes[0]; // unreachable with <=2 slots/beat; never a far cross
+  }
   const evts = [];
   for (let b = 0; b < nBeats; b++) {
     const slots = [];
@@ -1794,13 +1832,20 @@ function buildChart(lv, di, baseTime, speed = 1) {
     const usedLanes = [];
     for (const off of slots) {
       const T = baseTime + (b + off) * beat;
-      let lane = Math.floor(rng() * 4);
-      let guard = 0;
-      while (usedLanes.includes(lane) && guard++ < 8) lane = Math.floor(rng() * 4);
-      usedLanes.push(lane);
       const isBomb = rng() < diff.bombRate;
+      if (isBomb) {
+        let lane = Math.floor(rng() * 4);
+        let guard = 0;
+        while (usedLanes.includes(lane) && guard++ < 8) lane = Math.floor(rng() * 4);
+        usedLanes.push(lane);
+        evts.push({ hitTime: T, lane, kind: 'bomb', hand: null, dir: -1 });
+        continue;
+      }
+      const hand = pickHand();
+      const lane = pickLaneForHand(hand, usedLanes);
+      usedLanes.push(lane);
       evts.push({
-        hitTime: T, lane, kind: isBomb ? 'bomb' : 'note',
+        hitTime: T, lane, kind: 'note', hand,
         dir: -1 // no required direction (removed 2026-11-15): any swing counts
       });
     }
@@ -1824,7 +1869,7 @@ function spawnNote(e) {
   } else {
     const n = notes.find(o => !o.active);
     if (!n) return;
-    const hand = handOfLane(x);
+    const hand = e.hand || (x < 0 ? 'left' : 'right'); // color = hand, not side (alternating patterns, 2026-11-15); the lane fallback is defensive only
     n.active = true; n.judged = false; n.x = x; n.y = y; n.z = SPAWN_Z; n.vz = vz;
     n.hand = hand; n.dir = e.dir; n.bomb = false; n.hitTime = e.hitTime;
     n.cube.material = noteMats[hand];
