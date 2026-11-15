@@ -2,20 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <title>STAR STRIKE VR — Original Space Shooter</title>
 <style>
+  *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#02010a;
     font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
   canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (plain
+     align-items:center would clip the top). The ENTER VR button sits above
+     the detail paragraphs in the DOM so it is visible on load. */
   #panel {
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
     z-index:10; text-align:center; color:#fff;
   }
-  #panel .box { max-width:640px; padding:24px 20px; }
+  #panel .box { width:100%; max-width:640px; margin:auto; min-width:0; }
   #panel h1 {
-    font-size:60px; letter-spacing:8px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    font-size:clamp(32px, 9vw, 60px); letter-spacing:clamp(2px, 1vw, 8px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
     background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(77,166,255,.35);
@@ -24,9 +33,10 @@
   #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#e8f4ff; }
   #panel p.small { font-size:13px; color:#a8c4e0; }
   #vrBtn {
-    margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    margin-top:20px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
     padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+    min-height:56px; width:min(100%, 340px);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
@@ -34,13 +44,13 @@
     position:fixed; left:12px; top:52px; z-index:5;
     color:#7df9ff; font-size:14px; font-weight:800; letter-spacing:1px; line-height:1.5;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
-    background:rgba(2,8,24,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px;
+    background:rgba(2,8,24,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px; max-width:calc(100vw - 24px);
   }
   #banner {
     position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
-    color:#ffd319; font-size:30px; font-weight:900; letter-spacing:2px; text-align:center;
+    color:#ffd319; font-size:clamp(20px, 5vw, 30px); font-weight:900; letter-spacing:2px; text-align:center;
     text-shadow:0 2px 12px #000, 0 0 24px rgba(255,211,25,.5); pointer-events:none; display:none;
-    background:rgba(2,8,24,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px;
+    background:rgba(2,8,24,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px; max-width:calc(100vw - 32px);
   }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
@@ -51,6 +61,28 @@
     position:fixed; top:12px; left:12px; z-index:20; color:#bfeaff; font-size:13px;
     text-decoration:none; background:rgba(10,16,38,.72); border:1px solid #27e8ff;
     border-radius:8px; padding:8px 12px;
+  }
+  /* RECALL SHIP had no CSS rule: it rendered as an unstyled default button in
+     normal flow at the top-left, overlapping the back link. Pinned to the
+     bottom-right like the other corner controls; z-index 5 keeps it under the
+     launch panel (z-index 10), as before, and visible in-game. */
+  #recallBtn {
+    position:fixed; right:12px; bottom:12px; z-index:5; cursor:pointer;
+    background:rgba(10,16,38,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+  }
+  @media (max-width:520px) {
+    #hud { font-size:12px; }
   }
 </style>
 <script type="importmap">
@@ -64,6 +96,8 @@
     <h1>STAR STRIKE</h1>
     <div class="sub">An original VR space shooter — unlimited retries, 3 weapon slots, unlimited upgrades</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
     <p>You are rookie pilot <b>Jax Vega</b> in the interceptor <b>Kestrel</b>, holding the line against the Void drone swarm.</p>
     <p><b>Either thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible) &nbsp;·&nbsp; <b>A</b> = Nova Bomb &nbsp;·&nbsp; <b>Click either thumbstick</b> = recall ship to view center</p>
     <p class="small">In VR: <b>hold either thumbstick click</b> pauses &nbsp;·&nbsp; while paused, <b>A / X</b> toggles sound, <b>grip</b> restarts the run. Kills, pickups and hits buzz the controllers.</p>
@@ -71,8 +105,8 @@
     <p class="small">Difficulty climbs as you play: every cleared wave makes enemies faster, more numerous, and quicker to fire — and every 10,000 points raises your tier, unlocking elite drones, asteroid storms, and bomber squadrons. Boss waves (every 5th) add a new Ravager attack pattern each time.</p>
     <p class="small">Getting hit costs hull — at zero hull you explode and instantly respawn with your score, weapons and upgrades intact. There is no game over, ever.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse steers, click / Space fires, Shift barrel-rolls, N = Nova Bomb, M mutes, P pauses, R = recall ship (restart while paused).</p>
-    <button id="vrBtn">ENTER VR</button>
-    <div id="status"></div>
+    <p class="small" id="perfLast" style="color:#9fd8ff">Performance: no session logged yet.</p>
+    <p class="small">Session performance (frame times + valve level) is logged locally on this device only — nothing is sent anywhere.</p>
   </div>
 </div>
 
@@ -104,6 +138,13 @@ import * as THREE from 'three';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (a, b) => a + Math.random() * (b - a);
+// Debug toggles (URL params, OFF by default — normal play shows no debug
+// visuals): ?debug=perf shows the frame-time readout inside the VR HUD.
+// The perf readout used to be always-on; the Round 2 comparison showed the
+// 3D HUD doubling the score display on desktop, so both are now gated
+// (same pattern as Longshot/Marsh Shot).
+const debugParams = new URLSearchParams(location.search).get('debug') || '';
+const perfDebug = debugParams.includes('perf');
 
 // ============================== renderer / scene ==============================
 // CINEMATIC UPGRADE (Nov 15): antialias OFF + pixelRatio capped at 1.5, both
@@ -571,6 +612,11 @@ let muzzleT = 0, engineFlare = 0; // engineFlare: brief glow scale-up on every v
 // the SAME scoreboard: (a) this camera-attached plane in VR, (b) the #hud DOM
 // element on desktop. Key numbers only: SCORE + WAVE + HULL (the one extra
 // essential this game already tracks). No other scoreboard exists on screen.
+// ONE HUD (Round 2 comparison fix): the plane is VR-only — tick sets
+// hudPanel.visible = renderer.xr.isPresenting every frame, so on desktop
+// only the DOM #hud shows (the plane used to render on desktop too,
+// duplicating the score display). Boss bar + message line below are
+// transient and state-driven; they are NOT part of this gating.
 // VIEW MARGINS (camera FOV 70°, depth -1.5): visible half-width ≈ 1.05 and
 // visible half-height = 1.5·tan(35°) ≈ 1.05, so the view spans about ±1.05.
 // Cell 0.80 wide at center x −0.55 → left edge −0.95 (0.10 margin from the
@@ -586,6 +632,7 @@ const hudPanel = new THREE.Mesh(
 );
 hudPanel.renderOrder = 999;
 hudPanel.position.set(-0.55, 0.85, -1.5);
+hudPanel.visible = false; // VR-only — tick drives visibility (see below)
 camera.add(hudPanel);
 // Pre-existing RAVAGER boss bar, preserved as its own transient bar directly
 // below the scoreboard cell (NOT part of the cell, NOT a second scoreboard):
@@ -641,10 +688,13 @@ function drawHUD(state) {
   hctx.fillText('HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull, 22, 124);
   // Perf readout (cinematic upgrade): measured frame-time EMA + valve level
   // + the XR layer's ACTUAL framebuffer size. A measurement display, not a
-  // claim — refreshed at 2 Hz by the perf timer in tick.
-  hctx.textAlign = 'right';
-  hctx.font = 'bold 24px Arial'; hctx.fillStyle = '#8fb8ff';
-  hctx.fillText(perfValve.ema.toFixed(1) + 'ms · V' + perfValve.level + ' · ' + xrLayerSize(), 618, 124);
+  // claim — refreshed at 2 Hz by the perf timer in tick. A debug overlay:
+  // drawn only with ?debug=perf (same gating as Longshot/Marsh Shot).
+  if (perfDebug) {
+    hctx.textAlign = 'right';
+    hctx.font = 'bold 24px Arial'; hctx.fillStyle = '#8fb8ff';
+    hctx.fillText(perfValve.ema.toFixed(1) + 'ms · V' + perfValve.level + ' · ' + xrLayerSize(), 618, 124);
+  }
   if (muted) {
     hctx.textAlign = 'center';
     hctx.font = 'bold 28px Arial'; hctx.fillStyle = '#ff5566';
@@ -1058,6 +1108,81 @@ const perfValve = {
     try { renderer.xr.setFoveation(0.0); } catch (e) { /* foveation unavailable */ }
   },
 };
+
+// ============================== local performance capture (V2.0 / Standard §4) ==============================
+// Browser-side frame-time + valve-state capture, stored LOCALLY on the
+// device (localStorage) ONLY — key `star-strike-vr:perf-log`. No personal
+// data of any kind, no network calls, nothing transmitted. One summary per
+// play session (last 5 sessions kept; samples capped at 1 h in memory).
+// What is logged per session: date, duration, sample count, min/median/p95
+// frame-time EMA (ms), seconds spent in each valve level. This exists so
+// Danny's headset sessions produce a performance record automatically — no
+// hand-copied numbers. Only what the browser can measure (frame times +
+// valve state); no GPU-level claims. The last session's summary shows on
+// the menu (see showLastPerfSummary). All storage is guarded: a storage
+// failure must never break the game. Same pattern as Marsh Shot / Longshot.
+const PERF_LOG_KEY = 'star-strike-vr:perf-log';
+const PERF_LOG_MAX_SESSIONS = 5;
+const perfSession = { active: false, startT: 0, samples: [], sampleT: 0, valveSec: [0, 0, 0] };
+function perfSessionStart() {
+  if (perfSession.active) return; // restarts continue the same sitting
+  perfSession.active = true;
+  perfSession.startT = performance.now();
+  perfSession.samples.length = 0;
+  perfSession.sampleT = 0;
+  perfSession.valveSec = [0, 0, 0];
+}
+function perfSessionTick(dt) {
+  if (!perfSession.active) return;
+  perfSession.valveSec[perfValve.level] = (perfSession.valveSec[perfValve.level] || 0) + dt;
+  perfSession.sampleT += dt;
+  if (perfSession.sampleT >= 1.0) {
+    perfSession.sampleT -= 1.0;
+    perfSession.samples.push({ ema: Math.round(perfValve.ema * 10) / 10, v: perfValve.level });
+    if (perfSession.samples.length > 3600) perfSession.samples.shift(); // cap: 1 h of samples
+  }
+}
+function perfSessionFlush() {
+  if (!perfSession.active) return;
+  perfSession.active = false;
+  try {
+    const ems = perfSession.samples.map(s => s.ema).sort((a, b) => a - b);
+    const n = ems.length;
+    const rec = {
+      date: new Date().toISOString(),
+      durSec: Math.round((performance.now() - perfSession.startT) / 1000),
+      samples: n,
+      emaMin: n ? ems[0] : 0,
+      emaMed: n ? ems[Math.floor(n / 2)] : 0,
+      emaP95: n ? ems[Math.min(n - 1, Math.floor(n * 0.95))] : 0,
+      valveSec: perfSession.valveSec.map(v => Math.round(v))
+    };
+    let log = [];
+    try { const raw = localStorage.getItem(PERF_LOG_KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) log = p; } } catch (e) { log = []; }
+    log.push(rec);
+    while (log.length > PERF_LOG_MAX_SESSIONS) log.shift();
+    localStorage.setItem(PERF_LOG_KEY, JSON.stringify(log));
+    showLastPerfSummary();
+  } catch (e) { /* local logging must never break the game */ }
+}
+function showLastPerfSummary() {
+  const el = document.getElementById('perfLast');
+  if (!el) return;
+  try {
+    const raw = localStorage.getItem(PERF_LOG_KEY);
+    const log = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(log) || !log.length) { el.textContent = 'Performance: no session logged yet.'; return; }
+    const r = log[log.length - 1];
+    const mins = Math.max(1, Math.round(r.durSec / 60));
+    const totalV = ((r.valveSec[0] || 0) + (r.valveSec[1] || 0) + (r.valveSec[2] || 0)) || 1;
+    const l0 = Math.round((r.valveSec[0] || 0) / totalV * 100);
+    const d = new Date(r.date);
+    const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    el.textContent = 'Last session (' + when + '): ' + mins + ' min · median ' + r.emaMed + ' ms · p95 ' + r.emaP95 + ' ms · valve L0 ' + l0 + '% of play.';
+  } catch (e) { el.textContent = 'Performance: last-session summary unavailable.'; }
+}
+showLastPerfSummary(); // menu shows the previous session before play starts
+window.addEventListener('pagehide', perfSessionFlush);
 // The XR layer's ACTUAL framebuffer size (Rhythm Slicer pattern) — the
 // resolution the headset really renders at. 'n/a' when no XR layer exists.
 function xrLayerSize() {
@@ -1714,6 +1839,7 @@ function beginGame() {
   S.slots = []; S.nova = 0; // base laser only; weapons come from pickups, max 3
   S.upg = { plate: 0, cell: 0, engine: 0, power: 0 };
   paused = false; perfWarmup = 1.5; resetTrails();
+  perfSessionStart(); // a new play session begins (restarts continue it)
   startWave(1);
   hudDirty = true;
 }
@@ -1727,14 +1853,14 @@ vrBtn.addEventListener('click', async () => {
     renderer.xr.setReferenceSpaceType('local-floor');
     await renderer.xr.setSession(session);
     hidePanel();
-    session.addEventListener('end', () => { if (S.mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume.'); vrBtn.disabled = false; });
+    session.addEventListener('end', () => { perfSessionFlush(); if (S.mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume.'); vrBtn.disabled = false; });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
       renderer.xr.setReferenceSpaceType('local');
       await renderer.xr.setSession(session);
       hidePanel();
-      session.addEventListener('end', () => { if (S.mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume.'); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { perfSessionFlush(); if (S.mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume.'); vrBtn.disabled = false; });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
@@ -2186,7 +2312,7 @@ function tick() {
     // start/resume is not gameplay frame time). Tier progression still
     // holds while degraded (see checkTier).
     if (perfWarmup > 0) perfWarmup -= dt;
-    else perfValve.update(dt);
+    else { perfValve.update(dt); perfSessionTick(dt); }
     checkTier();
     drawHUD(S);
   } else {
@@ -2203,6 +2329,11 @@ function tick() {
 
   // ---- always-on cinematic upkeep (runs in menu, play, and paused) ----
   cockpit.visible = (S.mode === 'play');
+  // ONE HUD (Round 2 comparison fix): the 3D HUD plane is the VR HUD — it
+  // shows only while presenting. The DOM #hud is the desktop HUD. Showing
+  // both at once duplicated the score display on desktop (Nov 15
+  // comparison). One assignment here covers menu, play, and paused.
+  hudPanel.visible = renderer.xr.isPresenting;
   pauseMesh.visible = paused && S.mode === 'play';
   const trailsOn = S.mode === 'play' && perfValve.trailsOn;
   trails[0].mesh.visible = trailsOn; trails[1].mesh.visible = trailsOn;
