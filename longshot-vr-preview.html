@@ -1,0 +1,1867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>LONGSHOT VR — Original Mountain Sniper Range</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#1a0e08;
+    font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
+  canvas { display:block; }
+  #panel {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(900px 600px at 50% 25%, #3d1e0a 0%, #1a0e08 55%, #0a0503 100%);
+    z-index:10; text-align:center; color:#fff; overflow-y:auto;
+  }
+  #panel .box { max-width:680px; padding:24px 20px; }
+  #panel h1 {
+    font-size:58px; letter-spacing:8px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    background:linear-gradient(92deg,#ffd319 10%,#ff7e47 55%,#27e8ff 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    text-shadow:0 0 34px rgba(255,126,71,.35);
+  }
+  #panel .sub { font-size:14px; letter-spacing:3px; color:#ffd9a0; margin-bottom:16px; text-transform:uppercase; }
+  #panel p { font-size:15px; line-height:1.55; margin:8px 0; color:#ffeedd; }
+  #panel p.small { font-size:13px; color:#d8b898; }
+  #panel .wpnRow { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin:14px 0; }
+  #panel .wpnBtn {
+    cursor:pointer; color:#ffeedd; background:rgba(20,10,4,.7); border:2px solid #ff7e47;
+    border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.4; min-width:140px;
+  }
+  #panel .wpnBtn.sel { background:rgba(255,126,71,.25); border-color:#ffd319; box-shadow:0 0 18px rgba(255,211,25,.4); }
+  #panel .wpnBtn b { display:block; font-size:15px; color:#ffd319; letter-spacing:1px; }
+  #vrBtn {
+    margin-top:16px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    color:#1a0e08; background:linear-gradient(92deg,#ffd319,#ff7e47); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(255,126,71,.45);
+  }
+  #vrBtn:disabled { opacity:.55; cursor:wait; }
+  #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  #hud {
+    position:fixed; left:12px; top:52px; z-index:5;
+    color:#7df9ff; font-size:14px; font-weight:800; letter-spacing:1px; line-height:1.5;
+    text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:pre;
+    background:rgba(8,4,2,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px;
+  }
+  #hud b { color:#ffd319; }
+  #hud .wind { color:#2bff88; }
+  #perfHud {
+    position:fixed; right:12px; bottom:12px; z-index:5;
+    color:#7df9ff; font-size:12px; font-weight:700; letter-spacing:1px;
+    text-shadow:0 2px 8px #000; pointer-events:none; display:none;
+    background:rgba(8,4,2,.72); border:1px solid #27e8ff; border-radius:8px; padding:6px 10px;
+  }
+  #banner {
+    position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
+    color:#ffd319; font-size:28px; font-weight:900; letter-spacing:2px; text-align:center;
+    text-shadow:0 2px 12px #000, 0 0 24px rgba(255,211,25,.5); pointer-events:none; display:none;
+    background:rgba(10,6,2,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px;
+  }
+  #muteBtn {
+    position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
+    background:rgba(20,10,4,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  #backLink {
+    position:fixed; top:12px; left:12px; z-index:20; color:#bfeaff; font-size:13px;
+    text-decoration:none; background:rgba(20,10,4,.72); border:1px solid #27e8ff;
+    border-radius:8px; padding:8px 12px;
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<div id="panel">
+  <div class="box">
+    <h1>LONGSHOT</h1>
+    <div class="sub">An original VR mountain sniper range — endless targets, no fail state, ever</div>
+    <p>You hold a fixed firing position on a golden-hour mountain range. Steel plates at <b>100 / 300 / 600 yards</b>, sliding movers, pop-ups behind the berms, and drifting balloons — farther targets score more, and the wind pushes long shots sideways, so read the flags and compensate.</p>
+    <p><b>Pick your rifle</b> (or cycle in-game with <b>B</b>):</p>
+    <div class="wpnRow" id="wpnRow"></div>
+    <p><b>VR:</b> aim with the <b>right controller</b> &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Hold squeeze or A</b> = scope (aim snaps to scope center) &nbsp;·&nbsp; guns are <b>always loaded — no reloading, ever</b> &nbsp;·&nbsp; <b>B</b> cycles rifles &nbsp;·&nbsp; <b>Right stick click</b> pauses &nbsp;·&nbsp; <b>Left stick click</b> mutes</p>
+    <p><b>Desktop:</b> mouse aims &nbsp;·&nbsp; click fires &nbsp;·&nbsp; hold right-click or Shift = scope &nbsp;·&nbsp; always loaded, no reloading &nbsp;·&nbsp; 1–4 switch rifles &nbsp;·&nbsp; M mutes &nbsp;·&nbsp; P pauses &nbsp;·&nbsp; R resets score (when paused)</p>
+    <p class="small">Targets respawn endlessly and your score only ever climbs. There is no fail screen and no end — shoot as long as you like.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+  </div>
+</div>
+
+<div id="hud"></div>
+<div id="perfHud"></div>
+<div id="banner"></div>
+<button id="muteBtn">SOUND: ON</button>
+<a id="backLink" href="../">← Danny's Arcade</a>
+
+<script type="module">
+import * as THREE from 'three';
+
+// LONGSHOT VR — an original game. All rifles, names, ranges and sounds here
+// were invented for this game. No licensed weapons, characters, music or
+// worlds appear. Graphics follow the neon house style: a dark golden-hour
+// range backdrop, rifles with realistic proportions and dark-metal / wood
+// finishes, steel plates with neon-glowing rings so they read instantly at
+// distance, a neon scope reticle, neon HUD accents and glowing distance
+// markers. Materials stay cheap (unlit where possible, no heavy shaders).
+// CINEMATIC UPGRADE (Nov 15, 2026 — prototype): boot-time AA-off + frame-time
+// valve, scope sight picture, range depth (scrub / haze / rippling flags /
+// drifting golden-hour light), hit feedback (plate swing, flash, sparks,
+// dust), spatial audio + wind bed, haptics, in-VR pause + mute, gentle
+// no-fail progression. Live file untouched; this is the prototype copy.
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+
+// ============================== renderer / scene ==============================
+// CINEMATIC UPGRADE (Nov 15): antialias OFF + boot-time pixel-ratio cap.
+// The live build ran antialias ON + pixelRatio 1.5 while presenting — the
+// risky combo the Phase 1 audit flagged (Neon's header records pixelRatio 2
+// + AA + stereo as the thing that froze Quest before). In three.js r160,
+// setPixelRatio / setFramebufferScaleFactor are INERT mid-session, so there
+// is no mid-session fix: the boot-time values ARE the VR resolution, and the
+// live lever is the frame-time valve's fixed foveation below. The 1.5 cap is
+// kept (Rhythm Slicer benchmark parity — Longshot's 600-yard plates need the
+// pixels); 1.25 is a recorded A/B fallback if headset frame times miss.
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+// --- Frame-time valve + adaptive quality (Rhythm Slicer / Neon pattern) ---
+// EMA α 0.05, fed ONLY during active play (never menu/pause), degrade one
+// level after 1 s sustained above 20 ms, recover after 3 s sustained below
+// 16 ms, 2 s minimum dwell per level. The valve sheds ONLY registry items:
+// fixed foveation, hit-particle counts (minimum 2 per burst), and ambient
+// glows/motes at L2. It NEVER sheds lighting, geometry, textures, tracers,
+// muzzle flash, plate swing, hit flash, HUD, laser, scope, or flags.
+// Foveation semantics (r160 source): 0 = NO foveation, 1 = MAXIMUM.
+const perfValve = {
+  ema: 13.9, level: 0, overMs: 0, underMs: 0, dwell: 0,
+  foveation: [0.0, 0.25, 0.5],
+  get particleScale() { return [1, 0.5, 0.25][this.level]; },
+  get glowsOn() { return this.level < 2; },
+  update(dt) {
+    if (dt > 0.1) return; // single >100 ms frames are hitches, not gameplay
+    const ms = dt * 1000;
+    this.ema += (ms - this.ema) * 0.05;
+    this.dwell += dt;
+    if (this.ema > 20) { this.overMs += dt; this.underMs = 0; }
+    else if (this.ema < 16) { this.underMs += dt; this.overMs = 0; }
+    else { this.overMs = 0; this.underMs = 0; }
+    if (this.dwell >= 2.0 && this.overMs > 1.0 && this.level < 2) this.setLevel(this.level + 1);
+    else if (this.dwell >= 2.0 && this.underMs > 3.0 && this.level > 0) this.setLevel(this.level - 1);
+  },
+  setLevel(l) {
+    this.level = l; this.overMs = 0; this.underMs = 0; this.dwell = 0;
+    try { renderer.xr.setFoveation(this.foveation[l]); } catch (e) { /* best-effort */ }
+    applyValveVisuals();
+  },
+  reset() {
+    this.level = 0; this.ema = 13.9; this.overMs = 0; this.underMs = 0; this.dwell = 0;
+    try { renderer.xr.setFoveation(this.foveation[0]); } catch (e) { /* best-effort */ }
+    applyValveVisuals();
+  }
+};
+// Warm-up window (seconds) after session start / resume during which the EMA
+// is not fed — load and resume hitches are not gameplay frame time.
+let perfWarmup = 0;
+// Applies the valve's visual shedding. Called on level change AND on reset;
+// guards for objects built later in the file (sunGlow/motes exist by the
+// time any level change can fire, but reset() runs at boot).
+function applyValveVisuals() {
+  const on = perfValve.glowsOn;
+  if (typeof sunGlow !== 'undefined' && sunGlow) sunGlow.visible = on;
+  if (typeof dustMotes !== 'undefined' && dustMotes) dustMotes.visible = on;
+  if (typeof hazeSprites !== 'undefined' && hazeSprites) hazeSprites.forEach(s => { s.visible = on; });
+}
+
+// The XR layer's ACTUAL framebuffer size — the resolution the headset really
+// renders at. The stored pixel ratio is NOT the resolution. 'n/a' when no XR
+// layer exists (desktop / not presenting).
+function xrLayerSize() {
+  try {
+    const s = renderer.xr.getSession ? renderer.xr.getSession() : null;
+    const l = s && s.renderState ? s.renderState.baseLayer : null;
+    if (l && l.framebufferWidth) return l.framebufferWidth + '×' + l.framebufferHeight;
+    const layers = s && s.renderState ? s.renderState.layers : null;
+    if (layers && layers.length > 0 && layers[0] && layers[0].textureWidth) {
+      return layers[0].textureWidth + '×' + layers[0].textureHeight;
+    }
+  } catch (e) { /* no layer readable */ }
+  return 'n/a';
+}
+
+// --- Controller haptics (Quest 2 Touch; no-op on desktop / without actuators) ---
+// Same pattern as the Rhythm Slicer prototype. NOTE: this is what keeps the
+// `clamp` helper live — it was dead code in the live build.
+function pulseHaptics(hand, strength, ms) {
+  if (!renderer.xr.isPresenting) return;
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const src of session.inputSources) {
+    if (src.handedness !== hand) continue;
+    const gp = src.gamepad;
+    if (!gp || !gp.hapticActuators || !gp.hapticActuators.length) continue;
+    const act = gp.hapticActuators[0];
+    try {
+      if (typeof act.pulse === 'function') act.pulse(clamp(strength, 0, 1), ms);
+      else if (typeof act.playEffect === 'function') act.playEffect('dual-rumble', { duration: ms, strongMagnitude: strength, weakMagnitude: strength * 0.6 });
+    } catch (e) { /* haptics are best-effort */ }
+  }
+}
+
+// Boot-time foveation: level 0 (none). Deliberately NOT perfValve.reset()
+// here — reset() calls applyValveVisuals(), whose typeof guards would throw
+// on the not-yet-declared `const` scene objects (temporal dead zone).
+// reset() is only called after full script evaluation (session start).
+try { renderer.xr.setFoveation(0); } catch (e) { /* best-effort */ }
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a1608);
+scene.fog = new THREE.Fog(0x3a2410, 120, 420);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
+const rig = new THREE.Group();
+rig.position.set(0, 1.6, 0);
+rig.add(camera);
+scene.add(rig);
+
+// Lights: warm low sun + soft ambient, just enough for the standard materials.
+const hemi = new THREE.HemisphereLight(0xffd9a0, 0x1a1208, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffb066, 1.6);
+sun.position.set(-40, 30, -80);
+scene.add(sun);
+
+// Golden-hour drift: the light shifts SUBTLY across a session (10-minute
+// cycle, ±15% sun intensity, small color/exposure drift). Driven by
+// accumulated play time, frozen while paused. Pre-allocated colors — no
+// per-frame allocation. Amplitude is deliberately small: the range should
+// feel alive, never like the sun is flickering.
+let sessionT = 0;
+const _sunWarm = new THREE.Color(0xffb066), _sunDeep = new THREE.Color(0xff8a3d);
+const _fogNear = new THREE.Color(0x3a2410), _fogFar = new THREE.Color(0x452612);
+const _driftColor = new THREE.Color();
+function updateGoldenHour(dt) {
+  sessionT += dt;
+  const ph = 0.5 + 0.5 * Math.sin(sessionT * (Math.PI * 2 / 600));
+  sun.intensity = 1.6 - 0.25 * ph;
+  sun.color.lerpColors(_sunWarm, _sunDeep, ph * 0.7);
+  hemi.intensity = 0.9 - 0.08 * ph;
+  renderer.toneMappingExposure = 1.15 - 0.05 * ph;
+  scene.fog.color.lerpColors(_fogNear, _fogFar, ph);
+  if (sunGlow) sunGlow.material.opacity = 1 - 0.15 * ph;
+}
+
+// ============================== range environment ==============================
+// Golden-hour sky dome (canvas gradient + baked-in clouds, unlit, backside).
+// Clouds are painted into the texture: soft puffs with zero per-frame cost.
+function skyTexture() {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 512;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, '#0b0620'); grad.addColorStop(0.28, '#3a1c44');
+  grad.addColorStop(0.5, '#7a3050'); grad.addColorStop(0.68, '#c65a2a');
+  grad.addColorStop(0.82, '#ffb066'); grad.addColorStop(0.94, '#e8905a');
+  grad.addColorStop(1, '#3a2410');
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 512);
+  const puffs = [
+    [60, 150, 90, 16, 0.20], [180, 120, 120, 18, 0.16], [320, 165, 100, 14, 0.18],
+    [430, 120, 80, 15, 0.14], [250, 200, 130, 16, 0.15], [90, 210, 70, 12, 0.12],
+    [380, 215, 90, 13, 0.12], [150, 90, 60, 10, 0.10], [470, 180, 60, 11, 0.10]
+  ];
+  puffs.forEach(p => {
+    const rg = g.createRadialGradient(p[0], p[1], 2, p[0], p[1], p[2]);
+    rg.addColorStop(0, 'rgba(255,205,170,' + p[4] + ')');
+    rg.addColorStop(1, 'rgba(255,205,170,0)');
+    g.fillStyle = rg;
+    g.save(); g.translate(p[0], p[1]); g.scale(1, p[3] / p[2]); g.translate(-p[0], -p[1]);
+    g.beginPath(); g.arc(p[0], p[1], p[2], 0, Math.PI * 2); g.fill(); g.restore();
+  });
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(700, 24, 16),
+  new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, fog: false })
+);
+scene.add(sky);
+
+// Low sun glow sprite.
+function glowTexture(inner, outer) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  grad.addColorStop(0, inner); grad.addColorStop(1, outer);
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: glowTexture('rgba(255,220,150,1)', 'rgba(255,120,40,0)'), transparent: true, fog: false, depthWrite: false
+}));
+sunGlow.scale.set(180, 180, 1); sunGlow.position.set(-160, 55, -600);
+scene.add(sunGlow);
+// Bright sun core disc in front of the glow sprite.
+const sunCore = new THREE.Mesh(
+  new THREE.CircleGeometry(22, 24),
+  new THREE.MeshBasicMaterial({ color: 0xfff3c0, fog: false, transparent: true, opacity: 0.95 })
+);
+sunCore.position.set(-160, 55, -599);
+scene.add(sunCore);
+
+// Ground: dry-grass range floor with a procedural speckle texture, plus a
+// gravel firing-line strip under the bench. Static, cheap, standard material
+// so the warm sun still shades it.
+function groundTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#4a3a1e'; g.fillRect(0, 0, 256, 256);
+  const tones = ['#5a4a26', '#3a2c14', '#6b5a2a', '#7a6a35', '#2e2410', '#54401f'];
+  for (let i = 0; i < 5200; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.globalAlpha = 0.12 + rand(0, 0.25);
+    const s = rand(1, 3);
+    g.fillRect(rand(0, 256), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 0.10;
+  for (let i = 0; i < 24; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.beginPath(); g.arc(rand(0, 256), rand(0, 256), rand(8, 26), 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(12, 12); return t;
+}
+function gravelTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6a6257'; g.fillRect(0, 0, 256, 256);
+  const tones = ['#8a8272', '#4a443c', '#7a7264', '#9a9282', '#5a544a'];
+  for (let i = 0; i < 4200; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.globalAlpha = 0.25 + rand(0, 0.4);
+    const s = rand(1, 4);
+    g.fillRect(rand(0, 256), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 2); return t;
+}
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(600, 600),
+  new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 })
+);
+ground.rotation.x = -Math.PI / 2; ground.position.y = -1.6;
+scene.add(ground);
+const gravel = new THREE.Mesh(
+  new THREE.PlaneGeometry(10, 6),
+  new THREE.MeshStandardMaterial({ map: gravelTexture(), roughness: 1 })
+);
+gravel.rotation.x = -Math.PI / 2; gravel.position.set(0, -1.58, -1.5);
+scene.add(gravel);
+
+// Firing line: wooden bench + sandbags in front of the player.
+const benchMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.9 });
+const bench = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.12, 0.7), benchMat);
+bench.position.set(0, -0.55, -1.4); scene.add(bench);
+const benchLegL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.6), benchMat);
+benchLegL.position.set(-1.0, -1.1, -1.4); scene.add(benchLegL);
+const benchLegR = benchLegL.clone(); benchLegR.position.x = 1.0; scene.add(benchLegR);
+function fabricTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6b5a33'; g.fillRect(0, 0, 128, 128);
+  g.globalAlpha = 0.15; g.strokeStyle = '#3a2f18'; g.lineWidth = 1;
+  for (let y = 0; y <= 128; y += 8) { g.beginPath(); g.moveTo(0, y); g.lineTo(128, y); g.stroke(); }
+  for (let x = 0; x <= 128; x += 8) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 128); g.stroke(); }
+  g.globalAlpha = 0.5; g.strokeStyle = '#2e2410'; g.setLineDash([6, 5]); g.lineWidth = 2;
+  g.strokeRect(6, 6, 116, 116); g.setLineDash([]);
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const sandMat = new THREE.MeshStandardMaterial({ map: fabricTexture(), roughness: 1 });
+// Rounded sandbags, stacked 3 + 2, with a slight random yaw each.
+// CINEMATIC UPGRADE: one InstancedMesh (5 instances) instead of 5 meshes —
+// same look, 4 fewer draw calls. Static: matrices are set once at build.
+const _dummy = new THREE.Object3D();
+{
+  const bagGeo = new THREE.SphereGeometry(1, 14, 10);
+  const bags = new THREE.InstancedMesh(bagGeo, sandMat, 5);
+  [[-0.7, -0.40], [0, -0.40], [0.7, -0.40], [-0.35, -0.16], [0.35, -0.16]].forEach((b, i) => {
+    _dummy.position.set(b[0], b[1], -1.35);
+    _dummy.rotation.set(0, rand(-0.2, 0.2), 0);
+    _dummy.scale.set(0.38, 0.15, 0.22);
+    _dummy.updateMatrix();
+    bags.setMatrixAt(i, _dummy.matrix);
+  });
+  bags.instanceMatrix.needsUpdate = true;
+  scene.add(bags);
+}
+
+// Spotting scope on a tripod, left of the bench — firing-line set dressing
+// that sells "sniper range" in the first thing the player sees. Static,
+// 4 meshes, no per-frame cost.
+{
+  const legGeo = new THREE.CylinderGeometry(0.02, 0.02, 1.5, 6);
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x2a2d31, roughness: 0.6, metalness: 0.5 });
+  const tripodX = -1.8, tripodZ = -1.7;
+  [[0.22, 0.12], [-0.22, 0.12], [0, -0.26]].forEach(off => {
+    const leg = new THREE.Mesh(legGeo, legMat);
+    leg.position.set(tripodX + off[0] * 0.5, -0.85, tripodZ + off[1] * 0.5);
+    leg.rotation.set(off[1] * 0.9, 0, -off[0] * 0.9);
+    scene.add(leg);
+  });
+  const spotScope = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.06, 0.55, 10),
+    new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 0.4, metalness: 0.6 })
+  );
+  spotScope.rotation.x = Math.PI / 2 - 0.06;
+  spotScope.position.set(tripodX, -0.12, tripodZ);
+  scene.add(spotScope);
+}
+
+// Layered mountain ridges: jagged silhouette strips with procedural
+// rock/snow canvas textures and baked haze on the far ranges. All static,
+// unlit (basic) materials — no lighting cost, no per-frame work. The old
+// flat cones are gone; these read as real mountains.
+function ridgeTexture(rockTop, rockBottom, snowAmt, hazeAlpha, hazeColor) {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 256, 0, 0);
+  grad.addColorStop(0, rockBottom); grad.addColorStop(0.55, rockTop);
+  grad.addColorStop(0.8, rockTop); grad.addColorStop(1, '#e8e4dc');
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
+  // Rock speckle + strata lines.
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.08)';
+    const s = rand(1, 3);
+    g.fillRect(rand(0, 512), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 0.16; g.strokeStyle = '#000';
+  for (let y = 30; y < 256; y += 12 + Math.floor(rand(0, 12))) {
+    g.beginPath(); g.moveTo(0, y);
+    for (let x = 0; x <= 512; x += 32) g.lineTo(x, y + rand(-3, 3));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  // Noisy snow: white speckles concentrated near the top, fading down.
+  for (let i = 0; i < 1400 * snowAmt; i++) {
+    const y = rand(0, 90);
+    g.fillStyle = 'rgba(240,238,230,' + (0.5 * (1 - y / 110)) + ')';
+    g.fillRect(rand(0, 512), y, rand(1, 4), rand(1, 3));
+  }
+  // Baked atmospheric haze for the far ranges.
+  if (hazeAlpha > 0) { g.fillStyle = hazeColor; g.globalAlpha = hazeAlpha; g.fillRect(0, 0, 512, 256); g.globalAlpha = 1; }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function ridgeProfile(width, minH, maxH, steps) {
+  const pts = [];
+  let h = minH + rand(0, (maxH - minH) * 0.3);
+  for (let i = 0; i <= steps; i++) {
+    const x = -width / 2 + (i / steps) * width;
+    h += rand(-1, 1) * (maxH - minH) * 0.35;
+    h = Math.max(minH, Math.min(maxH, h));
+    if (i % 4 === 2) h = Math.min(maxH, h + (maxH - minH) * 0.35);
+    pts.push([x, h]);
+  }
+  pts[0][1] = minH * 0.5; pts[pts.length - 1][1] = minH * 0.5;
+  return pts;
+}
+function makeRidge(width, xOff, z, baseY, minH, maxH, tex) {
+  const peaks = ridgeProfile(width, minH, maxH, 42);
+  const pos = [], uv = [], idx = [];
+  peaks.forEach((p, i) => {
+    pos.push(p[0] + xOff, baseY, z, p[0] + xOff, baseY + p[1], z);
+    uv.push(i / (peaks.length - 1), 0, i / (peaks.length - 1), 1);
+  });
+  for (let i = 0; i < peaks.length - 1; i++) {
+    const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo,
+    new THREE.MeshBasicMaterial({ map: tex, fog: false, side: THREE.DoubleSide }));
+  scene.add(mesh); return mesh;
+}
+const farTex = ridgeTexture('#5a4a52', '#3a2c38', 1.0, 0.45, 'rgba(150,130,180,1)');
+const midTex = ridgeTexture('#4a382c', '#2e2018', 0.8, 0.20, 'rgba(150,130,180,1)');
+const nearTex = ridgeTexture('#3a2a1e', '#241812', 0.5, 0, 'rgba(0,0,0,0)');
+makeRidge(1100, 0, -560, -1.6, 60, 150, farTex);
+makeRidge(1000, 0, -470, -1.6, 40, 110, midTex);
+makeRidge(900, 0, -380, -1.6, 25, 75, nearTex);
+makeRidge(420, -480, -330, -1.6, 20, 55, nearTex);
+makeRidge(420, 480, -340, -1.6, 20, 60, nearTex);
+
+// Berms + glowing distance markers at each lane.
+function dirtTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#3d2c14'; g.fillRect(0, 0, 256, 256);
+  const tones = ['#2e2010', '#4a3820', '#54401f', '#332412'];
+  for (let i = 0; i < 3800; i++) {
+    g.fillStyle = tones[Math.floor(rand(0, tones.length))];
+    g.globalAlpha = 0.15 + rand(0, 0.3);
+    const s = rand(1, 4);
+    g.fillRect(rand(0, 256), rand(0, 256), s, s);
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 1); return t;
+}
+const bermMat = new THREE.MeshStandardMaterial({ map: dirtTexture(), roughness: 1 });
+const bermGrassMat = new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 });
+function markerTexture(text, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(8,4,2,0.9)'; g.fillRect(0, 0, 256, 128);
+  g.strokeStyle = color; g.lineWidth = 6; g.strokeRect(6, 6, 244, 116);
+  g.font = '900 64px Arial'; g.textAlign = 'center'; g.fillStyle = color;
+  g.shadowColor = color; g.shadowBlur = 22; g.fillText(text, 128, 84);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const LANES = [
+  { yd: 100, z: -60, color: 0x27e8ff, css: '#27e8ff' },
+  { yd: 300, z: -120, color: 0x2bff88, css: '#2bff88' },
+  { yd: 600, z: -190, color: 0xff3df0, css: '#ff3df0' }
+];
+// Sign-post transforms, collected during the lane build and baked into one
+// InstancedMesh below.
+const bermPostXforms = [];
+LANES.forEach(L => {
+  const berm = new THREE.Mesh(new THREE.BoxGeometry(90, 3, 4), bermMat);
+  berm.position.set(0, -0.1, L.z - 6); scene.add(berm);
+  const bermTop = new THREE.Mesh(new THREE.BoxGeometry(90, 0.35, 4.4), bermGrassMat);
+  bermTop.position.set(0, 1.55, L.z - 6); scene.add(bermTop);
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.5, metalness: 0.7 });
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(9.6, 5.1, 0.2), frameMat);
+  frame.position.set(34, 3.5, L.z - 4.2); scene.add(frame);
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(9, 4.5),
+    new THREE.MeshBasicMaterial({ map: markerTexture(L.yd + ' YDS', L.css), transparent: false, fog: false })
+  );
+  sign.position.set(34, 3.5, L.z - 4); scene.add(sign);
+  [30.5, 37.5].forEach(px => { bermPostXforms.push([px, 0.9, L.z - 4.2]); });
+});
+// CINEMATIC UPGRADE: sign posts as one InstancedMesh (6 instances) instead
+// of 6 meshes — same look, 5 fewer draw calls. Static, set once at build.
+{
+  const postGeo = new THREE.BoxGeometry(0.4, 5.2, 0.4);
+  const posts = new THREE.InstancedMesh(postGeo, benchMat, bermPostXforms.length);
+  bermPostXforms.forEach((p, i) => {
+    _dummy.position.set(p[0], p[1], p[2]);
+    _dummy.rotation.set(0, 0, 0);
+    _dummy.scale.set(1, 1, 1);
+    _dummy.updateMatrix();
+    posts.setMatrixAt(i, _dummy.matrix);
+  });
+  posts.instanceMatrix.needsUpdate = true;
+  scene.add(posts);
+}
+
+// Scrub bushes along the berm tops and scattered on the flanks — the range
+// floor was bare procedural speckle between the firing line and the berms.
+// One InstancedMesh (~70 instances), 1 draw call. Berm-top bushes sit
+// BEHIND the plates (berm is 6 m behind the plate line) and stay low so
+// they never occlude a target.
+{
+  const scrubGeo = new THREE.IcosahedronGeometry(0.5, 0);
+  const scrubMat = new THREE.MeshStandardMaterial({ color: 0x4a5226, roughness: 1 });
+  const spots = [];
+  LANES.forEach(L => {
+    for (let i = 0; i < 12; i++) spots.push([rand(-44, 44), 1.85, L.z - 6 + rand(-1.5, 1.5), rand(0.35, 0.6)]);
+  });
+  for (let i = 0; i < 34; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    spots.push([side * rand(30, 58), -1.3, rand(-180, -15), rand(0.5, 1.1)]);
+  }
+  const scrub = new THREE.InstancedMesh(scrubGeo, scrubMat, spots.length);
+  spots.forEach((s, i) => {
+    _dummy.position.set(s[0], s[1], s[2]);
+    _dummy.rotation.set(0, rand(0, Math.PI * 2), 0);
+    _dummy.scale.set(s[3], s[3] * 0.7, s[3]);
+    _dummy.updateMatrix();
+    scrub.setMatrixAt(i, _dummy.matrix);
+  });
+  scrub.instanceMatrix.needsUpdate = true;
+  scene.add(scrub);
+}
+
+// Distance haze: soft warm translucent bands standing at each berm line.
+// Aerial perspective in layers — the eye reads three distinct depths
+// instead of one flat fog wash. 3 sprites, valve-shed at L2 (ambient only).
+const hazeSprites = [];
+LANES.forEach(L => {
+  const haze = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture('rgba(255,180,120,0.16)', 'rgba(255,180,120,0)'),
+    transparent: true, depthWrite: false, fog: false, opacity: 0.85
+  }));
+  haze.scale.set(150, 22, 1);
+  haze.position.set(0, 7, L.z - 2);
+  scene.add(haze);
+  hazeSprites.push(haze);
+});
+
+// Drifting dust motes in the golden light around the firing line —
+// atmosphere the player breathes in, not geometry they look at. One THREE
+// .Points cloud (40 points), 1 draw call, slow whole-cloud rotation + bob
+// (no per-point updates). Valve-shed at L2 (ambient only).
+let dustMotes = null;
+{
+  const N = 40;
+  const pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = rand(-6, 6);
+    pos[i * 3 + 1] = rand(-1.2, 2.5);
+    pos[i * 3 + 2] = rand(-8, 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  dustMotes = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0xffd9a0, size: 0.06, transparent: true, opacity: 0.35,
+    depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
+  }));
+  scene.add(dustMotes);
+}
+
+// Wind flags downrange — they swing with the wind so the player can read it
+// in the world as well as on the HUD.
+// CINEMATIC UPGRADE: segmented cloth (8×3) with a per-vertex ripple driven
+// by wind speed, amplitude growing toward the free edge — the flags now
+// ripple instead of swinging as stiff boards. MeshBasicMaterial needs no
+// normals, so the update is a position-buffer write only (3 flags × 36
+// verts). The dead empty `flagGroup` (flags were added to the scene, never
+// to the group) is removed.
+const flagPoles = [];
+const flagBase = [];
+LANES.forEach((L, i) => {
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.08, 7, 6),
+    new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.6 })
+  );
+  pole.position.set(-26 + i * 4, 2, L.z + 8); scene.add(pole);
+  const flagGeo = new THREE.PlaneGeometry(2.4, 1.2, 8, 3);
+  const flag = new THREE.Mesh(
+    flagGeo,
+    new THREE.MeshBasicMaterial({ color: L.color, side: THREE.DoubleSide, fog: false })
+  );
+  flag.position.set(-24.7 + i * 4, 5.2, L.z + 8); scene.add(flag);
+  flagPoles.push(flag);
+  flagBase.push(new Float32Array(flagGeo.attributes.position.array));
+});
+function updateFlagWave(t) {
+  const windF = 0.3 + wind.mph / 12; // 0.3 calm → 1.3+ at full wind
+  for (let f = 0; f < flagPoles.length; f++) {
+    const attr = flagPoles[f].geometry.attributes.position;
+    const base = flagBase[f];
+    for (let v = 0; v < attr.count; v++) {
+      const bx = base[v * 3];
+      const edge = (bx + 1.2) / 2.4; // 0 at the pole, 1 at the free edge
+      attr.array[v * 3 + 2] = Math.sin(bx * 2.5 - t * (4 + wind.mph * 0.6) + f * 1.3) * 0.14 * windF * edge;
+    }
+    attr.needsUpdate = true;
+  }
+}
+
+// ============================== weapons ==============================
+// Four original rifles. Damage = how many hit points a shot removes;
+// targets have 1–3 HP, so the big rifle drops anything in one shot while
+// the light rifles need follow-ups on the heavy 600-yard plate.
+const WEAPONS = [
+  { name: 'SCOUT .308', zoom: 4, dmg: 1, bolt: 0.9, rate: 0, kick: 0.012, crack: 0.5, barrel: 0.85, stock: 0x3a2a1a, metal: 0x22262c, scale: 1.0 },
+  { name: 'HUNTER 6.5', zoom: 6, dmg: 2, bolt: 1.1, rate: 0, kick: 0.018, crack: 0.6, barrel: 0.95, stock: 0x6b4226, metal: 0x1a1d22, scale: 1.05 },
+  { name: 'THUNDER .50', zoom: 10, dmg: 3, bolt: 2.0, rate: 0, kick: 0.045, crack: 1.0, barrel: 1.25, stock: 0x2a2018, metal: 0x14171c, scale: 1.25 },
+  { name: 'VIPER SEMI', zoom: 6, dmg: 1, bolt: 0, rate: 0.25, kick: 0.014, crack: 0.55, barrel: 0.9, stock: 0x1c2226, metal: 0x2a2f36, scale: 1.0 }
+];
+let wpnIdx = 0, boltT = 0, fireT = 0;
+
+// Rifle model: realistic proportions — long barrel, receiver, tapered stock,
+// scope on mounts, magazine, grip. Dark metal + stock tones, one thin neon
+// accent line on the receiver for the house style. Attached to the camera so
+// it is visible in VR and desktop alike; hidden while scoped.
+// CINEMATIC UPGRADE: a shared grain canvas used as a bumpMap on both metal
+// (fine, 0.0015) and stock (coarser, 0.004) — the rifle is the object the
+// eye rests on most, so it gets the photorealism budget. Bump only: colors
+// are unchanged, and one shared texture costs no draw calls.
+function grainTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#8a8a8a'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 60; i++) {
+    g.strokeStyle = Math.random() < 0.5 ? 'rgba(60,60,60,0.35)' : 'rgba(180,180,180,0.25)';
+    g.lineWidth = rand(0.5, 1.5);
+    const y = rand(0, 128);
+    g.beginPath(); g.moveTo(0, y);
+    for (let x = 0; x <= 128; x += 16) g.lineTo(x, y + rand(-2, 2));
+    g.stroke();
+  }
+  return new THREE.CanvasTexture(c); // bump map: linear, no sRGB colorspace
+}
+const grainTex = grainTexture();
+const rifleGroup = new THREE.Group();
+let muzzleObj = null;
+function buildRifle(w) {
+  while (rifleGroup.children.length) rifleGroup.remove(rifleGroup.children[0]);
+  const metal = new THREE.MeshStandardMaterial({ color: w.metal, roughness: 0.45, metalness: 0.6, bumpMap: grainTex, bumpScale: 0.0015 });
+  const stock = new THREE.MeshStandardMaterial({ color: w.stock, roughness: 0.8, bumpMap: grainTex, bumpScale: 0.004 });
+  const s = w.scale;
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022 * s, 0.026 * s, w.barrel, 10), metal);
+  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.02, -0.55 - w.barrel / 2 + 0.35); rifleGroup.add(barrel);
+  if (w.name === 'THUNDER .50') {
+    const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, 0.16, 10), metal);
+    brake.rotation.x = Math.PI / 2; brake.position.set(0, 0.02, -0.55 - w.barrel + 0.35 - 0.06); rifleGroup.add(brake);
+  }
+  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09 * s, 0.11 * s, 0.42 * s), metal);
+  receiver.position.set(0, 0, -0.28); rifleGroup.add(receiver);
+  const stockMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.14 * s, 0.5 * s), stock);
+  stockMesh.position.set(0, -0.03, 0.05); stockMesh.rotation.x = 0.06; rifleGroup.add(stockMesh);
+  const butt = new THREE.Mesh(new THREE.BoxGeometry(0.11 * s, 0.22 * s, 0.08 * s), stock);
+  butt.position.set(0, -0.06, 0.32); rifleGroup.add(butt);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07 * s, 0.16 * s, 0.09 * s), stock);
+  grip.position.set(0, -0.1, -0.02); grip.rotation.x = 0.35; rifleGroup.add(grip);
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06 * s, 0.16 * s, 0.12 * s), metal);
+  mag.position.set(0, -0.11, -0.22); mag.rotation.x = 0.15; rifleGroup.add(mag);
+  const scopeTube = new THREE.Mesh(new THREE.CylinderGeometry(0.032 * s, 0.032 * s, 0.24 * s, 12), metal);
+  scopeTube.rotation.x = Math.PI / 2; scopeTube.position.set(0, 0.1, -0.3); rifleGroup.add(scopeTube);
+  const scopeBell = new THREE.Mesh(new THREE.CylinderGeometry(0.045 * s, 0.032 * s, 0.08 * s, 12), metal);
+  scopeBell.rotation.x = Math.PI / 2; scopeBell.position.set(0, 0.1, -0.46); rifleGroup.add(scopeBell);
+  const accent = new THREE.Mesh(new THREE.BoxGeometry(0.095 * s, 0.012, 0.3 * s),
+    new THREE.MeshBasicMaterial({ color: 0x27e8ff, fog: false }));
+  accent.position.set(0, 0.058, -0.28); rifleGroup.add(accent);
+  muzzleObj = new THREE.Object3D();
+  muzzleObj.position.set(0, 0.02, -0.55 - w.barrel + 0.35 - 0.05);
+  rifleGroup.add(muzzleObj);
+}
+buildRifle(WEAPONS[0]);
+rifleGroup.position.set(0.28, -0.26, -0.55);
+rifleGroup.rotation.y = 0.06;
+camera.add(rifleGroup);
+
+// Muzzle flash: one additive sprite, scene-level (NOT a rifle child —
+// buildRifle wipes the rifle group's children on every weapon switch).
+// Positioned at the muzzle world position on each shot, visible ~50 ms
+// with a random rotation/scale. 1 draw call, only while firing. Gameplay
+// feedback — the valve never sheds it.
+const muzzleFlash = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: glowTexture('rgba(255,240,180,1)', 'rgba(255,120,20,0)'),
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false
+}));
+muzzleFlash.scale.set(0.5, 0.5, 1);
+muzzleFlash.visible = false;
+scene.add(muzzleFlash);
+let muzzleFlashT = 0;
+const _flashPos = new THREE.Vector3();
+function showMuzzleFlash(power) {
+  muzzleObj.getWorldPosition(_flashPos);
+  muzzleFlash.position.copy(_flashPos);
+  const s = 0.35 + 0.35 * power;
+  muzzleFlash.scale.set(s, s, 1);
+  muzzleFlash.material.rotation = rand(0, Math.PI * 2);
+  muzzleFlash.visible = true;
+  muzzleFlashT = 0.05;
+}
+
+// Scope overlay: dark ring + neon mil-dot reticle, camera-attached, shown
+// only while scoped.
+// CINEMATIC UPGRADE — a proper sight picture, not a zoomed flat view: the
+// scope face is redrawn (cheap, infrequent — on weapon switch and wind
+// roll only, never per frame) with the current zoom, a windage reference
+// (mph + arrow, so the scope itself tells the shooter the hold), a subtle
+// glass tint (clear center, faint cool darkening toward the edge), and a
+// soft inner shadow ring for eye-relief depth. The HUD is hidden while
+// scoped (see tick) — a real scope shows no HUD.
+const scopeCanvas = document.createElement('canvas'); scopeCanvas.width = scopeCanvas.height = 512;
+const scopeCtx = scopeCanvas.getContext('2d');
+const scopeTex = new THREE.CanvasTexture(scopeCanvas);
+function drawScopeFace() {
+  const g = scopeCtx;
+  g.clearRect(0, 0, 512, 512);
+  // Dark ring (opaque outside the glass).
+  g.fillStyle = 'rgba(0,0,0,0.96)';
+  g.beginPath(); g.arc(256, 256, 256, 0, Math.PI * 2); g.arc(256, 256, 196, 0, Math.PI * 2, true); g.fill();
+  // Glass tint: clear center, faint cool darkening toward the edge.
+  const glass = g.createRadialGradient(256, 256, 60, 256, 256, 196);
+  glass.addColorStop(0, 'rgba(120,160,190,0.0)');
+  glass.addColorStop(0.75, 'rgba(90,130,170,0.06)');
+  glass.addColorStop(1, 'rgba(40,60,90,0.22)');
+  g.fillStyle = glass;
+  g.beginPath(); g.arc(256, 256, 196, 0, Math.PI * 2); g.fill();
+  // Soft inner shadow ring — eye-relief depth.
+  g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 14;
+  g.beginPath(); g.arc(256, 256, 190, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 3; g.shadowColor = '#27e8ff'; g.shadowBlur = 10;
+  g.beginPath(); g.arc(256, 256, 196, 0, Math.PI * 2); g.stroke();
+  g.shadowBlur = 0; g.strokeStyle = '#ff3df0'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(256, 60); g.lineTo(256, 452); g.moveTo(60, 256); g.lineTo(452, 256); g.stroke();
+  g.fillStyle = '#27e8ff';
+  for (let i = -4; i <= 4; i++) {
+    if (i === 0) continue;
+    g.beginPath(); g.arc(256 + i * 28, 256, 3, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(256, 256 + i * 28, 3, 0, Math.PI * 2); g.fill();
+  }
+  g.strokeStyle = '#ffd319'; g.lineWidth = 2;
+  g.beginPath(); g.arc(256, 256, 12, 0, Math.PI * 2); g.stroke();
+  // Sight-picture data: zoom + windage reference, dim so it never shouts.
+  g.font = 'bold 26px Arial'; g.textAlign = 'center';
+  g.fillStyle = 'rgba(125,249,255,0.85)';
+  g.fillText(WEAPONS[wpnIdx].zoom + '×', 256, 428);
+  g.font = 'bold 20px Arial';
+  g.fillStyle = 'rgba(43,255,136,0.85)';
+  g.fillText('WIND ' + wind.mph.toFixed(0) + ' mph ' + (wind.dir > 0 ? '→' : '←'), 256, 456);
+  scopeTex.needsUpdate = true;
+}
+const scopeMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.7, 1.7),
+  new THREE.MeshBasicMaterial({ map: scopeTex, transparent: true, depthTest: false, fog: false })
+);
+scopeMesh.position.set(0, 0, -1.2); scopeMesh.renderOrder = 900; scopeMesh.visible = false;
+camera.add(scopeMesh);
+
+// Unscoped aim dot: a small neon dot where the aim ray currently points.
+const aimDot = new THREE.Mesh(
+  new THREE.CircleGeometry(0.06, 12),
+  new THREE.MeshBasicMaterial({ color: 0xffd319, transparent: true, opacity: 0.95, depthTest: false, fog: false })
+);
+aimDot.renderOrder = 899; scene.add(aimDot);
+
+// VR laser sight: a thin red beam from the right controller along the true
+// shot line. It matters because the rifle viewmodel is head-attached while
+// the shot comes from the hand — without the beam, the player aims with the
+// rifle they see and the bullet goes where the hand points. The beam removes
+// that guesswork. Unscoped VR only; hidden while scoped or on desktop.
+const laser = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.008, 0.008, 1, 6),
+  new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.55, depthTest: false, fog: false })
+);
+laser.renderOrder = 898; laser.visible = false; scene.add(laser);
+const _laserD = new THREE.Vector3();
+
+// ============================== Scoreboard: ONE shared arcade cell ==============================
+// Single scoreboard in both forms, same content, same dark translucent cell
+// with a thin neon border: (a) a camera-attached plane in VR, (b) the #hud
+// DOM element on desktop. Key numbers only: score + hits, current rifle,
+// and wind speed/direction (it fits on its own uncrowded line; the old
+// zoom/damage/bolt/drift extras are dropped from the cell, not from the
+// game — rifles, zoom, and the wind flags in the world are untouched).
+// VR view margins (camera FOV 70, depth -1.5): visible half-width and
+// half-height are both ~1.05, so with a 0.80-wide x 0.36-tall cell and a
+// 0.10 margin from the left and top edges, the cell spans x -0.95..-0.15
+// and y 0.59..0.95 — its entire width/height inside the view, top-left.
+// Canvas 640x288 matches the plane aspect (0.80/0.36 = 2.222) so text is undistorted.
+const hudCanvas = document.createElement('canvas'); hudCanvas.width = 640; hudCanvas.height = 288;
+const hctx = hudCanvas.getContext('2d');
+const hudTex = new THREE.CanvasTexture(hudCanvas);
+const hudMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.80, 0.36),
+  new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, fog: false })
+);
+hudMesh.position.set(-0.55, 0.77, -1.5); hudMesh.renderOrder = 890;
+camera.add(hudMesh);
+// Perf readout (bottom-right, 0.62×0.08 m at depth -1.5: x 0.37..0.99,
+// y -0.92..-0.84 — inside the view with margin). Shows measured active-play
+// frame-time EMA + valve level + the XR layer's ACTUAL framebuffer size — a
+// measurement display for Danny's headset session, never a claim. Updated
+// on a 0.5 s cadence, not per frame. Mirrored in the #perfHud DOM element
+// on desktop. +1 draw call while playing.
+const perfCanvas = document.createElement('canvas'); perfCanvas.width = 512; perfCanvas.height = 64;
+const perfCtx = perfCanvas.getContext('2d');
+const perfTex = new THREE.CanvasTexture(perfCanvas);
+const perfMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.62, 0.08),
+  new THREE.MeshBasicMaterial({ map: perfTex, transparent: true, depthTest: false, fog: false })
+);
+perfMesh.position.set(0.68, -0.88, -1.5); perfMesh.renderOrder = 890;
+perfMesh.visible = false;
+camera.add(perfMesh);
+const perfHudEl = document.getElementById('perfHud');
+function updatePerfReadout() {
+  const text = perfValve.ema.toFixed(1) + ' ms · VALVE L' + perfValve.level +
+    ' · FB ' + xrLayerSize() + (S.paused ? ' · PAUSED' : '');
+  perfCtx.clearRect(0, 0, 512, 64);
+  perfCtx.fillStyle = 'rgba(8,4,2,0.72)'; perfCtx.fillRect(0, 0, 512, 64);
+  perfCtx.strokeStyle = '#27e8ff'; perfCtx.lineWidth = 2; perfCtx.strokeRect(2, 2, 508, 60);
+  perfCtx.font = 'bold 26px Arial'; perfCtx.fillStyle = '#7df9ff';
+  perfCtx.fillText(text, 12, 42);
+  perfTex.needsUpdate = true;
+  perfHudEl.textContent = text;
+}
+let hudDirty = true;
+const hudEl = document.getElementById('hud');
+function drawHud() {
+  const w = WEAPONS[wpnIdx];
+  const windArrow = wind.dir > 0 ? '→' : '←';
+  const lines = [
+    'SCORE ' + S.score + ' · HITS ' + S.hits,
+    w.name,
+    'WIND ' + wind.mph.toFixed(0) + ' mph ' + windArrow + (muted ? ' · MUTED' : '')
+  ];
+  hctx.clearRect(0, 0, 640, 288);
+  hctx.fillStyle = 'rgba(8,4,2,0.72)'; hctx.fillRect(0, 0, 640, 288);
+  hctx.strokeStyle = '#27e8ff'; hctx.lineWidth = 4; hctx.strokeRect(4, 4, 632, 280);
+  hctx.font = 'bold 38px Arial';
+  hctx.fillStyle = '#ffd319'; hctx.fillText(lines[0], 20, 60);
+  hctx.font = 'bold 32px Arial';
+  hctx.fillStyle = '#7df9ff'; hctx.fillText(lines[1], 20, 155);
+  hctx.font = 'bold 30px Arial';
+  hctx.fillStyle = '#2bff88'; hctx.fillText(lines[2], 20, 250);
+  hudTex.needsUpdate = true;
+  hudEl.innerHTML = '<b>' + lines[0] + '</b>\n' + lines[1] + '\n<span class="wind">' + lines[2] + '</span>';
+}
+
+// ============================== audio (original synth) ==============================
+let actx = null, masterGain = null, muted = false;
+let windGainNode = null;
+// Wind bed: a looping filtered-noise bed whose gain follows the wind speed
+// — the range breathes. Started once inside startAudio (user gesture);
+// gain is driven on the 0.5 s cadence in tick, silenced while paused/menu.
+function startWindBed() {
+  if (!actx || windGainNode) return;
+  try {
+    const len = Math.floor(actx.sampleRate * 2);
+    const buf = actx.createBuffer(1, len, actx.sampleRate);
+    const d = buf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < len; i++) { // brown-ish noise: soft, no hiss
+      const w = Math.random() * 2 - 1;
+      last = (last + 0.02 * w) / 1.02;
+      d[i] = last * 3.5;
+    }
+    const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 400;
+    windGainNode = actx.createGain(); windGainNode.gain.value = 0;
+    src.connect(lp); lp.connect(windGainNode); windGainNode.connect(masterGain);
+    src.start();
+  } catch (e) { /* wind bed is best-effort */ }
+}
+function startAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.4;
+    masterGain.connect(actx.destination);
+    startWindBed();
+  } catch (e) { /* audio unavailable — game still plays */ }
+}
+// Per-frame listener tracking: the AudioContext listener follows the
+// headset camera so spatial sounds stay anchored in the world. Module-scope
+// helper — reads renderer.xr.isPresenting DIRECTLY, never a tick()-local
+// (the Nov 14 Rhythm Slicer black screen was exactly this bug).
+const _lisPos = new THREE.Vector3(), _lisQuat = new THREE.Quaternion();
+const _lisFwd = new THREE.Vector3(), _lisUp = new THREE.Vector3();
+function updateAudioListener() {
+  if (!actx || !actx.listener) return;
+  try {
+    camera.getWorldPosition(_lisPos);
+    camera.getWorldQuaternion(_lisQuat);
+    _lisFwd.set(0, 0, -1).applyQuaternion(_lisQuat);
+    _lisUp.set(0, 1, 0).applyQuaternion(_lisQuat);
+    const L = actx.listener;
+    if (L.positionX) {
+      L.positionX.value = _lisPos.x; L.positionY.value = _lisPos.y; L.positionZ.value = _lisPos.z;
+      L.forwardX.value = _lisFwd.x; L.forwardY.value = _lisFwd.y; L.forwardZ.value = _lisFwd.z;
+      L.upX.value = _lisUp.x; L.upY.value = _lisUp.y; L.upZ.value = _lisUp.z;
+    } else if (L.setPosition) {
+      L.setPosition(_lisPos.x, _lisPos.y, _lisPos.z);
+      L.setOrientation(_lisFwd.x, _lisFwd.y, _lisFwd.z, _lisUp.x, _lisUp.y, _lisUp.z);
+    }
+  } catch (e) { /* listener update is best-effort */ }
+}
+function blip(freqA, freqB, dur, type, vol, dest) {
+  if (!actx || muted) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type || 'square';
+  o.frequency.setValueAtTime(freqA, actx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, freqB), actx.currentTime + dur);
+  g.gain.setValueAtTime(vol || 0.18, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(g); g.connect(dest || masterGain); o.start(); o.stop(actx.currentTime + dur);
+}
+// Rifle crack: three-stage synthesized shot, scaled per weapon (bigger gun =
+// deeper, louder, longer tail) — a sharp crack, a deep boom body, and a short
+// mountain-range echo. No samples — pure WebAudio.
+function sfxShot(w) {
+  if (!actx || muted) return;
+  const t0 = actx.currentTime;
+  const power = w.crack; // 0.5 Scout → 1.0 Thunder .50
+  // Stage 1: sharp broadband crack (noise burst through a highpass).
+  const nb = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.08), actx.sampleRate);
+  const nd = nb.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / nd.length);
+  const ns = actx.createBufferSource(); ns.buffer = nb;
+  const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1400;
+  const ng = actx.createGain();
+  ng.gain.setValueAtTime(0.55 + 0.45 * power, t0);
+  ng.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
+  ns.connect(hp); hp.connect(ng); ng.connect(masterGain); ns.start(t0);
+  // Stage 2: deep boom body — lowpassed noise + a falling sine thump.
+  const lb = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.3), actx.sampleRate);
+  const ld = lb.getChannelData(0);
+  for (let i = 0; i < ld.length; i++) ld[i] = (Math.random() * 2 - 1) * (1 - i / ld.length);
+  const ls = actx.createBufferSource(); ls.buffer = lb;
+  const lp = actx.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(900 - 300 * power, t0);
+  lp.frequency.exponentialRampToValueAtTime(120, t0 + 0.3);
+  const lg = actx.createGain();
+  lg.gain.setValueAtTime(0.35 + 0.45 * power, t0);
+  lg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.3);
+  ls.connect(lp); lp.connect(lg); lg.connect(masterGain); ls.start(t0);
+  const o = actx.createOscillator(), og = actx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(180 - 60 * power, t0);
+  o.frequency.exponentialRampToValueAtTime(40, t0 + 0.25);
+  og.gain.setValueAtTime(0.3 + 0.3 * power, t0);
+  og.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25);
+  o.connect(og); og.connect(masterGain); o.start(t0); o.stop(t0 + 0.25);
+  // Stage 3: short echoing tail, like a mountain-range echo.
+  [0.14, 0.28].forEach((delay, i) => {
+    const es = actx.createBufferSource(); es.buffer = lb;
+    const ef = actx.createBiquadFilter(); ef.type = 'lowpass'; ef.frequency.value = 500;
+    const eg = actx.createGain();
+    eg.gain.setValueAtTime((0.12 + 0.1 * power) / (i + 1), t0 + delay);
+    eg.gain.exponentialRampToValueAtTime(0.001, t0 + delay + 0.2);
+    es.connect(ef); ef.connect(eg); eg.connect(masterGain); es.start(t0 + delay);
+  });
+}
+// Spatial impacts: the steel ping / balloon pop play through an HRTF
+// panner positioned at the target, so a 600-yard hit sounds 600 yards away.
+// Volume falls with distance (100 yd full, 600 yd ~half). One panner per
+// shot, disconnected after 1 s — shots are bolt-gated, so this never piles
+// up. Falls back to the plain blip if panners are unavailable.
+function spatialBlip(freqA, freqB, dur, type, vol, pos, distM) {
+  if (!actx || muted) return;
+  const atten = clamp(90 / Math.max(30, distM), 0.35, 1);
+  try {
+    const p = actx.createPanner();
+    p.panningModel = 'HRTF';
+    p.distanceModel = 'inverse';
+    p.refDistance = 30; p.maxDistance = 400; p.rolloffFactor = 0.6;
+    if (p.positionX) {
+      p.positionX.value = pos.x; p.positionY.value = pos.y; p.positionZ.value = pos.z;
+    } else if (p.setPosition) {
+      p.setPosition(pos.x, pos.y, pos.z);
+    }
+    p.connect(masterGain);
+    blip(freqA, freqB, dur, type, vol * atten, p);
+    setTimeout(() => { try { p.disconnect(); } catch (e) { /* already gone */ } }, 1000);
+  } catch (e) { blip(freqA, freqB, dur, type, vol * atten); }
+}
+const _pingPos = new THREE.Vector3();
+function sfxPingAt(target) {
+  target.group.getWorldPosition(_pingPos);
+  const distM = camera.getWorldPosition(_lisPos).distanceTo(_pingPos);
+  spatialBlip(2400, 1900, 0.35, 'sine', 0.3, _pingPos, distM);
+  setTimeout(() => {
+    if (muted) return;
+    target.group.getWorldPosition(_pingPos);
+    const d2 = camera.getWorldPosition(_lisPos).distanceTo(_pingPos);
+    spatialBlip(3100, 2600, 0.2, 'sine', 0.15, _pingPos, d2);
+  }, 40);
+}
+function sfxPopAt(target) {
+  target.group.getWorldPosition(_pingPos);
+  const distM = camera.getWorldPosition(_lisPos).distanceTo(_pingPos);
+  spatialBlip(900, 120, 0.15, 'triangle', 0.35, _pingPos, distM);
+}
+// Distant bird chirps: sparse (every 12–30 s), quiet, randomly panned —
+// the range is outdoors and should sound like it. Driven from tick.
+let chirpPan = null, nextChirpT = 12;
+function maybeChirp(dt) {
+  if (!actx || muted || S.mode !== 'play' || S.paused) return;
+  nextChirpT -= dt;
+  if (nextChirpT > 0) return;
+  nextChirpT = rand(12, 30);
+  try {
+    if (!chirpPan) {
+      chirpPan = actx.createStereoPanner ? actx.createStereoPanner() : null;
+      if (chirpPan) chirpPan.connect(masterGain);
+    }
+    if (chirpPan) chirpPan.pan.value = rand(-0.7, 0.7);
+    const f = rand(2400, 3200);
+    blip(f, f * 0.8, 0.09, 'sine', 0.05, chirpPan || undefined);
+    setTimeout(() => blip(f * 1.1, f * 0.9, 0.08, 'sine', 0.04, chirpPan || undefined), 140);
+  } catch (e) { /* chirps are best-effort */ }
+}
+const sfxCycle = () => { blip(500, 800, 0.1, 'sine', 0.2); setTimeout(() => blip(800, 1200, 0.1, 'sine', 0.2), 80); };
+const muteBtn = document.getElementById('muteBtn');
+function setMuted(m) {
+  muted = m;
+  muteBtn.textContent = m ? 'SOUND: OFF' : 'SOUND: ON';
+  if (masterGain) masterGain.gain.value = m ? 0 : 0.4;
+  hudDirty = true; // HUD wind line carries the MUTED indicator
+  if (S.paused) drawPauseFace(); // pause overlay shows the sound state too
+}
+muteBtn.addEventListener('click', () => { startAudio(); setMuted(!muted); });
+
+// ============================== banner ==============================
+const bannerEl = document.getElementById('banner');
+let bannerTimer = null;
+function showBanner(text, dur) {
+  bannerEl.textContent = text; bannerEl.style.display = 'block';
+  if (bannerTimer) clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => { bannerEl.style.display = 'none'; }, (dur || 2) * 1000);
+}
+
+// ============================== game state + wind ==============================
+const S = { mode: 'menu', score: 0, hits: 0, paused: false };
+const wind = { mph: 5, dir: 1, nextT: 25 };
+// Gentle no-fail progression: the range gets livelier as hits accumulate —
+// wind range widens, movers quicken, pop-ups shorten. Endless, no fail
+// state, nothing the player can lose. All three scale from S.hits so a
+// score reset restarts the progression too.
+function windMaxMph() { return 12 + Math.min(6, S.hits * 0.02); } // 12 → 18 mph
+function moverSpeedMul() { return 1 + Math.min(0.6, S.hits * 0.004); } // 1× → 1.6×
+function balloonRiseMul() { return 1 + Math.min(0.4, S.hits * 0.003); } // 1× → 1.4×
+function popupUpMul() { return Math.max(0.6, 1 - S.hits * 0.002); } // 1× → 0.6× up-time
+// Milestone banners (once each): the range tells the player it is heating up.
+const MILESTONES = [
+  { hits: 25, text: 'SHARP SHOOTING — THE RANGE HEATS UP' },
+  { hits: 50, text: '50 HITS — WIND PICKING UP' },
+  { hits: 100, text: '100 HITS — MOVERS RUNNING FASTER' },
+  { hits: 200, text: '200 HITS — FULL SEND' }
+];
+let milestoneIdx = 0;
+function checkMilestones() {
+  if (milestoneIdx < MILESTONES.length && S.hits >= MILESTONES[milestoneIdx].hits) {
+    showBanner(MILESTONES[milestoneIdx].text, 2.5);
+    milestoneIdx++;
+  }
+}
+function rollWind() {
+  wind.mph = rand(0, windMaxMph());
+  wind.dir = Math.random() < 0.5 ? -1 : 1;
+  wind.nextT = rand(20, 40);
+  hudDirty = true;
+  drawScopeFace(); // scope windage reference follows the wind
+}
+drawScopeFace(); // first paint — wind + WEAPONS both exist from here on
+
+// ============================== targets (pooled, endless) ==============================
+// Every target faces the player and lives at a fixed lane distance. On a hit
+// it flashes, loses HP, and when HP hits zero it drops (plates / pop-ups),
+// slides off (movers) or pops (balloons) — then respawns after a delay.
+// Nothing here ever ends the game: the range just keeps serving targets.
+const steelMat = new THREE.MeshStandardMaterial({ color: 0x9aa4ad, roughness: 0.35, metalness: 0.8 });
+const steelDark = new THREE.MeshStandardMaterial({ color: 0x5a636b, roughness: 0.5, metalness: 0.7 });
+function neonRing(radius, color) {
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(radius * 1.12, 0.06, 8, 32),
+    new THREE.MeshBasicMaterial({ color, fog: false })
+  );
+  return ring;
+}
+const targets = [];
+// Plate-stand transforms, collected during the target build and baked into
+// two InstancedMeshes below (28 legs + 14 bars): 42 meshes → 2 draw calls.
+// Stands stay in the world (not in the plate group) so plates can tip off
+// them when downed — that behavior is unchanged.
+const standLegXforms = [], standBarXforms = [];
+// Shared hit-flash material: a struck plate flashes bright for ~90 ms.
+// Swapped per target (body.material), restored by a tick-driven timer.
+const flashMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff, emissive: 0xffaa00, emissiveIntensity: 1.2, roughness: 0.3, metalness: 0.6
+});
+function addTarget(kind, x, y, z, r, hp, pts, laneColor) {
+  const group = new THREE.Group();
+  let body;
+  if (kind === 'balloon') {
+    body = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 14),
+      new THREE.MeshBasicMaterial({ color: laneColor, fog: false }));
+    const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4, 6),
+      new THREE.MeshBasicMaterial({ color: 0x222222, fog: false }));
+    knot.position.y = -r - 0.2; group.add(knot);
+  } else {
+    body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.18, 28), steelMat);
+    body.rotation.x = Math.PI / 2;
+    const ring = neonRing(r, laneColor); group.add(ring);
+    if (kind === 'mover') {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(26, 0.25, 0.25), steelDark);
+      rail.position.set(0, -r - 0.6, 0.4); group.add(rail);
+    }
+    if (kind === 'popup') {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.4, 0.3), steelDark);
+      post.position.set(0, -r - 1.2, 0.3); group.add(post);
+    }
+  }
+  group.add(body);
+  if (kind === 'plate') {
+    // Static range stand: two legs + crossbar, left in the world (not the
+    // group) so the plate can tip off it when downed. All plates bottom
+    // out at y = 0, ground is at -1.6, so one 1.7-tall stand fits all.
+    // Transforms are collected here and baked into InstancedMeshes after
+    // all targets are built (42 meshes → 2 draw calls).
+    [-r * 0.6, r * 0.6].forEach(dx => { standLegXforms.push([x + dx, -0.75, z + 0.35]); });
+    standBarXforms.push([x, -0.05, z + 0.35, r * 1.5]);
+  }
+  group.position.set(x, y, z);
+  group.userData = { body, baseX: x, baseY: y, baseZ: z };
+  scene.add(group);
+  targets.push({
+    kind, group, body, x, y, z, r, hp, maxHp: hp, pts,
+    state: 'live', timer: 0, phase: rand(0, Math.PI * 2), speed: rand(0.5, 0.9),
+    downT: 0, upT: rand(2, 8),
+    swingAmp: 0, swingT: 1, flashT: 0, baseMat: body.material
+  });
+}
+// Static plates: 5 at 100, 5 at 300, 3 + 1 heavy at 600.
+[-16, -8, 0, 8, 16].forEach(x => addTarget('plate', x, 1.2, LANES[0].z, 1.2, 1, 10, LANES[0].color));
+[-20, -10, 0, 10, 20].forEach(x => addTarget('plate', x, 2.0, LANES[1].z, 2.0, 1, 25, LANES[1].color));
+[-22, 0, 22].forEach(x => addTarget('plate', x, 3.2, LANES[2].z, 3.2, 1, 50, LANES[2].color));
+addTarget('plate', 11, 4.0, LANES[2].z, 4.0, 3, 75, LANES[2].color);
+// Movers slide side-to-side at 300 yards.
+[-14, 0, 14].forEach(x => addTarget('mover', x, 2.0, LANES[1].z, 1.8, 2, 40, LANES[1].color));
+// Pop-ups hide behind the berms, then rise for a few seconds.
+[-12, 12].forEach(x => addTarget('popup', x, 0.4, LANES[0].z - 2, 1.5, 1, 30, LANES[0].color));
+[-16, 16].forEach(x => addTarget('popup', x, 0.4, LANES[1].z - 2, 2.0, 1, 35, LANES[1].color));
+// Balloons drift up through the lanes.
+const balloonColors = [0xff3df0, 0xffd319, 0x27e8ff, 0x2bff88, 0xff7e47];
+for (let i = 0; i < 5; i++) {
+  const lane = LANES[i % 3];
+  addTarget('balloon', rand(-24, 24), rand(2, 20), lane.z + rand(-8, 8), 1.6, 1, 25, balloonColors[i]);
+  targets[targets.length - 1].state = 'wait';
+  targets[targets.length - 1].timer = rand(1, 6);
+}
+// Bake the collected plate-stand transforms into two InstancedMeshes.
+// Legs share one geometry; bars share a unit-width box scaled per instance
+// (bar width = r × 1.5, which varies by plate). Static, set once at build.
+{
+  const legGeo = new THREE.BoxGeometry(0.18, 1.7, 0.18);
+  const legs = new THREE.InstancedMesh(legGeo, steelDark, standLegXforms.length);
+  standLegXforms.forEach((p, i) => {
+    _dummy.position.set(p[0], p[1], p[2]);
+    _dummy.rotation.set(0, 0, 0);
+    _dummy.scale.set(1, 1, 1);
+    _dummy.updateMatrix();
+    legs.setMatrixAt(i, _dummy.matrix);
+  });
+  legs.instanceMatrix.needsUpdate = true;
+  scene.add(legs);
+  const barGeo = new THREE.BoxGeometry(1, 0.18, 0.18);
+  const bars = new THREE.InstancedMesh(barGeo, steelDark, standBarXforms.length);
+  standBarXforms.forEach((p, i) => {
+    _dummy.position.set(p[0], p[1], p[2]);
+    _dummy.rotation.set(0, 0, 0);
+    _dummy.scale.set(p[3], 1, 1);
+    _dummy.updateMatrix();
+    bars.setMatrixAt(i, _dummy.matrix);
+  });
+  bars.instanceMatrix.needsUpdate = true;
+  scene.add(bars);
+}
+function respawnTarget(t) {
+  t.hp = t.maxHp; t.state = 'live'; t.timer = 0;
+  t.group.visible = true; t.group.rotation.x = 0; t.group.rotation.z = 0;
+  t.swingAmp = 0; t.swingT = 1; t.flashT = 0;
+  if (t.body.material !== t.baseMat) t.body.material = t.baseMat;
+  t.group.position.set(t.x, t.y, t.z);
+  if (t.kind === 'balloon') { t.group.position.y = rand(2, 8); t.group.position.x = rand(-24, 24); }
+  if (t.kind === 'popup') { t.group.position.y = t.y - 3; t.state = 'wait'; t.timer = rand(3, 9); }
+}
+function onTargetDown(t) {
+  S.score += t.pts; S.hits++;
+  hudDirty = true;
+  checkMilestones();
+  if (t.kind === 'balloon') {
+    sfxPopAt(t);
+    pulseHaptics('right', 0.7, 80);
+    // Sparks already spawned at the exact hit point in tryFire.
+    t.state = 'wait'; t.timer = rand(2, 6); t.group.visible = false;
+  } else {
+    sfxPingAt(t);
+    pulseHaptics('right', 0.85, 100);
+    // Dust kicks up at the plate base as it tips — the hit lands in the world.
+    _dustPos.set(t.group.position.x, 0.2, t.group.position.z + 0.5);
+    spawnDust(_dustPos, 3);
+    t.state = 'down'; t.timer = rand(2.5, 4);
+  }
+}
+
+// ============================== tracers (pooled) ==============================
+const tracerPool = [];
+for (let i = 0; i < 4; i++) {
+  const line = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.02, 0.02, 1, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffd319, transparent: true, opacity: 0.9, fog: false })
+  );
+  line.visible = false; scene.add(line); tracerPool.push({ line, t: 0 });
+}
+let tracerIdx = 0;
+const _muzzle = new THREE.Vector3(), _mid = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+const _tracerDir = new THREE.Vector3();
+function fireTracer(from, to) {
+  const tr = tracerPool[tracerIdx]; tracerIdx = (tracerIdx + 1) % tracerPool.length;
+  tr.line.visible = true; tr.t = 0.09;
+  _mid.addVectors(from, to).multiplyScalar(0.5);
+  tr.line.position.copy(_mid);
+  const len = from.distanceTo(to);
+  tr.line.scale.set(1, len, 1);
+  // Scratch vector — the live code allocated `to.clone()` on every shot.
+  _tracerDir.copy(to).sub(from).normalize();
+  tr.line.quaternion.setFromUnitVectors(_up, _tracerDir);
+}
+
+// ============================== hit FX (pooled sparks + dust) ==============================
+// Steel hits throw sparks; downed plates and dirt strikes kick up dust.
+// Pooled sprites, recycled oldest-first (round-robin), costing draw calls
+// ONLY while visible. Counts scale with the valve (L1 ×0.5, L2 ×0.25) with
+// a minimum of 2 sparks / 1 dust puff per burst — gameplay feedback is
+// never shed to zero.
+const _dustPos = new THREE.Vector3();
+const sparkPool = [], dustPool = [];
+let sparkIdx = 0, dustIdx = 0;
+{
+  const sparkMat = new THREE.SpriteMaterial({
+    map: glowTexture('rgba(255,250,220,1)', 'rgba(255,160,40,0)'),
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false
+  });
+  for (let i = 0; i < 12; i++) {
+    const s = new THREE.Sprite(sparkMat);
+    s.visible = false; scene.add(s);
+    sparkPool.push({ s, vel: new THREE.Vector3(), life: 0 });
+  }
+  const dustMat = new THREE.SpriteMaterial({
+    map: glowTexture('rgba(190,170,130,0.55)', 'rgba(190,170,130,0)'),
+    transparent: true, depthWrite: false, fog: false, opacity: 0.5
+  });
+  for (let i = 0; i < 8; i++) {
+    const s = new THREE.Sprite(dustMat);
+    s.visible = false; scene.add(s);
+    dustPool.push({ s, life: 0, maxLife: 0.8 });
+  }
+}
+function spawnSparks(pos, base) {
+  const n = Math.max(2, Math.round(base * perfValve.particleScale));
+  for (let k = 0; k < n; k++) {
+    const p = sparkPool[sparkIdx]; sparkIdx = (sparkIdx + 1) % sparkPool.length;
+    p.s.position.copy(pos);
+    p.vel.set(rand(-1, 1), rand(0.2, 1.4), rand(-1, 1)).normalize().multiplyScalar(rand(3, 6));
+    p.life = 0.35;
+    p.s.scale.set(0.5, 0.5, 1);
+    p.s.visible = true;
+  }
+}
+function spawnDust(pos, base) {
+  const n = Math.max(1, Math.round(base * perfValve.particleScale));
+  for (let k = 0; k < n; k++) {
+    const p = dustPool[dustIdx]; dustIdx = (dustIdx + 1) % dustPool.length;
+    p.s.position.set(pos.x + rand(-0.4, 0.4), pos.y + rand(0, 0.3), pos.z + rand(-0.4, 0.4));
+    p.life = 0.8; p.maxLife = 0.8;
+    p.s.scale.set(0.4, 0.4, 1);
+    p.s.visible = true;
+  }
+}
+function updateHitFx(dt) {
+  for (const p of sparkPool) {
+    if (!p.s.visible) continue;
+    p.life -= dt;
+    if (p.life <= 0) { p.s.visible = false; continue; }
+    p.vel.y -= 9 * dt;
+    p.s.position.addScaledVector(p.vel, dt);
+    const sc = 0.5 * (p.life / 0.35);
+    p.s.scale.set(sc, sc, 1);
+  }
+  for (const p of dustPool) {
+    if (!p.s.visible) continue;
+    p.life -= dt;
+    if (p.life <= 0) { p.s.visible = false; continue; }
+    const age = 1 - p.life / p.maxLife;
+    p.s.position.y += dt * 0.35;
+    // Grow, then shrink away in the last fifth of life (shared material
+    // means no per-sprite opacity — scale is the fade).
+    const sc = age < 0.8 ? 0.4 + age * 1.25 : 1.4 * (1 - age) * 5;
+    p.s.scale.set(Math.max(0.01, sc), Math.max(0.01, sc), 1);
+  }
+}
+
+// ============================== input ==============================
+// (Dead code removed Nov 15: the `DEAD` thumbstick constant was never read —
+// Longshot uses no thumbstick axes — and `mouseDown` only fed an empty if.)
+let scoped = false, scopeHeld = false;
+const mouseNDC = { x: 0, y: 0 };
+let scopeMouse = false;
+window.addEventListener('mousemove', e => {
+  mouseNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouseNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+});
+window.addEventListener('mousedown', e => {
+  if (e.target !== renderer.domElement) return;
+  if (e.button === 0) { startAudio(); tryFire(); }
+  if (e.button === 2) scopeMouse = true;
+});
+window.addEventListener('mouseup', e => {
+  if (e.button === 2) scopeMouse = false;
+});
+window.addEventListener('contextmenu', e => e.preventDefault());
+window.addEventListener('keydown', e => {
+  if (e.key === 'm' || e.key === 'M') { startAudio(); setMuted(!muted); }
+  if (e.key >= '1' && e.key <= '4') selectWeapon(parseInt(e.key, 10) - 1);
+  if (e.key === 'Shift') scopeMouse = true;
+  if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') togglePause();
+  if ((e.key === 'r' || e.key === 'R') && S.paused) resetScore();
+});
+window.addEventListener('keyup', e => { if (e.key === 'Shift') scopeMouse = false; });
+
+const _rayO = new THREE.Vector3(), _rayD = new THREE.Vector3(), _ctrlPos = new THREE.Vector3(), _ctrlQuat = new THREE.Quaternion();
+function pollXR() {
+  const out = { fire: false, scope: false, cycle: false, aim: null, cycleEdge: false, pauseClick: false, muteClick: false };
+  if (!renderer.xr.isPresenting) return out;
+  const session = renderer.xr.getSession();
+  if (!session) return out;
+  // three.js maps getController(i) to inputSources[i] in order, so the
+  // controller object must be picked by the source's own index — a hardcoded
+  // index 1 silently reads the WRONG hand when the right controller is not
+  // second, which was one cause of the "aiming is off" reports.
+  for (let si = 0; si < session.inputSources.length; si++) {
+    const src = session.inputSources[si];
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const trig = (gp.buttons && gp.buttons[0]) ? (gp.buttons[0].value || 0) : 0;
+    const squeeze = (gp.buttons && gp.buttons[1]) ? (gp.buttons[1].value || 0) : 0;
+    const stickClick = (gp.buttons && gp.buttons[3]) ? (gp.buttons[3].pressed || false) : false;
+    const aBtn = (gp.buttons && gp.buttons[4]) ? (gp.buttons[4].pressed || false) : false;
+    const bBtn = (gp.buttons && gp.buttons[5]) ? (gp.buttons[5].pressed || false) : false;
+    if (src.handedness === 'right') {
+      if (trig > 0.5) out.fire = true;
+      if (stickClick) out.pauseClick = true; // right stick click = pause
+      const ctrl = renderer.xr.getController(si);
+      if (ctrl) {
+        ctrl.updateMatrixWorld();
+        ctrl.getWorldPosition(_ctrlPos);
+        ctrl.getWorldQuaternion(_ctrlQuat);
+        _rayD.set(0, 0, -1).applyQuaternion(_ctrlQuat);
+        out.aim = { o: _ctrlPos.clone(), d: _rayD.clone() };
+      }
+    }
+    if (src.handedness === 'left' && stickClick) out.muteClick = true; // left stick click = mute
+    if (squeeze > 0.5 || aBtn) out.scope = true;
+    if (bBtn) out.cycle = true;
+  }
+  return out;
+}
+
+// ============================== pause + reset (in-VR) ==============================
+// Pause overlay: camera-attached plane, center screen, shown only while
+// paused. VR: right stick click pauses/resumes, left stick click mutes,
+// B resets the score (while paused). Desktop: P / Esc pauses, R resets
+// (while paused), M mutes. Pause freezes the sim (timers, wind, targets,
+// tracers, valve feed, golden-hour drift) but keeps rendering, so the
+// player still sees the range. Score reset is the restart: fresh targets,
+// zero score, progression restarts — no fail state, nothing lost.
+const pauseCanvas = document.createElement('canvas'); pauseCanvas.width = 704; pauseCanvas.height = 384;
+const pauseCtx = pauseCanvas.getContext('2d');
+const pauseTex = new THREE.CanvasTexture(pauseCanvas);
+const pauseMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.1, 0.6),
+  new THREE.MeshBasicMaterial({ map: pauseTex, transparent: true, depthTest: false, fog: false })
+);
+pauseMesh.position.set(0, 0, -1.5); pauseMesh.renderOrder = 950;
+pauseMesh.visible = false;
+camera.add(pauseMesh);
+function drawPauseFace() {
+  const g = pauseCtx;
+  g.clearRect(0, 0, 704, 384);
+  g.fillStyle = 'rgba(8,4,2,0.88)'; g.fillRect(0, 0, 704, 384);
+  g.strokeStyle = '#ffd319'; g.lineWidth = 4; g.strokeRect(4, 4, 696, 376);
+  g.textAlign = 'center';
+  g.font = '900 52px Arial'; g.fillStyle = '#ffd319';
+  g.fillText('PAUSED', 352, 76);
+  g.font = 'bold 30px Arial'; g.fillStyle = '#7df9ff';
+  g.fillText('Right stick click — resume', 352, 140);
+  g.fillText('Left stick click — sound ' + (muted ? 'OFF' : 'ON'), 352, 188);
+  g.fillText('B — reset score (fresh range)', 352, 236);
+  g.font = 'bold 24px Arial'; g.fillStyle = '#d8b898';
+  g.fillText('Desktop: P resume · R reset · M mute', 352, 296);
+  g.fillText('Score ' + S.score + ' · Hits ' + S.hits, 352, 340);
+  pauseTex.needsUpdate = true;
+}
+function togglePause() {
+  if (S.mode !== 'play') return;
+  S.paused = !S.paused;
+  pauseMesh.visible = S.paused;
+  if (S.paused) drawPauseFace();
+  else perfWarmup = 0.75; // resume hitch is not gameplay frame time
+  pulseHaptics('right', 0.4, 50);
+  updatePerfReadout();
+}
+function resetScore() {
+  if (!S.paused) return;
+  S.score = 0; S.hits = 0; milestoneIdx = 0;
+  targets.forEach(t => respawnTarget(t));
+  hudDirty = true;
+  drawPauseFace();
+  showBanner('SCORE RESET — FRESH RANGE', 2);
+  pulseHaptics('right', 0.5, 60);
+}
+
+// ============================== firing ==============================
+const _hit = new THREE.Vector3(), _to = new THREE.Vector3(), _from = new THREE.Vector3();
+let kickT = 0, kickAmt = 0, prevCycle = false;
+function windDriftAt(distYd) {
+  // Crosswind pushes the shot sideways; the effect grows with the square
+  // of distance. Kept clearly inside the 600-yd plate (radius 3.2) even at
+  // max wind (18 mph at high progression: 18×0.003×36 = 1.94 m), so a
+  // reticle-on-target shot still hits — the drift is a nudge to compensate
+  // for, not a second lottery.
+  return wind.dir * wind.mph * 0.003 * (distYd / 100) * (distYd / 100);
+}
+function laneYdForZ(z) {
+  let best = LANES[0], bd = 1e9;
+  LANES.forEach(L => { const d = Math.abs(L.z - z); if (d < bd) { bd = d; best = L; } });
+  return best.yd;
+}
+function selectWeapon(i) {
+  if (i < 0 || i >= WEAPONS.length || i === wpnIdx) return;
+  wpnIdx = i;
+  buildRifle(WEAPONS[i]); sfxCycle(); hudDirty = true;
+  drawScopeFace(); // scope shows the new rifle's zoom
+  pulseHaptics('right', 0.3, 40);
+  showBanner(WEAPONS[i].name, 1.6);
+  document.querySelectorAll('.wpnBtn').forEach((b, j) => b.classList.toggle('sel', j === wpnIdx));
+}
+const _bestPoint = new THREE.Vector3();
+function tryFire(xrOpt) {
+  if (S.mode !== 'play' || S.paused) return;
+  const w = WEAPONS[wpnIdx];
+  if (boltT > 0 || fireT > 0) return;
+  // Aim ray: scoped = straight down the scope (camera forward); unscoped
+  // VR = right-controller ray; desktop = mouse ray through the camera.
+  // xrOpt is the tick's cached pollXR() result — the live code polled up to
+  // 3× per frame (tick + tryFire + aim dot), each cloning vectors.
+  let o, d;
+  if (scoped) {
+    camera.getWorldPosition(_rayO);
+    camera.getWorldDirection(_rayD);
+    o = _rayO; d = _rayD;
+  } else if (renderer.xr.isPresenting) {
+    const xr = xrOpt || pollXR();
+    if (!xr.aim) return;
+    o = xr.aim.o; d = xr.aim.d;
+  } else {
+    camera.getWorldPosition(_rayO);
+    _rayD.set(mouseNDC.x, mouseNDC.y, -1).unproject(camera).sub(_rayO).normalize();
+    o = _rayO; d = _rayD;
+  }
+  sfxShot(w);
+  // Haptics + muzzle flash fire on the SAME path as the sound and the shot
+  // — synchronized feedback, never a sequential afterthought. Kick scales
+  // with the rifle (Scout 0.65/90 ms → Thunder 0.9/120 ms).
+  pulseHaptics('right', 0.4 + 0.5 * w.crack, 60 + 60 * w.crack);
+  showMuzzleFlash(w.crack);
+  boltT = w.bolt; fireT = w.rate;
+  kickT = 0.12; kickAmt = w.kick;
+  muzzleObj.getWorldPosition(_from);
+  // Find the nearest live target the ray crosses, with wind drift applied
+  // at the target's plane (farther = more drift).
+  let bestT = null, bestDist = 1e9;
+  for (const t of targets) {
+    if (t.state !== 'live') continue;
+    const tz = t.group.position.z;
+    if (d.z >= -0.001) continue;
+    const tt = (tz - o.z) / d.z;
+    if (tt <= 0) continue;
+    _hit.set(o.x + d.x * tt, o.y + d.y * tt, tz);
+    _hit.x += windDriftAt(laneYdForZ(tz));
+    const dx = _hit.x - t.group.position.x, dy = _hit.y - t.group.position.y;
+    if (dx * dx + dy * dy <= t.r * t.r && tt < bestDist) {
+      bestDist = tt; bestT = t; _bestPoint.copy(_hit);
+    }
+  }
+  if (bestT) {
+    _to.copy(_bestPoint);
+    bestT.hp -= w.dmg;
+    // Flash the ring brighter on a hit by briefly scaling the group.
+    bestT.group.scale.setScalar(1.06);
+    setTimeout(() => bestT.group.scale.setScalar(1), 120);
+    // Hit feedback: steel plates swing, flash, and throw sparks at the
+    // exact hit point. Balloons skip swing/flash — they pop.
+    spawnSparks(_bestPoint, 6);
+    if (bestT.kind !== 'balloon') {
+      bestT.swingAmp = 0.22 + 0.08 * w.dmg; bestT.swingT = 0;
+      bestT.body.material = flashMat; bestT.flashT = 0.09;
+    }
+    if (bestT.hp <= 0) onTargetDown(bestT);
+    else { sfxPingAt(bestT); pulseHaptics('right', 0.6, 60); }
+  } else {
+    // Miss: tracer runs out to the far berm line, carrying the same wind
+    // drift a real bullet would, so the tracer never lies about the shot.
+    _to.set(o.x + d.x * 200 + windDriftAt(600), Math.max(-1, o.y + d.y * 200), -200);
+    // Dirt strike: if the shot line reaches the ground, dust marks where
+    // it landed — a miss still gets feedback.
+    if (d.y < -0.001) {
+      const tg = (-1.6 - o.y) / d.y;
+      if (tg > 0 && tg < 250) {
+        _dustPos.set(o.x + d.x * tg + windDriftAt(600), -1.4, o.z + d.z * tg);
+        spawnDust(_dustPos, 2);
+      }
+    }
+  }
+  fireTracer(_from, _to);
+}
+
+// ============================== start screen ==============================
+const wpnRow = document.getElementById('wpnRow');
+WEAPONS.forEach((w, i) => {
+  const b = document.createElement('button');
+  b.className = 'wpnBtn' + (i === 0 ? ' sel' : '');
+  b.innerHTML = '<b>' + w.name + '</b>Zoom ' + w.zoom + '× · DMG ' + w.dmg +
+    '<br>Always loaded — never reloads' +
+    (w.bolt ? '<br>Bolt ' + w.bolt.toFixed(1) + 's' : '<br>Semi-auto');
+  b.addEventListener('click', () => { startAudio(); selectWeapon(i); });
+  wpnRow.appendChild(b);
+});
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+const panel = document.getElementById('panel');
+const hud = document.getElementById('hud');
+let xrSupported = false;
+function setStatus(msg) { statusEl.textContent = msg; }
+function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
+function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+function beginGame() {
+  if (S.mode === 'play') return;
+  S.mode = 'play'; S.score = 0; S.hits = 0; S.paused = false; milestoneIdx = 0;
+  hudDirty = true;
+  perfMesh.visible = true;
+  perfHudEl.style.display = 'block';
+  perfValve.reset();
+  perfWarmup = 0.75;
+  updatePerfReadout();
+}
+vrBtn.addEventListener('click', async () => {
+  startAudio();
+  beginGame();
+  if (!xrSupported) { hidePanel(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    perfValve.reset(); perfWarmup = 0.75; // fresh valve state per VR session
+    startAudio(); // resume the audio context inside the VR session if needed
+    hidePanel();
+    session.addEventListener('end', () => { showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; if (S.mode === 'play' && !S.paused) togglePause(); });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      perfValve.reset(); perfWarmup = 0.75; // fresh valve state per VR session
+      startAudio(); // resume the audio context inside the VR session if needed
+      hidePanel();
+      session.addEventListener('end', () => { showPanel(); vrBtn.disabled = false; if (S.mode === 'play' && !S.paused) togglePause(); });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+    }
+  }
+});
+
+// ============================== tick ==============================
+const clock = new THREE.Clock();
+let flagPhase = 0;
+let prevPauseClick = false, prevMuteClick = false;
+let perfTimer = 0;
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  // Audio listener follows the camera every frame (guarded no-op until the
+  // AudioContext exists). Module-scope helper reads XR state directly.
+  updateAudioListener();
+  if (S.mode === 'play') {
+    // ONE pollXR() per frame (the live code polled up to 3× — tick, tryFire,
+    // aim dot — each cloning vectors). Pause/mute edges are handled BEFORE
+    // the paused check so resume/mute work while frozen.
+    const xr = pollXR();
+    if (xr.pauseClick && !prevPauseClick) togglePause();
+    prevPauseClick = xr.pauseClick;
+    if (xr.muteClick && !prevMuteClick) { startAudio(); setMuted(!muted); }
+    prevMuteClick = xr.muteClick;
+    // While paused, B resets the score instead of cycling rifles.
+    if (S.paused) {
+      if (xr.cycle && !prevCycle) resetScore();
+      prevCycle = xr.cycle;
+      // Perf readout still refreshes on cadence (shows PAUSED); the sim,
+      // valve feed, and golden-hour drift all stay frozen.
+      perfTimer += dt;
+      if (perfTimer >= 0.5) { perfTimer = 0; updatePerfReadout(); updateWindBedGain(); }
+      renderer.render(scene, camera);
+      return;
+    }
+    // Frame-time valve: fed ONLY during active play, after the warm-up
+    // window. Menu/pause/load hitches never move the valve.
+    if (perfWarmup > 0) perfWarmup -= dt;
+    else perfValve.update(dt);
+    // Golden-hour light drift (frozen while paused — see above).
+    updateGoldenHour(dt);
+    // Timers (bolt cycle + semi-auto rate only — there is no reload).
+    if (boltT > 0) boltT -= dt;
+    if (fireT > 0) fireT -= dt;
+    // Wind rolls on its own schedule; flags follow it.
+    wind.nextT -= dt;
+    if (wind.nextT <= 0) rollWind();
+    flagPhase += dt * (1 + wind.mph * 0.5);
+    flagPoles.forEach((f, i) => {
+      f.rotation.y = (wind.dir > 0 ? 0 : Math.PI) + Math.sin(flagPhase + i * 1.7) * 0.15 * (0.3 + wind.mph / 12);
+      f.rotation.z = -0.15 - wind.mph * 0.01;
+    });
+    updateFlagWave(t);
+    // Dust motes drift: slow whole-cloud rotation + bob (no per-point work).
+    if (dustMotes) {
+      dustMotes.rotation.y += dt * 0.01;
+      dustMotes.position.y = Math.sin(t * 0.1) * 0.2;
+    }
+    // Targets: movers slide, balloons rise, pop-ups cycle, downed ones respawn.
+    for (const tg of targets) {
+      if (tg.state === 'wait') {
+        tg.timer -= dt;
+        if (tg.timer <= 0) respawnTarget(tg);
+        continue;
+      }
+      if (tg.state === 'down') {
+        tg.timer -= dt;
+        if (tg.timer <= 0) respawnTarget(tg);
+        else tg.group.rotation.x = Math.min(1.4, tg.group.rotation.x + dt * 6);
+        continue;
+      }
+      if (tg.kind === 'mover') {
+        // Phase is INTEGRATED (not t × speed): the progression multiplier
+        // grows with hits, and scaling t directly would teleport movers.
+        tg.phase += dt * tg.speed * moverSpeedMul();
+        tg.group.position.x = tg.x + Math.sin(tg.phase) * 12;
+      } else if (tg.kind === 'balloon') {
+        tg.group.position.y += dt * 1.1 * balloonRiseMul();
+        tg.group.position.x += wind.dir * wind.mph * 0.02 * dt;
+        if (tg.group.position.y > 42) { tg.state = 'wait'; tg.timer = rand(1, 4); tg.group.visible = false; }
+      } else if (tg.kind === 'popup') {
+        if (tg.group.position.y < tg.y) tg.group.position.y = Math.min(tg.y, tg.group.position.y + dt * 4);
+        else {
+          tg.upT -= dt;
+          if (tg.upT <= 0) { tg.state = 'wait'; tg.timer = rand(3, 9); tg.group.position.y = tg.y - 3; tg.upT = rand(3, 5) * popupUpMul(); }
+        }
+      }
+      // Plate swing: decaying side-to-side rock after a hit (rotation.z —
+      // rotation.x belongs to the downed tip-over). Hit flash restores the
+      // base material on a tick-driven timer.
+      if (tg.swingT < 1) {
+        tg.swingT = Math.min(1, tg.swingT + dt / 0.7);
+        tg.group.rotation.z = Math.sin(tg.swingT * Math.PI * 4) * tg.swingAmp * (1 - tg.swingT);
+        if (tg.swingT >= 1) tg.group.rotation.z = 0;
+      }
+      if (tg.flashT > 0) {
+        tg.flashT -= dt;
+        if (tg.flashT <= 0 && tg.body.material !== tg.baseMat) tg.body.material = tg.baseMat;
+      }
+    }
+    // Tracers fade.
+    for (const tr of tracerPool) {
+      if (!tr.line.visible) continue;
+      tr.t -= dt;
+      if (tr.t <= 0) tr.line.visible = false;
+    }
+    // Hit FX + muzzle flash timers.
+    updateHitFx(dt);
+    if (muzzleFlashT > 0) {
+      muzzleFlashT -= dt;
+      if (muzzleFlashT <= 0) muzzleFlash.visible = false;
+    }
+    // VR input: fire on trigger hold, scope hold, cycle (cached poll).
+    scopeHeld = xr.scope || scopeMouse;
+    if (xr.fire) tryFire(xr);
+    if (xr.cycle && !prevCycle) selectWeapon((wpnIdx + 1) % WEAPONS.length);
+    prevCycle = xr.cycle;
+    // Scope state: narrow FOV to the rifle's zoom, show reticle, hide rifle
+    // AND the HUD — a real scope shows no HUD (part of the HUD cell showed
+    // through the scope glass before).
+    const wantScoped = scopeHeld && S.mode === 'play';
+    if (wantScoped !== scoped) {
+      scoped = wantScoped;
+      scopeMesh.visible = scoped;
+      rifleGroup.visible = !scoped;
+      hudMesh.visible = !scoped;
+      const w = WEAPONS[wpnIdx];
+      camera.fov = scoped ? 70 / w.zoom : 70;
+      camera.updateProjectionMatrix();
+      aimDot.visible = !scoped;
+    }
+    // Aim dot + VR laser follow the live aim ray (unscoped only). The laser
+    // shows the true shot line from the hand in VR. Uses the cached poll —
+    // no second pollXR() call.
+    if (!scoped) {
+      let o, d, vrAim = false;
+      if (renderer.xr.isPresenting) {
+        if (xr.aim) { o = xr.aim.o; d = xr.aim.d; vrAim = true; }
+      }
+      if (!o) {
+        camera.getWorldPosition(_rayO);
+        _rayD.set(mouseNDC.x, mouseNDC.y, -1).unproject(camera).sub(_rayO).normalize();
+        o = _rayO; d = _rayD;
+      }
+      const tt = (o.z < -1) ? 0 : (-30 - o.z) / (d.z || -0.001);
+      if (tt > 0) {
+        aimDot.position.set(o.x + d.x * tt, o.y + d.y * tt, -30);
+        aimDot.lookAt(camera.position);
+        aimDot.visible = true;
+        if (vrAim) {
+          laser.visible = true;
+          _mid.addVectors(o, aimDot.position).multiplyScalar(0.5);
+          laser.position.copy(_mid);
+          laser.scale.set(1, o.distanceTo(aimDot.position), 1);
+          laser.quaternion.setFromUnitVectors(_up, _laserD.copy(aimDot.position).sub(o).normalize());
+        } else laser.visible = false;
+      } else { aimDot.visible = false; laser.visible = false; }
+    } else laser.visible = false;
+    // Recoil kick on the rifle viewmodel. Kicking camera.rotation does
+    // nothing in VR — the headset pose overwrites the camera rotation every
+    // frame — so the kick lives on the rifle, where it reads in both modes.
+    if (kickT > 0) {
+      kickT -= dt;
+      const k = kickT / 0.12;
+      rifleGroup.position.set(0.28, -0.26 + kickAmt * 2 * k, -0.55 + kickAmt * 6 * k);
+      rifleGroup.rotation.x = -kickAmt * 2 * k;
+    } else if (rifleGroup.position.y !== -0.26) {
+      rifleGroup.position.set(0.28, -0.26, -0.55);
+      rifleGroup.rotation.x = 0;
+    }
+    // Sparse bird chirps + 0.5 s cadence: perf readout + wind-bed gain.
+    maybeChirp(dt);
+    perfTimer += dt;
+    if (perfTimer >= 0.5) { perfTimer = 0; updatePerfReadout(); updateWindBedGain(); }
+    if (hudDirty) { drawHud(); hudDirty = false; }
+  }
+  renderer.render(scene, camera);
+}
+// Wind-bed gain follows wind speed (0.015 calm → 0.07 at full wind),
+// silenced in menu/pause/mute. Called on the 0.5 s cadence only.
+function updateWindBedGain() {
+  if (!windGainNode || !actx) return;
+  const target = (S.mode === 'play' && !S.paused && !muted)
+    ? Math.min(0.07, 0.015 + wind.mph * 0.004) : 0;
+  try { windGainNode.gain.setTargetAtTime(target, actx.currentTime, 0.5); }
+  catch (e) { /* best-effort */ }
+}
+renderer.setAnimationLoop(tick);
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

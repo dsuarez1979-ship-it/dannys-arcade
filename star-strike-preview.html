@@ -1,0 +1,2235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>STAR STRIKE VR — Original Space Shooter</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#02010a;
+    font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
+  canvas { display:block; }
+  #panel {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
+    z-index:10; text-align:center; color:#fff;
+  }
+  #panel .box { max-width:640px; padding:24px 20px; }
+  #panel h1 {
+    font-size:60px; letter-spacing:8px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    text-shadow:0 0 34px rgba(77,166,255,.35);
+  }
+  #panel .sub { font-size:14px; letter-spacing:3px; color:#bfe3ff; margin-bottom:20px; text-transform:uppercase; }
+  #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#e8f4ff; }
+  #panel p.small { font-size:13px; color:#a8c4e0; }
+  #vrBtn {
+    margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+  }
+  #vrBtn:disabled { opacity:.55; cursor:wait; }
+  #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  #hud {
+    position:fixed; left:12px; top:52px; z-index:5;
+    color:#7df9ff; font-size:14px; font-weight:800; letter-spacing:1px; line-height:1.5;
+    text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
+    background:rgba(2,8,24,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px;
+  }
+  #banner {
+    position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
+    color:#ffd319; font-size:30px; font-weight:900; letter-spacing:2px; text-align:center;
+    text-shadow:0 2px 12px #000, 0 0 24px rgba(255,211,25,.5); pointer-events:none; display:none;
+    background:rgba(2,8,24,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px;
+  }
+  #muteBtn {
+    position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
+    background:rgba(10,16,38,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  #backLink {
+    position:fixed; top:12px; left:12px; z-index:20; color:#bfeaff; font-size:13px;
+    text-decoration:none; background:rgba(10,16,38,.72); border:1px solid #27e8ff;
+    border-radius:8px; padding:8px 12px;
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<div id="panel">
+  <div class="box">
+    <h1>STAR STRIKE</h1>
+    <div class="sub">An original VR space shooter — unlimited retries, 3 weapon slots, unlimited upgrades</div>
+    <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <p>You are rookie pilot <b>Jax Vega</b> in the interceptor <b>Kestrel</b>, holding the line against the Void drone swarm.</p>
+    <p><b>Either thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Left trigger / B</b> = barrel roll (briefly invincible) &nbsp;·&nbsp; <b>A</b> = Nova Bomb &nbsp;·&nbsp; <b>Click either thumbstick</b> = recall ship to view center</p>
+    <p class="small">In VR: <b>hold either thumbstick click</b> pauses &nbsp;·&nbsp; while paused, <b>A / X</b> toggles sound, <b>grip</b> restarts the run. Kills, pickups and hits buzz the controllers.</p>
+    <p>Start with the base laser. Grab weapon pickups — <b>Triple Laser, Seeker Missiles, Plasma Cannon, Rail Beam, Nova Bomb</b> — up to <b>3 equipped at once</b> (a 4th replaces your oldest weapon). Upgrade pickups — <b>Hull Plating, Shield Cells, Engine Speed, Weapon Power</b> — stack with <b>no maximum</b>. Each cleared wave also grants a bonus upgrade.</p>
+    <p class="small">Difficulty climbs as you play: every cleared wave makes enemies faster, more numerous, and quicker to fire — and every 10,000 points raises your tier, unlocking elite drones, asteroid storms, and bomber squadrons. Boss waves (every 5th) add a new Ravager attack pattern each time.</p>
+    <p class="small">Getting hit costs hull — at zero hull you explode and instantly respawn with your score, weapons and upgrades intact. There is no game over, ever.</p>
+    <p class="small">No headset handy? Desktop preview works too — mouse steers, click / Space fires, Shift barrel-rolls, N = Nova Bomb, M mutes, P pauses, R = recall ship (restart while paused).</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+  </div>
+</div>
+
+<div id="hud">SCORE 0 &nbsp;·&nbsp; WAVE 1 &nbsp;·&nbsp; HULL 100/100</div>
+<div id="banner"></div>
+<button id="muteBtn">SOUND: ON</button>
+<button id="recallBtn">RECALL SHIP</button>
+<a id="backLink" href="../">← Danny's Arcade</a>
+
+<script type="module">
+import * as THREE from 'three';
+
+// STAR STRIKE VR — an original game. All ships, pilots, names and sounds here
+// were invented for this game. No licensed characters, music or worlds appear.
+//
+// GRAPHICS NOTE (honest): every visual here is procedural — canvas gradients,
+// extruded shapes, emissive materials, pooled particles. It is a visual lift
+// within what a Quest browser can render at frame rate, not console realism.
+// The look follows the Neon Invaders VR house style Danny loves: near-black
+// violet space, high-contrast neon palette, additive glow sprites everywhere,
+// dark hulls with neon emissive accents, tone-mapping-exempt neon cores.
+//
+// CINEMATIC UPGRADE (Nov 15, 2026 — prototype): boot pixelRatio 1.5 + AA
+// off, 3-level frame-time valve (foveation + particle/trail/glow shedding),
+// instanced enemies (178 -> 9 draw calls), cockpit frame, ribbon engine
+// trails, boss-encounter staging, ambient music bed, stereo-panned SFX,
+// controller haptics, in-VR pause/mute/restart, perf readout in the HUD.
+// The ship-finder beacon is untouched (owner requirement).
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+
+// ============================== renderer / scene ==============================
+// CINEMATIC UPGRADE (Nov 15): antialias OFF + pixelRatio capped at 1.5, both
+// set ONCE at boot. The old min(dpr, 2) + AA combo is the heaviest config in
+// the arcade; in r160 mid-session setPixelRatio/setFramebufferScaleFactor
+// are INERT in XR, so boot values + the frame-time valve (foveation) are the
+// only levers — there is intentionally no mid-session pixel-ratio call here.
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x040110);
+scene.fog = new THREE.Fog(0x040110, 60, 260);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
+const rig = new THREE.Group();
+rig.position.set(0, 1.6, 6);
+rig.add(camera);
+scene.add(rig);
+
+// SHIP-FINDABILITY: off-view chevron, attached to the camera so it tracks the
+// headset. Hidden while the ship is in view; otherwise it sits at the view edge
+// pointing toward the ship. Updated every tick by updateShipPointer().
+const shipPointer = new THREE.Group();
+const chevMat = new THREE.MeshBasicMaterial({ color: 0xffd319, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, toneMapped: false, fog: false });
+const chev = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.26, 4), chevMat);
+chev.renderOrder = 30;
+shipPointer.add(chev);
+shipPointer.visible = false;
+camera.add(shipPointer);
+const hemi = new THREE.HemisphereLight(0x8fb8ff, 0x0a0a20, 0.7);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(30, 60, 40);
+scene.add(sun);
+
+// ---- Nebula skybox: procedural canvas gradient wrapped on a huge sphere ----
+function skyboxTexture() {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, '#040110'); g.addColorStop(0.45, '#0a0620');
+  g.addColorStop(0.7, '#1b0f3d'); g.addColorStop(1, '#040110');
+  x.fillStyle = g; x.fillRect(0, 0, 1024, 512);
+  const blobs = [
+    ['#ff2e88', 180, 200, 150], ['#1fb6d9', 520, 150, 170], ['#7b2d8b', 800, 260, 130],
+    ['#ff7e47', 320, 320, 120], ['#27e8ff', 920, 120, 110], ['#2bff88', 60, 120, 100],
+  ];
+  for (const [col, bx, by, r] of blobs) {
+    const rg = x.createRadialGradient(bx, by, 4, bx, by, r);
+    rg.addColorStop(0, col); rg.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = rg; x.beginPath(); x.arc(bx, by, r, 0, Math.PI * 2); x.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const skybox = new THREE.Mesh(
+  new THREE.SphereGeometry(400, 32, 16),
+  new THREE.MeshBasicMaterial({ map: skyboxTexture(), side: THREE.BackSide, fog: false, depthWrite: false })
+);
+scene.add(skybox);
+
+// Starfield shells: vertex-colored points (white / cyan / pink / light blue),
+// fog-exempt and tone-mapping-exempt so the neon stars stay bright.
+function makeStars(count, radius, size) {
+  const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
+  const palette = [new THREE.Color(0xffffff), new THREE.Color(0xbfeaff), new THREE.Color(0xffd9ec), new THREE.Color(0x9fd8ff)];
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1)), r = radius;
+    pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+    pos[i * 3 + 1] = r * Math.cos(ph);
+    pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+    c.copy(palette[i % palette.length]).multiplyScalar(rand(0.35, 1));
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const m = new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false, fog: false, toneMapped: false });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false;
+  scene.add(p);
+  return p;
+}
+makeStars(2200, 380, 1.6);
+makeStars(900, 380, 2.6);
+makeStars(300, 380, 3.4);
+
+// Nebula sprites (canvas radial gradients)
+function nebulaSprite(hex, size) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const x = c.getContext('2d');
+  const grd = x.createRadialGradient(128, 128, 8, 128, 128, 128);
+  grd.addColorStop(0, hex); grd.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = grd; x.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.5, depthWrite: false, toneMapped: false, fog: false }));
+  spr.scale.set(size, size, 1);
+  return spr;
+}
+const neb1 = nebulaSprite('#ff2e88', 260); neb1.material.opacity = 0.13; neb1.position.set(-120, 40, -300); scene.add(neb1);
+const neb2 = nebulaSprite('#1fb6d9', 220); neb2.material.opacity = 0.12; neb2.position.set(140, -30, -320); scene.add(neb2);
+const neb3 = nebulaSprite('#7b2d8b', 180); neb3.material.opacity = 0.14; neb3.position.set(20, 90, -340); scene.add(neb3);
+const neb4 = nebulaSprite('#ff7e47', 200); neb4.material.opacity = 0.08; neb4.position.set(-180, -60, -310); scene.add(neb4);
+const neb5 = nebulaSprite('#27e8ff', 190); neb5.material.opacity = 0.10; neb5.position.set(180, 70, -330); scene.add(neb5);
+
+// ---- Deep-space scenery: planets, extra nebulas, denser starfield --------
+// Static far-field backdrop ONLY (z ≈ -280 to -350, far outside the play
+// area). Every mesh here uses cheap unlit MeshBasicMaterial with fog:false,
+// so scene fog and lighting never touch them, and NOTHING here has a
+// collision or gameplay hook — asteroids, bolts, the ship beacon, and the
+// off-view arrow all pass freely. Scenery frames the action, never blocks it.
+function bandedPlanetTexture(colors, storm) {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const x = c.getContext('2d');
+  let y = 0;
+  for (let i = 0; i < colors.length; i++) {
+    const h = 256 / colors.length;
+    x.fillStyle = colors[i]; x.fillRect(0, y, 512, h + 1);
+    // Wavy band edge so it reads as gas, not stripes.
+    x.fillStyle = colors[(i + 1) % colors.length];
+    x.beginPath();
+    for (let px = 0; px <= 512; px += 16) x.lineTo(px, y + h + Math.sin(px * 0.05 + i) * 3);
+    x.lineTo(512, y + h + 14); x.lineTo(0, y + h + 14); x.closePath(); x.fill();
+    y += h;
+  }
+  if (storm) {
+    x.fillStyle = storm;
+    x.beginPath(); x.ellipse(330, 150, 42, 18, 0, 0, Math.PI * 2); x.fill();
+    x.fillStyle = 'rgba(255,255,255,0.25)';
+    x.beginPath(); x.ellipse(330, 150, 26, 10, 0, 0, Math.PI * 2); x.fill();
+  }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function crateredTexture() {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = '#8a7a6a'; x.fillRect(0, 0, 512, 256);
+  for (let i = 0; i < 260; i++) {
+    x.fillStyle = Math.random() < 0.5 ? 'rgba(60,50,42,0.35)' : 'rgba(190,175,155,0.25)';
+    x.beginPath(); x.arc(Math.random() * 512, Math.random() * 256, rand(2, 14), 0, Math.PI * 2); x.fill();
+  }
+  for (let i = 0; i < 60; i++) { // darker crater rims
+    const cx = Math.random() * 512, cy = Math.random() * 256, r = rand(4, 16);
+    x.strokeStyle = 'rgba(40,32,26,0.5)'; x.lineWidth = 2;
+    x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function makePlanet(radius, tex, px, py, pz) {
+  const m = new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 32, 24),
+    new THREE.MeshBasicMaterial({ map: tex, fog: false, toneMapped: false })
+  );
+  m.position.set(px, py, pz); scene.add(m); return m;
+}
+// Banded gas giant (left, high) — cratered rock world (right, low) — ringed
+// planet (high center). All parked far outside the play area.
+makePlanet(45, bandedPlanetTexture(['#d8a05a', '#b8763e', '#e8c890', '#a85f33', '#e0b878'], '#c8552e'), -150, 60, -320);
+makePlanet(30, crateredTexture(), 160, -55, -330);
+makePlanet(28, bandedPlanetTexture(['#4a7fa5', '#6fa8c8', '#2e5a7a', '#7fb5d5'], null), -30, 115, -350);
+{
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(36, 62, 48),
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, fog: false, toneMapped: false, depthWrite: false })
+  );
+  ring.position.set(-30, 115, -350); ring.rotation.x = -1.1; ring.rotation.z = 0.3; scene.add(ring);
+}
+// Three more big soft nebulas (static, unlike the drifting neb1/neb4).
+const neb6 = nebulaSprite('#a855f7', 300); neb6.material.opacity = 0.10; neb6.position.set(-60, -80, -330); scene.add(neb6);
+const neb7 = nebulaSprite('#2dd4bf', 260); neb7.material.opacity = 0.09; neb7.position.set(60, 120, -340); scene.add(neb7);
+const neb8 = nebulaSprite('#f472b6', 240); neb8.material.opacity = 0.09; neb8.position.set(-220, 110, -320); scene.add(neb8);
+// Denser starfield: one more shell on top of the existing three.
+makeStars(1500, 380, 1.2);
+
+// Shooting star: one stretched gradient streak, far field, every ~9–16s.
+// A single mesh + one opacity update per frame — near-zero cost.
+const shootCanvas = document.createElement('canvas'); shootCanvas.width = 256; shootCanvas.height = 32;
+{
+  const x = shootCanvas.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 256, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.85, 'rgba(190,230,255,0.7)'); g.addColorStop(1, 'rgba(255,255,255,1)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 32);
+}
+const shootTex = new THREE.CanvasTexture(shootCanvas);
+const shootMat = new THREE.MeshBasicMaterial({ map: shootTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide });
+const shootStar = new THREE.Mesh(new THREE.PlaneGeometry(14, 0.5), shootMat);
+shootStar.visible = false; shootStar.frustumCulled = false; scene.add(shootStar);
+let shootTimer = rand(6, 12), shootT = 0, shootDur = 0, shootVX = 0, shootVY = 0;
+function updateShootingStar(dt) {
+  if (!shootStar.visible) {
+    shootTimer -= dt;
+    if (shootTimer <= 0) {
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      shootStar.position.set(-dir * 180, rand(20, 130), -280);
+      shootVX = dir * 55; shootVY = -8;
+      shootStar.rotation.z = Math.atan2(shootVY, shootVX);
+      shootT = 0; shootDur = rand(2.2, 3.2); shootStar.visible = true;
+    }
+    return;
+  }
+  shootT += dt;
+  const t = shootT / shootDur;
+  if (t >= 1) { shootStar.visible = false; shootTimer = rand(9, 16); return; }
+  shootStar.position.x += shootVX * dt;
+  shootStar.position.y += shootVY * dt;
+  shootMat.opacity = Math.min(t * 3, 1) * (1 - t) * 0.9;
+}
+
+// Shared radial glow texture, Neon Invaders VR style: white core fading out,
+// tinted by each sprite's material color. Every fake glow in the game uses it.
+function glowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 2, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const glowTex = glowTexture();
+// Shared procedural regolith texture for asteroids: gray-brown rock with
+// darker patches, crater dots, and speckle noise. One texture shared by all
+// rocks (one-time cost); per-rock variety comes from geometry and tint.
+function rockTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = '#8a7f72'; x.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 40; i++) { // darker mineral patches
+    x.fillStyle = 'rgba(60,52,44,' + (0.08 + Math.random() * 0.14) + ')';
+    x.beginPath();
+    x.ellipse(Math.random() * 256, Math.random() * 256, 12 + Math.random() * 42, 8 + Math.random() * 30, Math.random() * 3, 0, 7);
+    x.fill();
+  }
+  for (let i = 0; i < 26; i++) { // craters: dark pit + light rim arc
+    const cx = Math.random() * 256, cy = Math.random() * 256, r = 3 + Math.random() * 11;
+    x.fillStyle = 'rgba(40,34,28,0.55)';
+    x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill();
+    x.strokeStyle = 'rgba(200,190,175,0.35)'; x.lineWidth = 1.5;
+    x.beginPath(); x.arc(cx, cy, r, Math.PI * 0.9, Math.PI * 1.9); x.stroke();
+  }
+  for (let i = 0; i < 2600; i++) { // speckle noise
+    x.fillStyle = Math.random() < 0.5 ? 'rgba(50,44,38,0.25)' : 'rgba(210,200,185,0.22)';
+    x.fillRect(Math.random() * 256, Math.random() * 256, 1.5, 1.5);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const rockTex = rockTexture();
+// Neon Invaders VR glow helper: white-core sprite, tinted by color, additive,
+// tone-mapping- and fog-exempt so neon stays pure and bright at any distance.
+function glowSprite(color, scale, opacity) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+  s.scale.set(scale, scale, 1);
+  return s;
+}
+
+// ============================== shared materials / geometries ==============================
+// Neon Invaders VR house style: dark hulls (0x1c2742 / 0x11162a) + neon
+// emissive accents + pure-neon MeshBasicMaterial cores (toneMapped: false).
+// Bodies use the NIVR formula: base color = neon x 0.35, emissive = neon.
+const MAT = {
+  hull: new THREE.MeshStandardMaterial({ color: 0x1c2742, metalness: 0.8, roughness: 0.35 }),
+  hullDark: new THREE.MeshStandardMaterial({ color: 0x11162a, metalness: 0.5, roughness: 0.6 }),
+  hullStripe: new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false }),
+  canopy: new THREE.MeshStandardMaterial({ color: 0x35c8ff, metalness: 0.2, roughness: 0.1, emissive: 0x0a3a55, emissiveIntensity: 1.5 }),
+  engine: new THREE.MeshStandardMaterial({ color: 0x35c8ff, emissive: 0x2aa8ff, emissiveIntensity: 2.2 }),
+  engineHot: new THREE.MeshStandardMaterial({ color: 0xffcc55, emissive: 0xff8800, emissiveIntensity: 2.6 }),
+  enemyBody: new THREE.MeshStandardMaterial({ color: 0x591554, emissive: 0xff3df0, emissiveIntensity: 0.55, metalness: 0.3, roughness: 0.4 }),
+  enemyCore: new THREE.MeshBasicMaterial({ color: 0xff3df0, toneMapped: false }),
+  enemyRing: new THREE.MeshStandardMaterial({ color: 0x1a0f2e, metalness: 0.85, roughness: 0.35, emissive: 0xff3df0, emissiveIntensity: 0.4 }),
+  shard: new THREE.MeshStandardMaterial({ color: 0x0e5159, emissive: 0x27e8ff, emissiveIntensity: 0.55, metalness: 0.3, roughness: 0.35 }),
+  shardFin: new THREE.MeshStandardMaterial({ color: 0x0e5159, metalness: 0.8, roughness: 0.3, emissive: 0x27e8ff, emissiveIntensity: 0.8 }),
+  shardCore: new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false }),
+  rock: new THREE.MeshStandardMaterial({ color: 0x9a8d7d, map: rockTex, roughness: 1.0, flatShading: true }),
+  rockMid: new THREE.MeshStandardMaterial({ color: 0x84796a, map: rockTex, roughness: 1.0, flatShading: true }),
+  rockDark: new THREE.MeshStandardMaterial({ color: 0x6f665b, map: rockTex, roughness: 1.0, flatShading: true }),
+  boltP: new THREE.MeshBasicMaterial({ color: 0xbffcff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
+  boltE: new THREE.MeshBasicMaterial({ color: 0xff5566, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
+  plasma: new THREE.MeshBasicMaterial({ color: 0xff55ff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, toneMapped: false, fog: false }),
+  rail: new THREE.MeshBasicMaterial({ color: 0xaefcff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9, toneMapped: false, fog: false }),
+  gold: new THREE.MeshBasicMaterial({ color: 0xffc845, toneMapped: false }),
+  green: new THREE.MeshStandardMaterial({ color: 0x33ff88, emissive: 0x0a8833, emissiveIntensity: 1.6 }),
+  bossHull: new THREE.MeshStandardMaterial({ color: 0x372059, emissive: 0x9d5cff, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.4 }),
+  bossStripe: new THREE.MeshBasicMaterial({ color: 0xff2e88, toneMapped: false }),
+  navRed: new THREE.MeshBasicMaterial({ color: 0xff2222, toneMapped: false }),
+  navGreen: new THREE.MeshBasicMaterial({ color: 0x22ff66, toneMapped: false }),
+};
+const PICK_MAT = {
+  triple: new THREE.MeshBasicMaterial({ color: 0xffc845, toneMapped: false }),
+  seeker: new THREE.MeshBasicMaterial({ color: 0xff8833, toneMapped: false }),
+  plasma: new THREE.MeshBasicMaterial({ color: 0xff55ff, toneMapped: false }),
+  rail: new THREE.MeshBasicMaterial({ color: 0xaefcff, toneMapped: false }),
+  nova: new THREE.MeshBasicMaterial({ color: 0xff2244, toneMapped: false }),
+  plate: new THREE.MeshBasicMaterial({ color: 0x8fb8ff, toneMapped: false }),
+  cell: new THREE.MeshBasicMaterial({ color: 0x33ff88, toneMapped: false }),
+  engine: new THREE.MeshBasicMaterial({ color: 0xffff55, toneMapped: false }),
+  power: new THREE.MeshBasicMaterial({ color: 0xcc55ff, toneMapped: false }),
+  hull: new THREE.MeshBasicMaterial({ color: 0x7df9ff, toneMapped: false }),
+  shield: new THREE.MeshBasicMaterial({ color: 0x33ffcc, toneMapped: false }),
+};
+const GEO = {
+  cone: new THREE.ConeGeometry(0.32, 1.4, 8),
+  box: new THREE.BoxGeometry(1, 1, 1),
+  sphere: new THREE.SphereGeometry(0.5, 10, 8),
+  oct: new THREE.OctahedronGeometry(0.9),
+  tetra: new THREE.TetrahedronGeometry(1.0),
+  rock: new THREE.IcosahedronGeometry(1.0, 1),
+  bolt: new THREE.SphereGeometry(0.14, 8, 6),
+  plasmaBall: new THREE.SphereGeometry(0.34, 10, 8),
+  ring: new THREE.TorusGeometry(1, 0.08, 8, 32),
+};
+
+// ============================== player ship: detailed Kestrel (original design) ==============================
+const ship = new THREE.Group();
+let navL, navR;
+const engineGlows = [];
+{
+  // Nose spike + fuselage
+  const nose = new THREE.Mesh(GEO.cone, MAT.hull);
+  nose.rotation.x = -Math.PI / 2; nose.position.z = -0.4; ship.add(nose);
+  const body = new THREE.Mesh(GEO.box, MAT.hull);
+  body.scale.set(0.55, 0.35, 1.1); body.position.z = 0.55; ship.add(body);
+  const spine = new THREE.Mesh(GEO.box, MAT.hullDark);
+  spine.scale.set(0.2, 0.12, 1.0); spine.position.set(0, 0.22, 0.5); ship.add(spine);
+  const stripe = new THREE.Mesh(GEO.box, MAT.hullStripe);
+  stripe.scale.set(0.57, 0.06, 0.9); stripe.position.set(0, 0.0, 0.55); ship.add(stripe);
+  // Cockpit canopy with frame
+  const canopy = new THREE.Mesh(GEO.sphere, MAT.canopy);
+  canopy.scale.set(0.28, 0.22, 0.5); canopy.position.set(0, 0.24, 0.35); ship.add(canopy);
+  const frame = new THREE.Mesh(GEO.box, MAT.hullDark);
+  frame.scale.set(0.6, 0.06, 0.3); frame.position.set(0, 0.24, 0.75); ship.add(frame);
+  for (const s of [-1, 1]) {
+    // Swept wing + flap + tip light + engine pod
+    const wing = new THREE.Mesh(GEO.box, MAT.hullDark);
+    wing.scale.set(1.25, 0.08, 0.7); wing.position.set(s * 0.85, -0.05, 0.75); ship.add(wing);
+    const flap = new THREE.Mesh(GEO.box, MAT.hull);
+    flap.scale.set(0.5, 0.06, 0.3); flap.position.set(s * 1.25, -0.02, 1.05); ship.add(flap);
+    const tip = new THREE.Mesh(GEO.box, MAT.engine);
+    tip.scale.set(0.12, 0.12, 0.5); tip.position.set(s * 1.45, -0.05, 0.75); ship.add(tip);
+    const nav = new THREE.Mesh(GEO.sphere, s < 0 ? MAT.navRed : MAT.navGreen);
+    nav.scale.setScalar(0.28); nav.position.set(s * 1.5, -0.02, 0.55); ship.add(nav);
+    if (s < 0) navL = nav; else navR = nav;
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.7, 10), MAT.hullDark);
+    pod.rotation.x = Math.PI / 2; pod.position.set(s * 0.35, -0.05, 1.15); ship.add(pod);
+    const eng = new THREE.Mesh(GEO.sphere, MAT.engineHot);
+    eng.scale.set(0.22, 0.22, 0.3); eng.position.set(s * 0.35, -0.05, 1.5); ship.add(eng);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x66ccff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+    glow.scale.set(1.5, 1.5, 1); glow.position.set(s * 0.35, -0.05, 1.75); ship.add(glow);
+    engineGlows.push(glow);
+  }
+}
+ship.position.set(0, 0, 0);
+scene.add(ship);
+
+// SHIP-FINDABILITY: tall beacon beam + halo above the ship. The beam ignores
+// depth (visible through asteroids and at distance) so the ship reads instantly
+// in any direction; it pulses in tick(). Steering/tilt never change it.
+const beaconMat = new THREE.MeshBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, toneMapped: false, fog: false });
+const beaconBeam = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 14, 10, 1, true), beaconMat);
+beaconBeam.position.y = 7; beaconBeam.renderOrder = 20; beaconBeam.frustumCulled = false;
+ship.add(beaconBeam);
+const beaconHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x27e8ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, toneMapped: false, fog: false }));
+beaconHalo.scale.set(3.2, 3.2, 1); beaconHalo.position.y = 1.2; beaconHalo.renderOrder = 20;
+ship.add(beaconHalo);
+
+// Engine trails: ribbon triangle strips (Bible §3.3, Rhythm Slicer
+// makeVrTrail pattern) — one per engine pod, 14-pose history, vertex
+// colors fading head-color -> black (additive blending: black reads as
+// transparent). Replaces the old 1-px THREE.Line trails. The ship flies in
+// the z=0 plane facing the camera, so ribbon width perpendicular to travel
+// in the XY plane faces the viewer. 2 meshes, ~26 tris each.
+const TRAIL_N = 14;
+const TRAIL_W = 0.11;
+function makeTrail(color) {
+  const hist = new Float32Array(TRAIL_N * 3); // pose history, newest at 0
+  const pos = new Float32Array(TRAIL_N * 2 * 3);
+  const col = new Float32Array(TRAIL_N * 2 * 3);
+  const c = new THREE.Color(color);
+  for (let i = 0; i < TRAIL_N; i++) {
+    pos[i * 6 + 1] = -999; pos[i * 6 + 4] = -999; // parked until first update
+    const f = 1 - i / (TRAIL_N - 1); // 1 at the engine, 0 at the tail
+    const fade = f * f; // quadratic falloff
+    col[i * 6] = c.r * fade; col[i * 6 + 1] = c.g * fade; col[i * 6 + 2] = c.b * fade;
+    col[i * 6 + 3] = c.r * fade; col[i * 6 + 4] = c.g * fade; col[i * 6 + 5] = c.b * fade;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const idx = [];
+  for (let i = 0; i < TRAIL_N - 1; i++) {
+    const a = i * 2, b = a + 1, d = a + 2, e = a + 3;
+    idx.push(a, b, d, b, e, d);
+  }
+  g.setIndex(idx);
+  const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending,
+    depthWrite: false, side: THREE.DoubleSide, toneMapped: false
+  }));
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return { mesh, hist, pos };
+}
+const trails = [makeTrail(0x66ccff), makeTrail(0x66ccff)];
+const _trailTmp = new THREE.Vector3();
+function updateTrails() {
+  for (let k = 0; k < 2; k++) {
+    const s = k === 0 ? -1 : 1;
+    _trailTmp.set(ship.position.x + s * 0.35, ship.position.y - 0.05, ship.position.z + 1.6);
+    const tr = trails[k];
+    tr.hist.copyWithin(3, 0, (TRAIL_N - 1) * 3); // shift poses down by one
+    tr.hist[0] = _trailTmp.x; tr.hist[1] = _trailTmp.y; tr.hist[2] = _trailTmp.z;
+    // Rebuild the strip: width perpendicular to travel, tapering to the tail.
+    const pos = tr.pos;
+    for (let i = 0; i < TRAIL_N; i++) {
+      const hx = tr.hist[i * 3], hy = tr.hist[i * 3 + 1], hz = tr.hist[i * 3 + 2];
+      const j = Math.min(i + 1, TRAIL_N - 1);
+      let dx = tr.hist[j * 3] - hx, dy = tr.hist[j * 3 + 1] - hy;
+      const len = Math.hypot(dx, dy) || 1;
+      dx /= len; dy /= len;
+      const w = TRAIL_W * (1 - i / (TRAIL_N - 1)) + 0.01;
+      const ox = -dy * w, oy = dx * w;
+      pos[i * 6] = hx + ox; pos[i * 6 + 1] = hy + oy; pos[i * 6 + 2] = hz;
+      pos[i * 6 + 3] = hx - ox; pos[i * 6 + 4] = hy - oy; pos[i * 6 + 5] = hz;
+    }
+    tr.mesh.geometry.attributes.position.needsUpdate = true;
+  }
+}
+// Collapse both trails onto the ship's current engine pods — called on
+// recall / respawn / restart so a teleport never draws a streak across the
+// sky. Uses px/py (the position source of truth), not ship.position.
+function resetTrails() {
+  for (let k = 0; k < 2; k++) {
+    const s = k === 0 ? -1 : 1;
+    const tr = trails[k];
+    const x = px + s * 0.35, y = py - 0.05, z = 1.6;
+    for (let i = 0; i < TRAIL_N; i++) { tr.hist[i * 3] = x; tr.hist[i * 3 + 1] = y; tr.hist[i * 3 + 2] = z; }
+  }
+}
+
+// Muzzle flash sprite (brief, at the nose on every volley)
+const muzzle = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xaefcff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+muzzle.scale.set(1.4, 1.4, 1);
+scene.add(muzzle);
+let muzzleT = 0, engineFlare = 0; // engineFlare: brief glow scale-up on every volley
+
+// ============================== SCOREBOARD CELL (shared arcade cell) ==============================
+// ONE small dark translucent rectangular cell with a thin neon border, top-left
+// of the view, in the neon house style shared across the arcade. Two forms of
+// the SAME scoreboard: (a) this camera-attached plane in VR, (b) the #hud DOM
+// element on desktop. Key numbers only: SCORE + WAVE + HULL (the one extra
+// essential this game already tracks). No other scoreboard exists on screen.
+// VIEW MARGINS (camera FOV 70°, depth -1.5): visible half-width ≈ 1.05 and
+// visible half-height = 1.5·tan(35°) ≈ 1.05, so the view spans about ±1.05.
+// Cell 0.80 wide at center x −0.55 → left edge −0.95 (0.10 margin from the
+// left edge), right edge −0.15. Cell 0.20 tall at center y 0.85 → top edge
+// 0.95 (0.10 margin below the view top), bottom edge 0.75. Entire cell fits.
+const hudCanvas = document.createElement('canvas');
+hudCanvas.width = 640; hudCanvas.height = 160;
+const hctx = hudCanvas.getContext('2d');
+const hudTex = new THREE.CanvasTexture(hudCanvas);
+const hudPanel = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.80, 0.20),
+  new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false })
+);
+hudPanel.renderOrder = 999;
+hudPanel.position.set(-0.55, 0.85, -1.5);
+camera.add(hudPanel);
+// Pre-existing RAVAGER boss bar, preserved as its own transient bar directly
+// below the scoreboard cell (NOT part of the cell, NOT a second scoreboard):
+// same label/bar colours and bossHp/bossMax maths as before, visible only
+// while a boss is alive. 0.80 wide at center x −0.55 → left −0.95, right −0.15;
+// 0.08 tall at center y 0.68 → top 0.72 (0.03 gap below the cell), bottom 0.64.
+const bossCanvas = document.createElement('canvas');
+bossCanvas.width = 640; bossCanvas.height = 64;
+const bossCtx = bossCanvas.getContext('2d');
+const bossTex = new THREE.CanvasTexture(bossCanvas);
+const bossBarMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.80, 0.08),
+  new THREE.MeshBasicMaterial({ map: bossTex, transparent: true, depthTest: false })
+);
+bossBarMesh.renderOrder = 999;
+bossBarMesh.position.set(-0.55, 0.68, -1.5);
+bossBarMesh.visible = false;
+camera.add(bossBarMesh);
+// Pre-existing wave/tier announcement line (S.msg), likewise preserved as its
+// own transient line below the boss bar (NOT part of the scoreboard cell):
+// same text, colour and msgT timing as the old panel's message row, visible
+// only while a message is set. 0.80 wide at center x −0.55 → left −0.95,
+// right −0.15; 0.08 tall at center y 0.57 → top 0.61 (0.03 gap below the boss
+// bar), bottom 0.53. Banners themselves (bannerMesh / #banner) are untouched.
+const msgCanvas = document.createElement('canvas');
+msgCanvas.width = 640; msgCanvas.height = 64;
+const msgCtx = msgCanvas.getContext('2d');
+const msgTex = new THREE.CanvasTexture(msgCanvas);
+const msgMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.80, 0.08),
+  new THREE.MeshBasicMaterial({ map: msgTex, transparent: true, depthTest: false })
+);
+msgMesh.renderOrder = 999;
+msgMesh.position.set(-0.55, 0.57, -1.5);
+msgMesh.visible = false;
+camera.add(msgMesh);
+const hudEl = document.getElementById('hud');
+let hudDirty = true;
+function drawHUD(state) {
+  if (!hudDirty) return;
+  hudDirty = false;
+  hctx.clearRect(0, 0, 640, 160);
+  hctx.fillStyle = 'rgba(2,8,24,0.72)'; hctx.fillRect(0, 0, 640, 160);
+  hctx.strokeStyle = muted ? '#ff3355' : '#27e8ff'; hctx.lineWidth = 3; hctx.strokeRect(3, 3, 634, 154);
+  hctx.textAlign = 'left';
+  hctx.font = 'bold 42px Arial'; hctx.fillStyle = '#7df9ff';
+  hctx.fillText('SCORE ' + state.score, 22, 60);
+  hctx.textAlign = 'right'; hctx.fillStyle = '#ffd319';
+  hctx.fillText('WAVE ' + state.wave, 618, 60);
+  hctx.textAlign = 'left';
+  hctx.font = 'bold 36px Arial';
+  hctx.fillStyle = state.hull > state.maxHull * 0.3 ? '#33ff88' : '#ff5566';
+  hctx.fillText('HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull, 22, 124);
+  // Perf readout (cinematic upgrade): measured frame-time EMA + valve level
+  // + the XR layer's ACTUAL framebuffer size. A measurement display, not a
+  // claim — refreshed at 2 Hz by the perf timer in tick.
+  hctx.textAlign = 'right';
+  hctx.font = 'bold 24px Arial'; hctx.fillStyle = '#8fb8ff';
+  hctx.fillText(perfValve.ema.toFixed(1) + 'ms · V' + perfValve.level + ' · ' + xrLayerSize(), 618, 124);
+  if (muted) {
+    hctx.textAlign = 'center';
+    hctx.font = 'bold 28px Arial'; hctx.fillStyle = '#ff5566';
+    hctx.fillText('MUTED', 320, 60);
+  }
+  hudTex.needsUpdate = true;
+  if (state.bossHp > 0) {
+    bossCtx.clearRect(0, 0, 640, 64);
+    bossCtx.fillStyle = 'rgba(2,8,24,0.72)'; bossCtx.fillRect(0, 0, 640, 64);
+    bossCtx.fillStyle = '#ff3355'; bossCtx.font = 'bold 26px Arial'; bossCtx.textAlign = 'left';
+    bossCtx.fillText('RAVAGER', 16, 42);
+    bossCtx.fillStyle = '#123'; bossCtx.fillRect(150, 20, 400, 24);
+    bossCtx.fillStyle = '#ff3355'; bossCtx.fillRect(150, 20, 400 * state.bossHp / state.bossMax, 24);
+    bossTex.needsUpdate = true;
+    bossBarMesh.visible = true;
+  } else {
+    bossBarMesh.visible = false;
+  }
+  if (state.msg) {
+    msgCtx.clearRect(0, 0, 640, 64);
+    msgCtx.fillStyle = 'rgba(2,8,24,0.72)'; msgCtx.fillRect(0, 0, 640, 64);
+    msgCtx.fillStyle = '#ffd319'; msgCtx.font = 'bold 26px Arial'; msgCtx.textAlign = 'center';
+    msgCtx.fillText(state.msg, 320, 42);
+    msgTex.needsUpdate = true;
+    msgMesh.visible = true;
+  } else {
+    msgMesh.visible = false;
+  }
+  hudEl.textContent = 'SCORE ' + state.score + '  ·  WAVE ' + state.wave + '  ·  HULL ' + Math.max(0, Math.round(state.hull)) + '/' + state.maxHull;
+}
+
+// ============================== pickup banner (DOM + in-VR 3D banner) ==============
+// Every pickup gets a clear on-screen label the moment it is collected. The DOM
+// banner serves the desktop preview; the transient center-view 3D banner serves
+// Quest VR, where DOM is not visible. Both auto-hide; neither is always-on.
+const bannerEl = document.getElementById('banner');
+let bannerTimer = null;
+const bannerCanvas = document.createElement('canvas');
+bannerCanvas.width = 640; bannerCanvas.height = 128;
+const bctx = bannerCanvas.getContext('2d');
+const bannerTex = new THREE.CanvasTexture(bannerCanvas);
+const bannerMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.5, 0.3),
+  new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true, depthTest: false })
+);
+bannerMesh.renderOrder = 1000;
+bannerMesh.position.set(0, 0.35, -1.5);
+bannerMesh.visible = false;
+camera.add(bannerMesh);
+let bannerT = 0;
+function showBanner(text, dur) {
+  S.msg = text; S.msgT = dur || 2.5;
+  if (bannerEl) {
+    bannerEl.textContent = text;
+    bannerEl.style.display = 'block';
+    if (bannerTimer) clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { bannerEl.style.display = 'none'; }, (dur || 2.5) * 1000);
+  }
+  bctx.clearRect(0, 0, 640, 128);
+  bctx.fillStyle = 'rgba(2,8,24,0.72)'; bctx.fillRect(0, 0, 640, 128);
+  bctx.strokeStyle = '#ffd319'; bctx.lineWidth = 4; bctx.strokeRect(4, 4, 632, 120);
+  bctx.font = 'bold 34px Arial'; bctx.fillStyle = '#ffd319'; bctx.textAlign = 'center';
+  bctx.fillText(text, 320, 78);
+  bannerTex.needsUpdate = true;
+  bannerMesh.visible = true;
+  bannerT = dur || 2.5;
+  hudDirty = true;
+}
+
+// ============================== cockpit frame + pause panel + boss vignette (cinematic upgrade) ==============================
+// COCKPIT: a camera-attached frame the player sits in (Bible §7.4) — two
+// side struts, a top bar, and a bottom console with a cyan emissive strip,
+// all at z = -1.5 (the HUD plane; view half-extent there is ≈1.05, so the
+// frame sits at the view edges and never covers the play field). Dark hull
+// materials, 5 meshes, visible only in play mode. It moves with the HEAD,
+// like a real canopy — never with the ship.
+const cockpit = new THREE.Group();
+{
+  const strutGeo = new THREE.BoxGeometry(0.09, 2.1, 0.06);
+  for (const s of [-1, 1]) {
+    const strut = new THREE.Mesh(strutGeo, MAT.hullDark);
+    strut.position.set(s * 0.98, 0, -1.5);
+    cockpit.add(strut);
+  }
+  const topBar = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.07, 0.06), MAT.hullDark);
+  topBar.position.set(0, 0.99, -1.5);
+  cockpit.add(topBar);
+  const dash = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.18, 0.1), MAT.hullDark);
+  dash.position.set(0, -0.95, -1.5);
+  cockpit.add(dash);
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.03, 0.02), MAT.hullStripe);
+  strip.position.set(0, -0.85, -1.44);
+  cockpit.add(strip);
+}
+cockpit.visible = false;
+camera.add(cockpit);
+
+// PAUSE PANEL (Neon pattern): camera-attached, static canvas drawn once,
+// visible only while paused in play mode (see tick).
+const pauseCanvas = document.createElement('canvas');
+pauseCanvas.width = 512; pauseCanvas.height = 256;
+const pauseCtx = pauseCanvas.getContext('2d');
+const pauseTex = new THREE.CanvasTexture(pauseCanvas);
+const pauseMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.15, 0.575),
+  new THREE.MeshBasicMaterial({ map: pauseTex, transparent: true, toneMapped: false, fog: false, depthTest: false })
+);
+pauseMesh.position.set(0, 0, -1.5);
+pauseMesh.renderOrder = 1000;
+pauseMesh.visible = false;
+camera.add(pauseMesh);
+{
+  const g = pauseCtx;
+  g.fillStyle = 'rgba(8,10,26,0.92)'; g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 6; g.strokeRect(4, 4, 504, 248);
+  g.textAlign = 'center';
+  g.fillStyle = '#eaf6ff'; g.font = '900 56px Arial';
+  g.fillText('PAUSED', 256, 66);
+  g.font = '700 26px Arial'; g.fillStyle = '#bfeaff';
+  g.fillText('Hold stick-click — resume', 256, 122);
+  g.fillText('A / X — sound      Grip — restart run', 256, 164);
+  g.fillText('P / R on desktop', 256, 206);
+  pauseTex.needsUpdate = true;
+}
+
+// BOSS VIGNETTE: red edge-glow plane for boss-encounter staging (Bible
+// §7.4). Radial-gradient canvas, transparent center; pulses while the
+// Ravager lives, hidden otherwise (0 draw calls when hidden). The
+// frame-time valve forces it off at L2 (registry item).
+const vigCanvas = document.createElement('canvas');
+vigCanvas.width = vigCanvas.height = 256;
+{
+  const x = vigCanvas.getContext('2d');
+  const g = x.createRadialGradient(128, 128, 60, 128, 128, 180);
+  g.addColorStop(0, 'rgba(255,40,60,0)');
+  g.addColorStop(0.7, 'rgba(255,40,60,0.12)');
+  g.addColorStop(1, 'rgba(255,40,60,0.55)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 256);
+}
+const vignetteMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(2.6, 2.6),
+  new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(vigCanvas), transparent: true, opacity: 0, depthWrite: false, depthTest: false, toneMapped: false, fog: false })
+);
+vignetteMesh.position.set(0, 0, -1.4);
+vignetteMesh.renderOrder = 998;
+vignetteMesh.visible = false;
+camera.add(vignetteMesh);
+
+// ============================== audio (original synth) ==============================
+let actx = null, masterGain = null, muted = false;
+function startAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); startMusicBed(); return; }
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.4;
+    masterGain.connect(actx.destination);
+    startMusicBed();
+  } catch (e) { /* audio unavailable — game still plays */ }
+}
+// Ambient music bed (cinematic upgrade): a quiet two-oscillator deep-space
+// pad with a slow breathing LFO, through its own musicGain into masterGain
+// (so mute silences it). Started once, on the first user gesture.
+let musicGain = null, musicStarted = false;
+function startMusicBed() {
+  if (!actx || !masterGain || musicStarted) return;
+  musicStarted = true;
+  try {
+    musicGain = actx.createGain(); musicGain.gain.value = 0.5; musicGain.connect(masterGain);
+    const o1 = actx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 55;
+    const o2 = actx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = 82.5;
+    const g1 = actx.createGain(); g1.gain.value = 0.05;
+    const g2 = actx.createGain(); g2.gain.value = 0.03;
+    const lfo = actx.createOscillator(); lfo.frequency.value = 0.07;
+    const lfoG = actx.createGain(); lfoG.gain.value = 0.02;
+    lfo.connect(lfoG); lfoG.connect(g1.gain);
+    o1.connect(g1); g1.connect(musicGain);
+    o2.connect(g2); g2.connect(musicGain);
+    o1.start(); o2.start(); lfo.start();
+  } catch (e) { /* the bed is optional — SFX still work without it */ }
+}
+function blip(freqA, freqB, dur, type, vol, pan) {
+  if (!actx || muted) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type || 'square';
+  o.frequency.setValueAtTime(freqA, actx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, freqB), actx.currentTime + dur);
+  g.gain.setValueAtTime(vol || 0.18, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(g);
+  // Stereo pan (cinematic upgrade): an optional pan (-1..1) routes the blip
+  // through a StereoPannerNode; no panner is built when pan is 0/omitted.
+  if (pan && actx.createStereoPanner) {
+    const p = actx.createStereoPanner();
+    p.pan.value = clamp(pan, -1, 1);
+    g.connect(p); p.connect(masterGain);
+  } else g.connect(masterGain);
+  o.start(); o.stop(actx.currentTime + dur);
+}
+// Stereo pan for a world x position, relative to the ship (clamped ±0.8).
+const panFor = (x) => clamp((x - px) / 8, -0.8, 0.8);
+const sfxLaser = () => blip(880, 220, 0.12, 'sawtooth', 0.12);
+const sfxHit = () => blip(160, 40, 0.3, 'sine', 0.5);
+const sfxBoom = (x) => blip(90, 28, 0.6, 'sine', 0.6, x === undefined ? 0 : panFor(x));
+const sfxPickup = () => { blip(520, 1040, 0.15, 'sine', 0.2); setTimeout(() => blip(1040, 1560, 0.15, 'sine', 0.2), 90); };
+const sfxRoll = () => blip(300, 900, 0.35, 'triangle', 0.2);
+const sfxNova = () => { blip(1200, 60, 0.9, 'sawtooth', 0.5); blip(60, 30, 0.9, 'sine', 0.6); };
+const sfxRail = () => blip(2400, 180, 0.25, 'sawtooth', 0.3);
+const muteBtn = document.getElementById('muteBtn');
+function setMuted(m) {
+  muted = m;
+  muteBtn.textContent = m ? 'SOUND: OFF' : 'SOUND: ON';
+  if (masterGain) masterGain.gain.value = m ? 0 : 0.4;
+  hudDirty = true; // redraw the HUD so the MUTED tag + border update
+}
+muteBtn.addEventListener('click', () => { startAudio(); setMuted(!muted); });
+
+// Controller haptics (cinematic upgrade — Neon pattern, Std §5): fires on
+// the same frame path as the score and the sound. Both hands buzz — either
+// hand can fire/steer, so a kill is never attributed to one hand the player
+// didn't use. Guarded throughout: no-op on desktop, best-effort in VR.
+function pulseHaptics(hand, strength, ms) {
+  if (!renderer.xr.isPresenting) return;
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const src of session.inputSources) {
+    if (src.handedness !== hand) continue;
+    const gp = src.gamepad;
+    if (!gp || !gp.hapticActuators || !gp.hapticActuators.length) continue;
+    const act = gp.hapticActuators[0];
+    try {
+      if (typeof act.pulse === 'function') act.pulse(clamp(strength, 0, 1), ms);
+      else if (typeof act.playEffect === 'function') act.playEffect('dual-rumble', { duration: ms, strongMagnitude: strength, weakMagnitude: strength * 0.6 });
+    } catch (e) { /* haptics are best-effort */ }
+  }
+}
+function pulseBoth(strength, ms) { pulseHaptics('left', strength, ms); pulseHaptics('right', strength, ms); }
+const recallBtn = document.getElementById('recallBtn');
+recallBtn.addEventListener('click', () => { startAudio(); recallShip(); });
+
+// ============================== input ==============================
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+  if (e.repeat) return; // held keys must not re-toggle pause/mute/restart
+  if (e.code === 'KeyM') setMuted(!muted);
+  if (e.code === 'KeyP') togglePause();
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') tryRoll();
+  if (e.code === 'KeyN') tryNova();
+  if (e.code === 'KeyR') { if (paused) restartRun(); else recallShip(); }
+  startAudio();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+const mouse = { x: 0, y: 0, down: false };
+window.addEventListener('mousemove', e => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -((e.clientY / window.innerHeight) * 2 - 1);
+});
+window.addEventListener('mousedown', () => { mouse.down = true; startAudio(); });
+window.addEventListener('mouseup', () => { mouse.down = false; });
+
+const DEAD = 0.14;
+const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3();
+function pollXR(dt) {
+  // Returns: steerX, steerY (EITHER thumbstick — both steer, averaged if both
+  // give input so speed never doubles), fire, roll, nova, recall, aimX, aimY
+  // (right-controller ray on z=0 plane, fallback only when neither stick is
+  // touched — the tick loop prefers stick input over aim), plus the pause /
+  // mute / restart button states (cinematic upgrade): pauseToggle fires once
+  // per stick-click HOLD (≥0.6 s); muteBtn / restartBtn are RAW pressed
+  // states — tick rising-edges them and only honors them while paused
+  // (in play, A/X is Nova and grip is barrel roll).
+  const out = { sx: 0, sy: 0, fire: false, roll: false, nova: false, recall: false, aim: null, pauseToggle: false, muteBtn: false, restartBtn: false };
+  let lx = 0, ly = 0, rx = 0, ry = 0; // per-hand stick values, combined below
+  let anyClick = false; // any thumbstick click held this frame (pause hold)
+  if (!renderer.xr.isPresenting) return out;
+  const session = renderer.xr.getSession();
+  if (!session) return out;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    if (gp.axes && gp.axes.length > 3) {
+      const ax = gp.axes[2] || 0, ay = gp.axes[3] || 0;
+      if (src.handedness === 'left') {
+        if (Math.abs(ax) > DEAD) lx = ax;
+        if (Math.abs(ay) > DEAD) ly = -ay;
+      } else if (src.handedness === 'right') {
+        if (Math.abs(ax) > DEAD) rx = ax;
+        if (Math.abs(ay) > DEAD) ry = -ay;
+      }
+    }
+    const trig = (gp.buttons && gp.buttons[0]) ? (gp.buttons[0].value || 0) : 0;
+    if (trig > 0.5) out.fire = true;
+    const squeeze = (gp.buttons && gp.buttons[1]) ? (gp.buttons[1].value || 0) : 0;
+    const bBtn = (gp.buttons && gp.buttons[5]) ? (gp.buttons[5].pressed || false) : false;
+    if (squeeze > 0.5 || bBtn) out.roll = true;
+    if (squeeze > 0.5) out.restartBtn = true;
+    const aBtn = (gp.buttons && gp.buttons[4]) ? (gp.buttons[4].pressed || false) : false;
+    if (aBtn) out.nova = true;
+    if (aBtn) out.muteBtn = true;
+    // Thumbstick click (buttons[3]) is unbound on Quest controllers — recall ship.
+    const stickClick = (gp.buttons && gp.buttons[3]) ? (gp.buttons[3].pressed || false) : false;
+    if (stickClick) { out.recall = true; anyClick = true; }
+    if (src.handedness === 'right') {
+      const ctrl = renderer.xr.getController(1);
+      if (ctrl) {
+        ctrl.updateMatrixWorld();
+        ctrl.getWorldPosition(_v);
+        ctrl.getWorldQuaternion(_q);
+        _dir.set(0, 0, -1).applyQuaternion(_q);
+        if (_dir.z < -0.05) {
+          const t = (0 - _v.z) / _dir.z;
+          if (t > 0) out.aim = { x: clamp(_v.x + _dir.x * t, PX.min, PX.max), y: clamp(_v.y + _dir.y * t, PY.min, PY.max) };
+        }
+      }
+    }
+  }
+  // Stick-click HOLD (≥0.6 s) toggles pause; a short click still recalls the
+  // ship (rising edge, in tick). Holding also recalls — benign, the ship
+  // recenters and then the game pauses. One toggle per hold (latched).
+  if (anyClick) {
+    stickHoldT += dt;
+    if (stickHoldT >= 0.6 && !stickHoldLatched) { stickHoldLatched = true; out.pauseToggle = true; }
+  } else { stickHoldT = 0; stickHoldLatched = false; }
+  // DUAL-STICK STEERING: one active stick behaves exactly as before; two
+  // active sticks average per axis, so using both never doubles speed.
+  out.sx = (lx !== 0 && rx !== 0) ? (lx + rx) / 2 : (lx || rx);
+  out.sy = (ly !== 0 && ry !== 0) ? (ly + ry) / 2 : (ly || ry);
+  return out;
+}
+
+// ============================== game state ==============================
+const S = {
+  mode: 'menu', score: 0, hull: 100, maxHull: 100, shield: 0, wave: 1,
+  retries: 0, bossHp: 0, bossMax: 0, msg: 'WAVE 1 INCOMING',
+  tier: 0, bossCount: 0, eliteLvl: 0, stormLvl: 0, bomberLvl: 0,
+  fireCd: 0, rollT: 0, rollCd: 0, msgT: 0, spawnQueue: 0, spawnT: 0, shake: 0,
+  seekerCd: 0, railCd: 0, railVis: 0,
+  // Weapons: base laser only at start; pickups equip up to 3 slots, a 4th
+  // replaces the oldest. Upgrades stack with no maximum, unchanged.
+  slots: [], nova: 0,
+  upg: { plate: 0, cell: 0, engine: 0, power: 0 },
+};
+let paused = false; // in-VR pause state (cinematic upgrade) — see togglePause()
+const WPN_NAMES = { triple: 'TRIPLE LASER', seeker: 'SEEKER MISSILES', plasma: 'PLASMA CANNON', rail: 'RAIL BEAM', nova: 'NOVA BOMB' };
+const hasWpn = (k) => S.slots.includes(k);
+// (Dead helper slotLabel was removed in the Nov 15 cinematic upgrade —
+// nothing in the game ever called it.)
+const boltDmg = () => 1 + S.upg.power;
+const speedMul = () => 1 + S.upg.engine * 0.15;
+
+// ============================== goal-based difficulty escalation ==============
+// Waves cleared (wave-1): enemy speed +5%/wave, enemy fire rate +4%/wave,
+// squadron groups +1 ship/wave (capped at +3/group; the 26-enemy pool is the
+// hard on-screen cap). Score tiers: every 10,000 pts = one tier up, unlocking
+// a new wrinkle in rotation (elite drones -> asteroid storms -> bomber
+// squadrons); wrinkles stack and never decrease within a run. Boss waves
+// (every 5th) add one attack pattern per appearance. Tier-ups are HELD while
+// frames are degraded (see tick) so difficulty never outruns frame rate.
+const waveCleared = () => Math.max(0, S.wave - 1);
+const diffSpeed = () => Math.pow(1.05, waveCleared());
+const diffFire = () => Math.pow(1.04, waveCleared());
+const squadBonus = () => Math.min(waveCleared(), 3);
+// ============================== frame-time valve (cinematic upgrade) =========
+// Rhythm Slicer perfValve pattern (Bible §2 + Performance Manager spec §3):
+// EMA α 0.05, fed ONLY during active play; degrade >20 ms sustained 1 s,
+// recover <16 ms sustained 3 s, 2 s minimum dwell, foveation steps
+// [0.0, 0.25, 0.5] (r160: 0 = none, 1 = max). One step at a time.
+// VALVE REGISTRY — shed ONLY these, each with a reverse path:
+//   L1: foveation 0.25, particle spawns ×0.5.
+//   L2: foveation 0.5, particle spawns ×0.25, ribbon trails hidden,
+//       boss vignette off, engine glows dimmed.
+// NEVER shed: the beacon, HUD, muzzle flash, lighting, geometry, textures,
+// or any gameplay feedback. `degraded` (valveLevel > 0) keeps the old
+// tier-progression hold in checkTier() working unchanged. The old bare EMA
+// (avgMs, tier-hold only, shed nothing) is replaced by this valve.
+let degraded = false;
+let perfWarmup = 0; // seconds after start/resume during which the EMA is not fed
+const perfValve = {
+  ema: 13.9, level: 0, overMs: 0, underMs: 0, dwell: 0,
+  foveation: [0.0, 0.25, 0.5],
+  get particleScale() { return [1, 0.5, 0.25][this.level]; },
+  get trailsOn() { return this.level < 2; },
+  get glowsOn() { return this.level < 2; },
+  update(dt) {
+    const ms = dt * 1000;
+    this.ema += (ms - this.ema) * 0.05;
+    this.dwell += dt;
+    if (this.ema > 20) { this.overMs += dt; this.underMs = 0; }
+    else if (this.ema < 16) { this.underMs += dt; this.overMs = 0; }
+    else { this.overMs = 0; this.underMs = 0; }
+    if (this.dwell >= 2.0 && this.overMs > 1.0 && this.level < 2) this.setLevel(this.level + 1);
+    else if (this.dwell >= 2.0 && this.underMs > 3.0 && this.level > 0) this.setLevel(this.level - 1);
+  },
+  setLevel(l) {
+    this.level = l; this.overMs = 0; this.underMs = 0; this.dwell = 0;
+    degraded = l > 0;
+    try { renderer.xr.setFoveation(this.foveation[l]); } catch (e) { /* foveation unavailable */ }
+  },
+  reset() {
+    this.level = 0; this.ema = 13.9; this.overMs = 0; this.underMs = 0; this.dwell = 0;
+    degraded = false;
+    try { renderer.xr.setFoveation(0.0); } catch (e) { /* foveation unavailable */ }
+  },
+};
+// The XR layer's ACTUAL framebuffer size (Rhythm Slicer pattern) — the
+// resolution the headset really renders at. 'n/a' when no XR layer exists.
+function xrLayerSize() {
+  try {
+    const s = renderer.xr.getSession ? renderer.xr.getSession() : null;
+    const l = s && s.renderState ? s.renderState.baseLayer : null;
+    if (l && l.framebufferWidth) return l.framebufferWidth + '×' + l.framebufferHeight;
+  } catch (e) { /* no XR layer */ }
+  return 'n/a';
+}
+// Combat pulse (Bible §3.5) + boss staging state (applied in tick).
+let combatPulse = 0, bossFlash = 0, sunBase = 1.6;
+const _sunNormal = new THREE.Color(0xffffff);
+const _sunBoss = new THREE.Color(0xffb0b8);
+function bumpPulse(x) { combatPulse = Math.min(1, combatPulse + x); }
+const sfxTier = () => { blip(523, 523, 0.12, 'square', 0.22); setTimeout(() => blip(659, 659, 0.12, 'square', 0.22), 110); setTimeout(() => blip(784, 784, 0.2, 'square', 0.22), 220); };
+function checkTier() {
+  if (degraded) return; // hold progression until frames recover
+  const t = Math.floor(S.score / 10000);
+  if (t <= S.tier) return;
+  S.tier = t;
+  const names = ['ELITE DRONES', 'ASTEROID STORM', 'BOMBER SQUADRON'];
+  const name = names[(t - 1) % 3];
+  if ((t - 1) % 3 === 0) S.eliteLvl++;
+  else if ((t - 1) % 3 === 1) S.stormLvl++;
+  else S.bomberLvl++;
+  S.msg = 'TIER ' + t + ' — ' + name + ' UNLOCKED'; S.msgT = 3; sfxTier(); bumpPulse(0.6); hudDirty = true;
+}
+// SHRUNK PLAY AREA (2026-10-25): old bounds ±7 / −2.5…3.5 exceeded the
+// headset's forward view at the ship's distance — rig z=6, camera FOV 70°:
+// half-width at the ship plane ≈ 6·tan(35°) ≈ 4.2 with a square per-eye
+// aspect, and the ship's half-width is ≈ 1.65 (wingtips + nav lights), so
+// ±2.5 kept the whole ship in view. Danny then asked for it increased "a
+// little bit" (late 2026-10-25): now ±3.0 / −1.75…3.5 — still far inside
+// the old ±7, with the ship body in view at every corner when looking
+// straight ahead. Bottom −1.75 stays clear of the bottom edge; top 3.5
+// was already comfortably in view and is unchanged.
+const PX = { min: -3.0, max: 3.0 }, PY = { min: -1.75, max: 3.5 };
+let px = 0, py = 0, pvx = 0, pvy = 0, prevRoll = false, prevNova = false, prevRecall = false;
+let prevMuteBtn = false, prevRestartBtn = false, stickHoldT = 0, stickHoldLatched = false; // pause/mute/restart edge state
+
+// ============================== pools: bolts, plasma, missiles, enemies, asteroids, pickups, particles ==============================
+function makeBolt(mat, scaleZ) {
+  const m = new THREE.Mesh(GEO.bolt, mat);
+  m.scale.set(1, 1, scaleZ || 4); m.visible = false; scene.add(m); return m;
+}
+const pBolts = [], eBolts = [], pPlasma = [];
+for (let i = 0; i < 96; i++) pBolts.push({ m: makeBolt(MAT.boltP), on: false, vx: 0, vy: 0, vz: 0, dmg: 1 });
+for (let i = 0; i < 48; i++) eBolts.push({ m: makeBolt(MAT.boltE), on: false, vx: 0, vy: 0, vz: 0, dmg: 1 });
+for (let i = 0; i < 24; i++) {
+  const m = new THREE.Mesh(GEO.plasmaBall, MAT.plasma);
+  m.visible = false; scene.add(m);
+  pPlasma.push({ m, on: false, vx: 0, vy: 0, vz: 0, dmg: 3 });
+}
+function fireBolt(list, x, y, z, vx, vy, vz, dmg) {
+  for (const b of list) {
+    if (b.on) continue;
+    b.on = true; b.m.visible = true;
+    b.m.position.set(x, y, z); b.vx = vx; b.vy = vy; b.vz = vz; b.dmg = dmg;
+    return;
+  }
+}
+// Seeker missiles: homing cones that chase the nearest live target
+const MISSILES = [];
+for (let i = 0; i < 32; i++) {
+  const m = new THREE.Mesh(GEO.cone, MAT.gold);
+  m.rotation.x = -Math.PI / 2; m.visible = false; scene.add(m);
+  MISSILES.push({ m, on: false, vx: 0, vy: 0, vz: 0, life: 0, target: null });
+}
+function fireMissile(x, y) {
+  for (const ms of MISSILES) {
+    if (ms.on) continue;
+    ms.on = true; ms.m.visible = true; ms.life = 4;
+    ms.m.position.set(x, y, -1); ms.vx = 0; ms.vy = 0; ms.vz = -40; ms.target = null;
+    return;
+  }
+}
+function nearestTarget(x, y, z) {
+  // Returns the live enemy object, the string 'boss', or null — so missiles
+  // can retarget when their quarry dies instead of chasing a corpse's spot.
+  let best = null, bd = 1e9;
+  for (const e of ENEMIES) {
+    if (!e.on) continue;
+    const d = (e.g.position.x - x) ** 2 + (e.g.position.y - y) ** 2 + (e.g.position.z - z) ** 2;
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (S.bossHp > 0) {
+    const d = (boss.position.x - x) ** 2 + (boss.position.y - y) ** 2 + (-52 - z) ** 2;
+    if (d < bd) best = 'boss';
+  }
+  return best;
+}
+
+// Detailed enemies (original designs) — rendered via InstancedMesh (see
+// below). Each logic object keeps its `g` Group, but the group is now EMPTY
+// and NOT added to the scene: it is only the transform the game logic reads
+// and writes (position / rotation / scale / visible), exactly as before.
+// syncEnemyInstances() turns those transforms into instance matrices.
+const ENEMIES = [];
+function makeDrone() {
+  const g = new THREE.Group(); // logic transform only — rendered via InstancedMesh
+  return { g, on: false, kind: 'drone', hp: 1, t: 0, baseX: 0, baseY: 0, fireT: rand(1, 2.5), score: 100 };
+}
+function makeShard() {
+  const g = new THREE.Group(); // logic transform only — rendered via InstancedMesh
+  return { g, on: false, kind: 'shard', hp: 2, t: 0, baseX: 0, baseY: 0, fireT: rand(1.5, 3), score: 200 };
+}
+for (let i = 0; i < 16; i++) ENEMIES.push(makeDrone());
+for (let i = 0; i < 10; i++) ENEMIES.push(makeShard());
+
+// ---- Instanced enemies (cinematic upgrade, Bible §3.7): the 26 pooled
+// enemies used to cost up to 178 draw calls (drone 8 meshes, shard 5).
+// They now share 9 InstancedMeshes — one per part type — plus one
+// billboarded glow-plane mesh for all 26 halos. Part shapes, materials,
+// local offsets and scales are the originals, baked into local matrices
+// below. Hidden enemies get zero-scale matrices. No per-frame allocation
+// (scratch Object3D + Matrix4s); instance buffers are DynamicDrawUsage and
+// frustumCulled is false (instances span the whole field).
+const DRONE_N = 16, SHARD_N = 10;
+function _inst(geo, mat, n) {
+  const im = new THREE.InstancedMesh(geo, mat, n);
+  im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  im.frustumCulled = false;
+  scene.add(im);
+  return im;
+}
+const droneBodyIM = _inst(GEO.oct, MAT.enemyBody, DRONE_N);
+const droneRingIM = _inst(GEO.ring, MAT.enemyRing, DRONE_N);
+const droneArmIM = _inst(GEO.box, MAT.enemyRing, DRONE_N * 2);
+const droneGunIM = _inst(GEO.sphere, MAT.enemyCore, DRONE_N * 2);
+const droneCoreIM = _inst(GEO.sphere, MAT.enemyCore, DRONE_N);
+const shardBodyIM = _inst(GEO.tetra, MAT.shard, SHARD_N);
+const shardFinIM = _inst(GEO.box, MAT.shardFin, SHARD_N * 2);
+const shardCoreIM = _inst(GEO.sphere, MAT.shardCore, SHARD_N);
+const haloIM = _inst(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }), DRONE_N + SHARD_N);
+{ // Per-instance halo tint (opacity baked into the color: additive blending
+  // reads color value as brightness). Set once — kinds never change slots.
+  const _hc = new THREE.Color();
+  for (let i = 0; i < DRONE_N; i++) haloIM.setColorAt(i, _hc.setHex(0xff3df0).multiplyScalar(0.34));
+  for (let j = 0; j < SHARD_N; j++) haloIM.setColorAt(DRONE_N + j, _hc.setHex(0x27e8ff).multiplyScalar(0.3));
+  haloIM.instanceColor.needsUpdate = true;
+}
+const _ONE_Q = new THREE.Quaternion();
+function _localM(x, y, z, sx, sy, sz, rz) {
+  const q = rz ? new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, rz)) : _ONE_Q;
+  return new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(sx, sy, sz));
+}
+const LM = { // original per-part local transforms (offsets + scales)
+  ring: _localM(0, 0, 0, 1.1, 1.1, 1.1),
+  armL: _localM(-0.9, 0, 0, 0.9, 0.16, 0.16),
+  armR: _localM(0.9, 0, 0, 0.9, 0.16, 0.16),
+  gunL: _localM(-1.3, 0, -0.4, 0.3, 0.3, 0.3),
+  gunR: _localM(1.3, 0, -0.4, 0.3, 0.3, 0.3),
+  coreD: _localM(0, 0, 0, 0.55, 0.55, 0.55),
+  finL: _localM(-0.7, 0, 0.2, 0.12, 1.1, 0.7, -0.5),
+  finR: _localM(0.7, 0, 0.2, 0.12, 1.1, 0.7, 0.5),
+  coreS: _localM(0, 0, 0, 0.4, 0.4, 0.4),
+};
+const _dummy = new THREE.Object3D();
+const _mPart = new THREE.Matrix4();
+const _mZero = new THREE.Matrix4().makeScale(0, 0, 0);
+const _camQ = new THREE.Quaternion();
+const _haloS = new THREE.Vector3();
+const _haloP = new THREE.Vector3();
+function syncEnemyInstances() {
+  camera.getWorldQuaternion(_camQ); // halo planes billboard toward the camera
+  for (let i = 0; i < ENEMIES.length; i++) {
+    const e = ENEMIES[i];
+    if (e.kind === 'drone') {
+      if (!e.on) {
+        droneBodyIM.setMatrixAt(i, _mZero); droneRingIM.setMatrixAt(i, _mZero);
+        droneArmIM.setMatrixAt(i * 2, _mZero); droneArmIM.setMatrixAt(i * 2 + 1, _mZero);
+        droneGunIM.setMatrixAt(i * 2, _mZero); droneGunIM.setMatrixAt(i * 2 + 1, _mZero);
+        droneCoreIM.setMatrixAt(i, _mZero); haloIM.setMatrixAt(i, _mZero);
+        continue;
+      }
+      _dummy.position.copy(e.g.position);
+      _dummy.quaternion.setFromEuler(e.g.rotation);
+      _dummy.scale.setScalar(e.g.scale.x); // elite 1.3×, normal 1×
+      _dummy.updateMatrix();
+      droneBodyIM.setMatrixAt(i, _dummy.matrix);
+      droneRingIM.setMatrixAt(i, _mPart.multiplyMatrices(_dummy.matrix, LM.ring));
+      droneArmIM.setMatrixAt(i * 2, _mPart.multiplyMatrices(_dummy.matrix, LM.armL));
+      droneArmIM.setMatrixAt(i * 2 + 1, _mPart.multiplyMatrices(_dummy.matrix, LM.armR));
+      droneGunIM.setMatrixAt(i * 2, _mPart.multiplyMatrices(_dummy.matrix, LM.gunL));
+      droneGunIM.setMatrixAt(i * 2 + 1, _mPart.multiplyMatrices(_dummy.matrix, LM.gunR));
+      droneCoreIM.setMatrixAt(i, _mPart.multiplyMatrices(_dummy.matrix, LM.coreD));
+      _haloP.copy(e.g.position); _haloP.z -= 0.1;
+      _haloS.setScalar(1.85 * e.g.scale.x);
+      haloIM.setMatrixAt(i, _mPart.compose(_haloP, _camQ, _haloS));
+    } else {
+      const j = i - DRONE_N;
+      if (!e.on) {
+        shardBodyIM.setMatrixAt(j, _mZero);
+        shardFinIM.setMatrixAt(j * 2, _mZero); shardFinIM.setMatrixAt(j * 2 + 1, _mZero);
+        shardCoreIM.setMatrixAt(j, _mZero); haloIM.setMatrixAt(DRONE_N + j, _mZero);
+        continue;
+      }
+      _dummy.position.copy(e.g.position);
+      _dummy.quaternion.setFromEuler(e.g.rotation);
+      _dummy.scale.setScalar(e.g.scale.x);
+      _dummy.updateMatrix();
+      shardBodyIM.setMatrixAt(j, _dummy.matrix);
+      shardFinIM.setMatrixAt(j * 2, _mPart.multiplyMatrices(_dummy.matrix, LM.finL));
+      shardFinIM.setMatrixAt(j * 2 + 1, _mPart.multiplyMatrices(_dummy.matrix, LM.finR));
+      shardCoreIM.setMatrixAt(j, _mPart.multiplyMatrices(_dummy.matrix, LM.coreS));
+      _haloP.copy(e.g.position); _haloP.z -= 0.1;
+      _haloS.setScalar(1.6 * e.g.scale.x);
+      haloIM.setMatrixAt(DRONE_N + j, _mPart.compose(_haloP, _camQ, _haloS));
+    }
+  }
+  droneBodyIM.instanceMatrix.needsUpdate = true;
+  droneRingIM.instanceMatrix.needsUpdate = true;
+  droneArmIM.instanceMatrix.needsUpdate = true;
+  droneGunIM.instanceMatrix.needsUpdate = true;
+  droneCoreIM.instanceMatrix.needsUpdate = true;
+  shardBodyIM.instanceMatrix.needsUpdate = true;
+  shardFinIM.instanceMatrix.needsUpdate = true;
+  shardCoreIM.instanceMatrix.needsUpdate = true;
+  haloIM.instanceMatrix.needsUpdate = true;
+}
+syncEnemyInstances(); // park every instance at zero scale until the first spawn
+
+// Realistic craggy asteroids: direction-based smooth-noise displacement.
+// The old per-vertex-index random scale tore the non-indexed icosahedron
+// apart (coincident vertices got different scales) and the dark blue/purple
+// emissive materials read as glowing blobs, not rock. Displacement here is
+// a smooth function of each vertex DIRECTION only, so coincident vertices
+// move identically — no cracks — and each rock gets its own seed. One-time
+// cost at spawn; tumble rotation is the only per-frame cost.
+function craggyRockGeo(seed) {
+  const g = new THREE.IcosahedronGeometry(1.0, 2);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const len = Math.hypot(x, y, z) || 1;
+    const dx = x / len, dy = y / len, dz = z / len;
+    const n = 0.86
+      + 0.14 * Math.sin(3.1 * dx + seed) * Math.sin(2.7 * dy + seed * 1.3)
+      + 0.10 * Math.sin(5.3 * dy + seed * 0.7) * Math.sin(4.1 * dz + seed * 2.1)
+      + 0.08 * Math.sin(7.7 * dz + seed);
+    pos.setXYZ(i, x * n, y * n, z * n);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const ROCKS = [];
+const ROCK_MATS = [MAT.rock, MAT.rockMid, MAT.rockDark];
+for (let i = 0; i < 14; i++) {
+  const m = new THREE.Mesh(craggyRockGeo(rand(0, 6.28)), ROCK_MATS[i % 3]);
+  const s = rand(0.5, 1.6);
+  m.scale.set(s, s * rand(0.7, 1.2), s);
+  m.visible = false; scene.add(m);
+  ROCKS.push({ m, on: false, vx: 0, vy: 0, vz: 0, rx: rand(0, 3), ry: rand(0, 3), rz: rand(0, 3) });
+}
+
+// Pickups: one pool entry per kind (x2) — weapons equip into max 3 slots, upgrades stack without limit
+const PICKUP_KINDS = ['triple', 'seeker', 'plasma', 'rail', 'nova', 'plate', 'cell', 'engine', 'power', 'hull', 'shield'];
+const PICKUPS = [];
+for (const kind of PICKUP_KINDS) {
+  for (let i = 0; i < 2; i++) {
+    const m = new THREE.Mesh(GEO.oct, PICK_MAT[kind]);
+    m.scale.setScalar(0.55); m.visible = false;
+    const halo = glowSprite(PICK_MAT[kind].color.getHex(), 1.6, 0.5);
+    m.add(halo);
+    scene.add(m);
+    PICKUPS.push({ m, on: false, kind, t: 0 });
+  }
+}
+
+const PARTS = 320;
+const pPos = new Float32Array(PARTS * 3);
+const pCol = new Float32Array(PARTS * 3);
+const pVel = new Float32Array(PARTS * 3);
+const pLife = new Float32Array(PARTS);
+for (let i = 0; i < PARTS; i++) pPos[i * 3 + 1] = -999; // parked offscreen until used
+let pCursor = 0;
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3).setUsage(THREE.DynamicDrawUsage));
+const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ map: glowTex, size: 0.3, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+points.frustumCulled = false;
+scene.add(points);
+const _burstCol = new THREE.Color();
+function burst(x, y, z, n, spread, hex) {
+  _burstCol.setHex(hex === undefined ? 0xffcc55 : hex);
+  // Valve registry item: spawn counts scale ×0.5 (L1) / ×0.25 (L2).
+  const count = Math.max(1, Math.round(n * perfValve.particleScale));
+  for (let i = 0; i < count; i++) {
+    const k = pCursor; pCursor = (pCursor + 1) % PARTS;
+    pPos[k * 3] = x; pPos[k * 3 + 1] = y; pPos[k * 3 + 2] = z;
+    pVel[k * 3] = rand(-spread, spread); pVel[k * 3 + 1] = rand(-spread, spread); pVel[k * 3 + 2] = rand(-spread, spread);
+    pCol[k * 3] = _burstCol.r; pCol[k * 3 + 1] = _burstCol.g; pCol[k * 3 + 2] = _burstCol.b;
+    pLife[k] = rand(0.4, 1.0);
+  }
+  pGeo.attributes.color.needsUpdate = true;
+}
+// Shockwave rings for big explosions (boss death, player death, nova)
+const SHOCKS = [];
+for (let i = 0; i < 6; i++) {
+  const m = new THREE.Mesh(GEO.ring, new THREE.MeshBasicMaterial({ color: 0xffcc55, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+  m.visible = false; scene.add(m);
+  SHOCKS.push({ m, on: false, t: 0 });
+}
+function shockwave(x, y, z, scale) {
+  for (const s of SHOCKS) {
+    if (s.on) continue;
+    s.on = true; s.t = 0; s.m.visible = true;
+    s.m.position.set(x, y, z); s.m.scale.setScalar(scale);
+    return;
+  }
+}
+
+// Rail beam visual: long glowing bar fired from the ship
+const railBeam = new THREE.Mesh(GEO.box, MAT.rail);
+railBeam.scale.set(0.5, 0.5, 90); railBeam.visible = false;
+scene.add(railBeam);
+
+// Boss: detailed Ravager carrier (original design — wide hull, twin prongs, turrets, hangar bays, engine glows)
+const boss = new THREE.Group();
+{
+  const main = new THREE.Mesh(GEO.box, MAT.bossHull);
+  main.scale.set(14, 3, 6); boss.add(main);
+  const stripe = new THREE.Mesh(GEO.box, MAT.bossStripe);
+  stripe.scale.set(14.2, 0.4, 6.2); stripe.position.y = 0.8; boss.add(stripe);
+  for (const s of [-1, 1]) {
+    const prong = new THREE.Mesh(GEO.box, MAT.bossHull);
+    prong.scale.set(2.5, 1.5, 10); prong.position.set(s * 6, 0, -4); boss.add(prong);
+    const turret = new THREE.Mesh(GEO.sphere, MAT.enemyCore);
+    turret.scale.setScalar(1.1); turret.position.set(s * 4.5, 2, -1); boss.add(turret);
+    const tHalo = glowSprite(0xff3df0, 2.4, 0.4); tHalo.position.set(s * 4.5, 2, -1); boss.add(tHalo);
+    const bay = new THREE.Mesh(GEO.box, MAT.hullDark);
+    bay.scale.set(2, 1.2, 4); bay.position.set(s * 6, -1.2, -2); boss.add(bay);
+    const mast = new THREE.Mesh(GEO.box, MAT.enemyRing);
+    mast.scale.set(0.2, 3, 0.2); mast.position.set(s * 6, 2.5, -7); boss.add(mast);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff5566, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+    glow.scale.set(2.4, 2.4, 1); glow.position.set(s * 6, 0, 3.4); boss.add(glow);
+  }
+  const core = new THREE.Mesh(GEO.sphere, MAT.enemyCore);
+  core.scale.setScalar(1.8); core.position.set(0, 0, 3.2); boss.add(core);
+  const cHalo = glowSprite(0xff3df0, 4.5, 0.4); cHalo.position.set(0, 0, 3.2); boss.add(cHalo);
+  const dome = new THREE.Mesh(GEO.sphere, MAT.bossHull);
+  dome.scale.set(2.2, 1.2, 2.2); dome.position.set(0, 1.8, 0); boss.add(dome);
+}
+boss.visible = false; boss.position.set(0, 1, -60); scene.add(boss);
+let bossFireT = 0, bossT = 0;
+// Boss attack patterns: base twin-turret volley; 2nd appearance adds a double
+// volley; 3rd adds a 3-bolt spread fan per turret.
+function bossVolley() {
+  for (const s of [-4.5, 4.5]) {
+    const bx = boss.position.x + s, by = boss.position.y;
+    const dx = px - bx, dy = py - by;
+    const d = Math.max(1, Math.hypot(dx, dy));
+    const ux = dx / d, uy = dy / d;
+    const angles = bossSpread ? [-0.22, 0, 0.22] : [0];
+    for (const a of angles) {
+      const c = Math.cos(a), sn = Math.sin(a);
+      fireBolt(eBolts, bx, by, -52, (ux * c - uy * sn) * 6, (ux * sn + uy * c) * 6, 24, 1);
+    }
+  }
+}
+
+// ============================== waves ==============================
+function spawnEnemy(kind, x, y, opts) {
+  for (const e of ENEMIES) {
+    if (e.on || e.kind !== kind) continue;
+    e.on = true; e.g.visible = true;
+    e.baseX = x; e.baseY = y; e.t = 0; e.fireT = rand(1, 2.5) / diffFire();
+    e.hp = kind === 'shard' ? 2 : 1;
+    e.score = kind === 'shard' ? 200 : 100;
+    e.elite = !!(opts && opts.elite);
+    e.bomber = !!(opts && opts.bomber);
+    if (e.elite) { e.hp = 2; e.score = 200; e.g.scale.setScalar(1.3); }
+    else e.g.scale.setScalar(1);
+    e.g.position.set(x, y, -90);
+    return;
+  }
+}
+// Squadron spawn with tier wrinkles: elites (faster, 2 HP, double points) and
+// bombers (spread fire) roll per drone once their tier is unlocked.
+function spawnScaled(kind, x, y) {
+  const opts = {};
+  if (kind === 'drone' && S.eliteLvl > 0 && Math.random() < Math.min(0.25 * S.eliteLvl, 0.75)) opts.elite = true;
+  if (kind === 'drone' && S.bomberLvl > 0 && Math.random() < Math.min(0.2 * S.bomberLvl, 0.6)) opts.bomber = true;
+  spawnEnemy(kind, x, y, opts);
+}
+function clearField() { for (const e of ENEMIES) { e.on = false; e.g.visible = false; } }
+function spawnRock() {
+  for (const r of ROCKS) {
+    if (r.on) continue;
+    r.on = true; r.m.visible = true;
+    r.m.position.set(rand(-8, 8), rand(-3, 4), -90);
+    r.vx = rand(-0.5, 0.5); r.vy = rand(-0.3, 0.3); r.vz = rand(14, 20);
+    return;
+  }
+}
+function spawnPickup(kind, x, y) {
+  for (const p of PICKUPS) {
+    if (p.on || p.kind !== kind) continue;
+    p.on = true; p.m.visible = true; p.t = 0;
+    p.m.position.set(x, y, -60);
+    return;
+  }
+}
+let bossFireInterval = 0.7, bossDouble = false, bossSpread = false, bossVolleyPending = 0;
+function startWave(n) {
+  S.msg = 'WAVE ' + n; S.msgT = 2.5; hudDirty = true;
+  if (n % 5 === 0) {
+    // Boss wave: every 5th wave. Each appearance adds one attack pattern.
+    S.bossCount++;
+    const ap = S.bossCount;
+    boss.visible = true; S.bossMax = 300 + 100 * (ap - 1); S.bossHp = S.bossMax;
+    bossT = 0; bossFireT = 1;
+    bossDouble = ap >= 2; bossSpread = ap >= 3;
+    bossFireInterval = ap >= 5 ? 0.55 : 0.7;
+    if (ap >= 4) { // drone escorts from the 4th appearance on
+      spawnEnemy('drone', -4, 2); spawnEnemy('drone', 4, 2);
+    }
+    S.msg = 'WARNING: RAVAGER CARRIER' + (ap > 1 ? ' — ATTACK PATTERN ' + ap : ''); hudDirty = true;
+    bossFlash = 0.3; bumpPulse(0.8); // staging: vignette flash + light lift
+    return;
+  }
+  const count = 4 + n * 2;
+  S.spawnQueue = count; S.spawnT = 0.5;
+  // Asteroid storm tier: a denser rock field arrives with each wave.
+  if (S.stormLvl > 0) for (let i = 0; i < S.stormLvl + 1; i++) spawnRock();
+}
+function queueSpawn() {
+  const kind = Math.random() < 0.35 ? 'shard' : 'drone';
+  const form = Math.floor(rand(0, 3));
+  const b = squadBonus(); // +1 ship per squadron per wave cleared (capped +3)
+  if (form === 0) {
+    const x0 = rand(-5, 5);
+    for (let i = 0; i < 3 + b && S.spawnQueue > 0; i++) { spawnScaled(kind, x0 + (i - 1) * 2.2, rand(1, 3)); S.spawnQueue--; }
+  } else if (form === 1) {
+    for (let i = 0; i < 2 + b && S.spawnQueue > 0; i++) { spawnScaled(kind, rand(-6, 6), rand(-1, 3)); S.spawnQueue--; }
+  } else {
+    for (let i = 0; i < 1 + b && S.spawnQueue > 0; i++) { spawnScaled(kind, rand(-6, 6), rand(0, 3)); S.spawnQueue--; }
+  }
+  if (Math.random() < 0.3) spawnRock();
+}
+// Wave-clear bonus: one random upgrade level, stacked without limit
+function grantWaveBonus() {
+  const ups = ['plate', 'cell', 'engine', 'power'];
+  const pick = ups[Math.floor(rand(0, ups.length))];
+  applyUpgrade(pick);
+  const names = { plate: 'HULL PLATING', cell: 'SHIELD CELLS', engine: 'ENGINE SPEED', power: 'WEAPON POWER' };
+  showBanner('WAVE BONUS: ' + names[pick] + ' +1 (NO LIMIT)', 3);
+  bumpPulse(0.5);
+}
+function applyUpgrade(kind) {
+  if (kind === 'plate') { S.upg.plate++; S.maxHull += 25; S.hull += 25; }
+  else if (kind === 'cell') { S.upg.cell++; S.shield += 50; }
+  else if (kind === 'engine') { S.upg.engine++; }
+  else if (kind === 'power') { S.upg.power++; }
+}
+function applyWeapon(kind) {
+  // Max 3 weapons equipped at once. A 4th replaces the oldest equipped weapon.
+  // Re-collecting an equipped weapon just tops it up (nova: +3 bombs).
+  const name = WPN_NAMES[kind];
+  if (kind === 'nova') {
+    if (!hasWpn('nova')) {
+      if (S.slots.length >= 3) { const out = S.slots.shift(); showBanner(name + ' — replaces ' + WPN_NAMES[out]); }
+      else showBanner(name + ' — Slot ' + (S.slots.length + 1));
+      S.slots.push('nova');
+      S.nova = 3;
+    } else {
+      S.nova += 3;
+      showBanner(name + ' +3 (x' + S.nova + ' TOTAL)');
+    }
+    return;
+  }
+  if (hasWpn(kind)) { showBanner(name + ' — ALREADY EQUIPPED'); return; }
+  if (S.slots.length >= 3) {
+    const out = S.slots.shift();
+    if (out === 'nova') S.nova = 0; // bombs go away with the weapon
+    showBanner(name + ' — replaces ' + WPN_NAMES[out]);
+  } else {
+    showBanner(name + ' — Slot ' + (S.slots.length + 1));
+  }
+  S.slots.push(kind);
+}
+
+// ============================== damage / respawn (unlimited retries) ==============================
+function damagePlayer(amount) {
+  if (S.rollT > 0) return; // barrel roll = invincible
+  if (S.shield > 0) {
+    S.shield -= amount;
+    if (S.shield < 0) { S.hull += S.shield; S.shield = 0; }
+  } else S.hull -= amount;
+  S.shake = 0.5; sfxHit(); pulseBoth(0.9, 150); bumpPulse(0.6); hudDirty = true;
+  burst(px, py, 0, 24, 6, 0xff5533);
+  if (S.hull <= 0) {
+    // Unlimited retries: explode, respawn instantly, score + weapons + upgrades kept, wave restarts.
+    S.retries++;
+    burst(px, py, 0, 80, 14, 0xff5533); shockwave(px, py, 0, 2); sfxBoom(); pulseBoth(1.0, 250);
+    S.hull = S.maxHull; S.shield = 0;
+    px = 0; py = 0; pvx = 0; pvy = 0;
+    ship.position.set(0, 0, 0); ship.rotation.set(0, 0, 0); resetTrails();
+    for (const e of ENEMIES) { e.on = false; e.g.visible = false; }
+    for (const r of ROCKS) { r.on = false; r.m.visible = false; }
+    for (const b of eBolts) { b.on = false; b.m.visible = false; }
+    for (const ms of MISSILES) { ms.on = false; ms.m.visible = false; }
+    if (S.bossHp > 0) { S.bossHp = S.bossMax; }
+    else startWave(S.wave);
+    S.msg = 'SHIP DOWN — BACK IN THE FIGHT'; S.msgT = 2.5;
+    hudDirty = true;
+  }
+}
+// Boss kill — ONE helper for all four damage paths (bolts, missiles, rail,
+// nova). Previously this block was duplicated 4×; a fix in one path missed
+// the others. NOTE: the rail/nova paths previously killed the boss SILENTLY
+// (no boom); the boom now plays on every path — deliberate, the biggest
+// kill in the game needs its sound. Message order is preserved as before:
+// startWave overwrites 'RAVAGER DOWN!' with the next wave's announcement
+// (pre-existing quirk, kept — the wave number is on the HUD anyway).
+function bossDown() {
+  S.bossHp = 0; boss.visible = false;
+  S.score += 5000; sfxBoom(boss.position.x);
+  burst(0, 1, -52, 120, 16); shockwave(0, 1, -52, 10);
+  pulseBoth(0.9, 200); bumpPulse(1);
+  S.msg = 'RAVAGER DOWN! +5000'; S.msgT = 3;
+  S.wave++; clearField(); startWave(S.wave);
+  hudDirty = true;
+}
+function tryRoll() {
+  if (S.mode !== 'play' || S.rollT > 0 || S.rollCd > 0) return;
+  S.rollT = 0.55; S.rollCd = 1.4; sfxRoll(); pulseBoth(0.3, 40);
+}
+function tryNova() {
+  if (S.mode !== 'play' || !hasWpn('nova') || S.nova <= 0) return;
+  S.nova--;
+  sfxNova(); pulseBoth(0.8, 120); bumpPulse(0.8);
+  shockwave(px, py, -10, 8);
+  burst(px, py, -10, 100, 18, 0xff3df0);
+  for (const e of ENEMIES) {
+    if (!e.on) continue;
+    e.hp -= 20 + S.upg.power * 5;
+    if (e.hp <= 0) {
+      e.on = false; e.g.visible = false;
+      S.score += e.score;
+      burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+    }
+  }
+  for (const r of ROCKS) {
+    if (!r.on) continue;
+    r.on = false; r.m.visible = false;
+    S.score += 50;
+    burst(r.m.position.x, r.m.position.y, r.m.position.z, 26, 7);
+  }
+  if (S.bossHp > 0) {
+    S.bossHp -= 50 + S.upg.power * 5;
+    if (S.bossHp <= 0) bossDown();
+  }
+  S.msg = 'NOVA BOMB! ' + S.nova + ' LEFT';
+  S.msgT = 2; hudDirty = true;
+}
+function fireRail() {
+  // Piercing beam down the ship's line: damages everything near x = px
+  S.railCd = 4;
+  S.railVis = 0.18;
+  railBeam.position.set(px, py, -45);
+  railBeam.visible = true;
+  sfxRail(); pulseBoth(0.6, 80);
+  const dmg = 10 + S.upg.power * 2;
+  for (const e of ENEMIES) {
+    if (!e.on) continue;
+    if (Math.abs(e.g.position.x - px) < 1.6 && Math.abs(e.g.position.y - py) < 1.6) {
+      e.hp -= dmg;
+      burst(e.g.position.x, e.g.position.y, e.g.position.z, 16, 5);
+      if (e.hp <= 0) {
+        e.on = false; e.g.visible = false;
+        S.score += e.score;
+        burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+        if (Math.random() < 0.22) spawnPickup(PICKUP_KINDS[Math.floor(rand(0, PICKUP_KINDS.length))], e.g.position.x, e.g.position.y);
+      }
+    }
+  }
+  if (S.bossHp > 0 && Math.abs(boss.position.x - px) < 8) {
+    S.bossHp -= dmg;
+    if (S.bossHp <= 0) bossDown();
+  }
+  hudDirty = true;
+}
+
+// ============================== pause / restart (cinematic upgrade) ==============================
+// Pause freezes gameplay updates in tick; the ambient scene keeps drifting
+// behind the pause panel. Toggled by holding a stick-click in VR (short
+// clicks still recall the ship) or P on desktop. Auto-pauses on XR session
+// end. Restart is available ONLY while paused (grip in VR, R on desktop)
+// so it can never fire accidentally mid-combat.
+function togglePause() {
+  if (S.mode !== 'play') return;
+  paused = !paused;
+  if (!paused) hidePanel(); // resuming from the post-session-end panel
+  hudDirty = true;
+}
+function clearAll() {
+  for (const e of ENEMIES) { e.on = false; e.g.visible = false; }
+  for (const r of ROCKS) { r.on = false; r.m.visible = false; }
+  for (const b of pBolts) { b.on = false; b.m.visible = false; }
+  for (const b of eBolts) { b.on = false; b.m.visible = false; }
+  for (const b of pPlasma) { b.on = false; b.m.visible = false; }
+  for (const ms of MISSILES) { ms.on = false; ms.m.visible = false; }
+  for (const p of PICKUPS) { p.on = false; p.m.visible = false; }
+  for (const s of SHOCKS) { s.on = false; s.m.visible = false; }
+  for (let i = 0; i < PARTS; i++) { pLife[i] = 0; pPos[i * 3 + 1] = -999; }
+  pGeo.attributes.position.needsUpdate = true;
+  boss.visible = false; S.bossHp = 0; S.bossMax = 0;
+  railBeam.visible = false; S.railVis = 0;
+  bannerMesh.visible = false; bannerT = 0;
+  resetTrails();
+}
+function restartRun() {
+  if (S.mode !== 'play' || !paused) return;
+  clearAll();
+  S.fireCd = 0; S.rollT = 0; S.rollCd = 0; S.seekerCd = 0; S.railCd = 0;
+  S.spawnQueue = 0; S.spawnT = 0; S.shake = 0; S.msgT = 0;
+  px = 0; py = 0; pvx = 0; pvy = 0;
+  ship.position.set(0, 0, 0); ship.rotation.set(0, 0, 0);
+  combatPulse = 0; bossFlash = 0;
+  perfValve.reset();
+  perfWarmup = 1.5;
+  S.mode = 'menu';
+  paused = false;
+  beginGame();
+}
+
+// ============================== ENTER VR flow (proven pattern) ==============================
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+const panel = document.getElementById('panel');
+const hud = document.getElementById('hud');
+let xrSupported = false;
+function setStatus(msg) { statusEl.textContent = msg; }
+function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
+function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+function beginGame() {
+  if (S.mode === 'play') return;
+  S.mode = 'play'; S.score = 0; S.hull = 100; S.maxHull = 100; S.shield = 0; S.wave = 1;
+  S.retries = 0; S.bossHp = 0; S.tier = 0; S.bossCount = 0; S.eliteLvl = 0; S.stormLvl = 0; S.bomberLvl = 0;
+  S.slots = []; S.nova = 0; // base laser only; weapons come from pickups, max 3
+  S.upg = { plate: 0, cell: 0, engine: 0, power: 0 };
+  paused = false; perfWarmup = 1.5; resetTrails();
+  startWave(1);
+  hudDirty = true;
+}
+vrBtn.addEventListener('click', async () => {
+  startAudio();
+  beginGame();
+  if (!xrSupported) { hidePanel(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    hidePanel();
+    session.addEventListener('end', () => { if (S.mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume.'); vrBtn.disabled = false; });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      hidePanel();
+      session.addEventListener('end', () => { if (S.mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume.'); vrBtn.disabled = false; });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+    }
+  }
+});
+
+// ============================== ship findability ==============================
+// recallShip(): snap the ship to the center of the player's CURRENT view —
+// intersect the camera's forward ray with the z=0 play plane (yaw-forward
+// fallback if the player is looking away from the plane), clamped to the play
+// bounds. Steering, speed and weapons are untouched; only position changes.
+const _camPos = new THREE.Vector3(), _camDir = new THREE.Vector3();
+function recallShip() {
+  if (S.mode !== 'play') return;
+  camera.updateMatrixWorld();
+  camera.getWorldPosition(_camPos);
+  camera.getWorldDirection(_camDir);
+  let tx = 0, ty = 0.5;
+  if (_camDir.z < -0.05) {
+    const t = (0 - _camPos.z) / _camDir.z;
+    if (t > 0) { tx = _camPos.x + _camDir.x * t; ty = _camPos.y + _camDir.y * t; }
+  } else {
+    const yaw = Math.atan2(_camDir.x, _camDir.z);
+    tx = _camPos.x + Math.sin(yaw) * 6; ty = _camPos.y;
+  }
+  px = clamp(tx, PX.min, PX.max); py = clamp(ty, PY.min, PY.max);
+  pvx = 0; pvy = 0;
+  ship.position.set(px, py, 0);
+  resetTrails(); // no streak across the sky from the teleport
+  showBanner('SHIP RECALLED — CENTER VIEW', 1.6);
+}
+// updateShipPointer(): hide the chevron while the ship is in view, else park it
+// at the view edge pointing at the ship (mirrored direction if it is behind).
+const _shipLocal = new THREE.Vector3();
+function updateShipPointer() {
+  if (S.mode !== 'play') { shipPointer.visible = false; return; }
+  camera.updateMatrixWorld();
+  _shipLocal.copy(ship.position);
+  camera.worldToLocal(_shipLocal);
+  const lx = _shipLocal.x, ly = _shipLocal.y, lz = _shipLocal.z;
+  const halfV = THREE.MathUtils.degToRad(camera.fov * 0.5);
+  const halfH = Math.atan(Math.tan(halfV) * camera.aspect);
+  const inFront = lz < 0;
+  const inView = inFront && Math.abs(Math.atan2(lx, -lz)) < halfH * 0.92 && Math.abs(Math.atan2(ly, -lz)) < halfV * 0.92;
+  if (inView) { shipPointer.visible = false; return; }
+  shipPointer.visible = true;
+  let ax = lx, ay = ly;
+  if (!inFront) { ax = -lx; ay = -ly; }
+  const ang = Math.atan2(ay, ax);
+  const d = 1.6;
+  const ex = Math.cos(ang) * Math.tan(halfH) * d * 0.85;
+  const ey = Math.sin(ang) * Math.tan(halfV) * d * 0.85;
+  shipPointer.position.set(ex, ey, -d);
+  chev.rotation.z = ang - Math.PI / 2; // cone points +y by default
+  const s = 1 + Math.sin(time * 8) * 0.15;
+  chev.scale.setScalar(s);
+}
+
+// ============================== main loop ==============================
+const clock = new THREE.Clock();
+let time = 0, perfHudT = 0;
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  time += dt;
+  const xr = pollXR(dt);
+
+  // VR pause/mute/restart buttons (rising edges; seen whether paused or not —
+  // that is how you resume). A/X mutes ONLY while paused (in play it is Nova);
+  // grip restarts ONLY while paused (in play it is barrel roll).
+  if (xr.pauseToggle) togglePause();
+  if (xr.muteBtn && !prevMuteBtn && paused) setMuted(!muted);
+  prevMuteBtn = xr.muteBtn;
+  if (xr.restartBtn && !prevRestartBtn && paused) restartRun();
+  prevRestartBtn = xr.restartBtn;
+
+  if (S.mode === 'play' && paused) {
+    // PAUSED: gameplay frozen. Edge trackers stay fresh so a button held
+    // through resume never fires on the resume frame; the beacon keeps
+    // pulsing and the HUD keeps drawing (MUTED tag + perf readout update).
+    prevRoll = xr.roll; prevNova = xr.nova; prevRecall = xr.recall;
+    beaconMat.opacity = 0.28 + Math.sin(time * 6) * 0.1;
+    drawHUD(S);
+  } else if (S.mode === 'play') {
+    // --- steering (engine upgrades multiply speed, no cap) ---
+    // Rates retuned for the bumped area: same time-to-cross as before
+    // (thumbstick X 0.63s, Y 0.42s; keyboard X 0.71s, Y 0.45s), so the
+    // slightly larger area feels the same, not slower or twitchier.
+    const sm = speedMul();
+    let tx = px, ty = py;
+    let kx = 0, ky = 0;
+    if (keys['ArrowLeft'] || keys['KeyA']) kx -= 1;
+    if (keys['ArrowRight'] || keys['KeyD']) kx += 1;
+    if (keys['ArrowUp'] || keys['KeyW']) ky += 1;
+    if (keys['ArrowDown'] || keys['KeyS']) ky -= 1;
+    if (Math.abs(xr.sx) > 0 || Math.abs(xr.sy) > 0) { tx = px + xr.sx * 9.6 * sm * dt; ty = py + xr.sy * 12.6 * sm * dt; }
+    else if (kx !== 0 || ky !== 0) { tx = px + kx * 8.4 * sm * dt; ty = py + ky * 11.55 * sm * dt; }
+    else if (xr.aim) { tx = lerp(px, xr.aim.x, 1 - Math.pow(0.001, dt)); ty = lerp(py, xr.aim.y, 1 - Math.pow(0.001, dt)); }
+    else if (!renderer.xr.isPresenting) { tx = lerp(px, mouse.x * PX.max, 1 - Math.pow(0.001, dt)); ty = lerp(py, mouse.y * 2.625 + 0.875, 1 - Math.pow(0.001, dt)); }
+    pvx = (tx - px) / Math.max(dt, 0.001); pvy = (ty - py) / Math.max(dt, 0.001);
+    px = clamp(tx, PX.min, PX.max); py = clamp(ty, PY.min, PY.max);
+    ship.position.set(px, py, 0);
+    ship.rotation.z = clamp(-pvx * 0.02, -0.6, 0.6);
+    ship.rotation.x = clamp(pvy * 0.015, -0.3, 0.3);
+
+    // --- barrel roll + nova (edge-detected) ---
+    if (xr.roll && !prevRoll) tryRoll();
+    prevRoll = xr.roll;
+    if (xr.nova && !prevNova) tryNova();
+    prevNova = xr.nova;
+    if (xr.recall && !prevRecall) recallShip();
+    prevRecall = xr.recall;
+    // Ship findability: beacon pulse + off-view pointer (steering untouched).
+    beaconMat.opacity = 0.28 + Math.sin(time * 6) * 0.1;
+    updateShipPointer();
+    if (S.rollT > 0) { S.rollT -= dt; ship.rotation.z += dt * 11; }
+    if (S.rollCd > 0) S.rollCd -= dt;
+
+    // --- firing: base laser + equipped slot weapons (max 3, all fire together) ---
+    S.fireCd -= dt;
+    const firing = xr.fire || keys['Space'] || mouse.down;
+    if (firing && S.fireCd <= 0) {
+      S.fireCd = 0.22;
+      const n = hasWpn('triple') ? 3 : 1; // base laser, +2 bolts while Triple Laser is equipped
+      for (let i = 0; i < n; i++) {
+        const off = i - (n - 1) / 2;
+        fireBolt(pBolts, px + off * 0.5, py, -1, off * 3, 0, -70, boltDmg());
+      }
+      if (hasWpn('plasma')) {
+        fireBolt(pPlasma, px, py - 0.2, -1, 0, 0, -45, 3 + S.upg.power);
+      }
+      sfxLaser();
+      muzzle.position.set(px, py, -1.2); muzzleT = 0.06;
+      muzzle.material.opacity = 0.9;
+      engineFlare = 0.12; // brief engine-glow scale-up on every volley
+    }
+    S.seekerCd -= dt;
+    if (hasWpn('seeker') && S.seekerCd <= 0) {
+      S.seekerCd = 0.9;
+      fireMissile(px, py);
+    }
+    S.railCd -= dt;
+    if (hasWpn('rail') && S.railCd <= 0) fireRail();
+    if (S.railVis > 0) {
+      S.railVis -= dt;
+      railBeam.position.x = px; railBeam.position.y = py;
+      if (S.railVis <= 0) railBeam.visible = false;
+    }
+
+    // --- wave spawning ---
+    if (S.spawnQueue > 0) {
+      S.spawnT -= dt;
+      if (S.spawnT <= 0) { queueSpawn(); S.spawnT = 0.6; }
+    }
+    if (Math.random() < dt * 0.5 * (1 + S.stormLvl)) spawnRock();
+
+    // --- enemies ---
+    let anyEnemy = false;
+    for (const e of ENEMIES) {
+      if (!e.on) continue;
+      anyEnemy = true;
+      e.t += dt;
+      const speed = (6 + S.wave * 0.6) * diffSpeed() * (e.elite ? 1.3 : 1);
+      e.g.position.z += speed * dt;
+      if (e.kind === 'drone') {
+        e.g.position.x = e.baseX + Math.sin(e.t * 2.2) * 1.4;
+        e.g.position.y = e.baseY + Math.sin(e.t * 3.1) * 0.5;
+      } else {
+        e.g.position.x = e.baseX + Math.sin(e.t * 1.4) * 2.6;
+        e.g.position.y = e.baseY;
+        e.g.rotation.z += dt * 2;
+      }
+      e.g.rotation.y += dt * 1.5;
+      e.fireT -= dt;
+      if (e.fireT <= 0 && e.g.position.z > -60 && e.g.position.z < -5) {
+        e.fireT = rand(1.6, 3.2) / diffFire();
+        const dx = px - e.g.position.x, dy = py - e.g.position.y;
+        const d = Math.max(1, Math.hypot(dx, dy));
+        if (e.bomber) {
+          for (const a of [-0.22, 0, 0.22]) {
+            const c = Math.cos(a), sn = Math.sin(a);
+            fireBolt(eBolts, e.g.position.x, e.g.position.y, e.g.position.z + 1, (dx * c - dy * sn) / d * 8, (dx * sn + dy * c) / d * 8, 26, 1);
+          }
+        } else {
+          fireBolt(eBolts, e.g.position.x, e.g.position.y, e.g.position.z + 1, dx / d * 8, dy / d * 8, 26, 1);
+        }
+      }
+      if (e.g.position.z > 8) { e.on = false; e.g.visible = false; continue; }
+      // player bolts + plasma vs enemy
+      const hitLists = [pBolts, pPlasma];
+      for (const list of hitLists) {
+        let consumed = false;
+        for (const b of list) {
+          if (!b.on) continue;
+          const dx = b.m.position.x - e.g.position.x, dy = b.m.position.y - e.g.position.y, dz = b.m.position.z - e.g.position.z;
+          if (Math.abs(dx) < 1.2 && Math.abs(dy) < 1.2 && Math.abs(dz) < 1.6) {
+            b.on = false; b.m.visible = false;
+            e.hp -= b.dmg;
+            burst(e.g.position.x, e.g.position.y, e.g.position.z, 10, 4);
+            if (e.hp <= 0) {
+              e.on = false; e.g.visible = false;
+              S.score += e.score; sfxBoom(e.g.position.x);
+              burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+              if (e.elite) { shockwave(e.g.position.x, e.g.position.y, e.g.position.z, 1.2); pulseBoth(0.8, 90); }
+              else pulseBoth(0.5, 60);
+              bumpPulse(e.elite ? 0.6 : 0.35);
+              if (Math.random() < 0.22) spawnPickup(PICKUP_KINDS[Math.floor(rand(0, PICKUP_KINDS.length))], e.g.position.x, e.g.position.y);
+              hudDirty = true;
+            }
+            consumed = true;
+            break;
+          }
+        }
+        if (consumed) break;
+      }
+      if (!e.on) continue;
+      // enemy touches player plane
+      if (e.g.position.z > -1.5) {
+        const dx = e.g.position.x - px, dy = e.g.position.y - py;
+        if (Math.hypot(dx, dy) < 1.4) {
+          e.on = false; e.g.visible = false;
+          burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+          damagePlayer(20);
+        }
+      }
+    }
+
+    // --- seeker missiles: home on nearest live target ---
+    for (const ms of MISSILES) {
+      if (!ms.on) continue;
+      ms.life -= dt;
+      if (ms.life <= 0) { ms.on = false; ms.m.visible = false; continue; }
+      if (!ms.target) ms.target = nearestTarget(ms.m.position.x, ms.m.position.y, ms.m.position.z);
+      if (ms.target === 'boss' && S.bossHp <= 0) ms.target = nearestTarget(ms.m.position.x, ms.m.position.y, ms.m.position.z);
+      if (ms.target && ms.target !== 'boss' && !ms.target.on) ms.target = nearestTarget(ms.m.position.x, ms.m.position.y, ms.m.position.z);
+      let tx2 = 0, ty2 = 0, tz2 = -90;
+      if (ms.target === 'boss') { tx2 = boss.position.x; ty2 = boss.position.y; tz2 = -52; }
+      else if (ms.target) { tx2 = ms.target.g.position.x; ty2 = ms.target.g.position.y; tz2 = ms.target.g.position.z; }
+      const dx = tx2 - ms.m.position.x, dy = ty2 - ms.m.position.y, dz = tz2 - ms.m.position.z;
+      const d = Math.max(1, Math.hypot(dx, dy, dz));
+      const turn = 26;
+      ms.vx += (dx / d * 60 - ms.vx) * Math.min(1, turn * dt * 0.2);
+      ms.vy += (dy / d * 60 - ms.vy) * Math.min(1, turn * dt * 0.2);
+      ms.vz += (dz / d * 60 - ms.vz) * Math.min(1, turn * dt * 0.2);
+      ms.m.position.x += ms.vx * dt; ms.m.position.y += ms.vy * dt; ms.m.position.z += ms.vz * dt;
+      ms.m.lookAt(ms.m.position.x + ms.vx, ms.m.position.y + ms.vy, ms.m.position.z + ms.vz);
+      // missile hits enemy / boss / rock
+      let spent = false;
+      for (const e of ENEMIES) {
+        if (!e.on) continue;
+        if (Math.abs(ms.m.position.x - e.g.position.x) < 1.3 && Math.abs(ms.m.position.y - e.g.position.y) < 1.3 && Math.abs(ms.m.position.z - e.g.position.z) < 1.6) {
+          e.hp -= 2 + S.upg.power;
+          burst(e.g.position.x, e.g.position.y, e.g.position.z, 14, 5);
+          if (e.hp <= 0) {
+            e.on = false; e.g.visible = false;
+            S.score += e.score; sfxBoom(e.g.position.x);
+            burst(e.g.position.x, e.g.position.y, e.g.position.z, 30, 8);
+            if (e.elite) { shockwave(e.g.position.x, e.g.position.y, e.g.position.z, 1.2); pulseBoth(0.8, 90); }
+            else pulseBoth(0.5, 60);
+            bumpPulse(e.elite ? 0.6 : 0.35);
+            if (Math.random() < 0.22) spawnPickup(PICKUP_KINDS[Math.floor(rand(0, PICKUP_KINDS.length))], e.g.position.x, e.g.position.y);
+          }
+          spent = true; hudDirty = true;
+          break;
+        }
+      }
+      if (!spent && S.bossHp > 0 && Math.abs(ms.m.position.x - boss.position.x) < 7.5 && Math.abs(ms.m.position.y - boss.position.y) < 2.5 && Math.abs(ms.m.position.z - (-52)) < 5) {
+        S.bossHp -= 2 + S.upg.power;
+        burst(ms.m.position.x, ms.m.position.y, ms.m.position.z, 10, 4);
+        spent = true; hudDirty = true;
+        if (S.bossHp <= 0) bossDown();
+      }
+      if (spent) { ms.on = false; ms.m.visible = false; continue; }
+      if (ms.m.position.z < -95 || ms.m.position.z > 8) { ms.on = false; ms.m.visible = false; }
+    }
+
+    // --- asteroids ---
+    for (const r of ROCKS) {
+      if (!r.on) continue;
+      r.m.position.x += r.vx * dt; r.m.position.y += r.vy * dt; r.m.position.z += r.vz * dt;
+      r.m.rotation.x += r.rx * dt; r.m.rotation.y += r.ry * dt; r.m.rotation.z += r.rz * dt;
+      if (r.m.position.z > 8) { r.on = false; r.m.visible = false; continue; }
+      let broken = false;
+      for (const list of [pBolts, pPlasma]) {
+        for (const b of list) {
+          if (!b.on) continue;
+          const dx = b.m.position.x - r.m.position.x, dy = b.m.position.y - r.m.position.y, dz = b.m.position.z - r.m.position.z;
+          const rad = 1.1 * r.m.scale.x;
+          if (Math.abs(dx) < rad && Math.abs(dy) < rad && Math.abs(dz) < rad + 1) {
+            b.on = false; b.m.visible = false;
+            r.on = false; r.m.visible = false;
+            S.score += 50; sfxBoom(r.m.position.x);
+            burst(r.m.position.x, r.m.position.y, r.m.position.z, 26, 7);
+            pulseBoth(0.5, 60); bumpPulse(0.25);
+            hudDirty = true;
+            broken = true;
+            break;
+          }
+        }
+        if (broken) break;
+      }
+      if (broken) continue;
+      if (r.m.position.z > -1.5) {
+        const dx = r.m.position.x - px, dy = r.m.position.y - py;
+        if (Math.hypot(dx, dy) < 1.2 + r.m.scale.x * 0.6) {
+          r.on = false; r.m.visible = false;
+          burst(r.m.position.x, r.m.position.y, r.m.position.z, 26, 7);
+          damagePlayer(25);
+        }
+      }
+    }
+
+    // --- pickups: every kind stacks without limit ---
+    for (const p of PICKUPS) {
+      if (!p.on) continue;
+      p.t += dt;
+      p.m.position.z += 12 * dt;
+      p.m.rotation.y += dt * 3;
+      p.m.position.y += Math.sin(p.t * 4) * dt * 0.5;
+      if (p.m.position.z > 8) { p.on = false; p.m.visible = false; continue; }
+      if (p.m.position.z > -1.5) {
+        const dx = p.m.position.x - px, dy = p.m.position.y - py;
+        if (Math.hypot(dx, dy) < 1.3) {
+          p.on = false; p.m.visible = false;
+          const names = {
+            triple: 'TRIPLE LASER', seeker: 'SEEKER MISSILES', plasma: 'PLASMA CANNON',
+            rail: 'RAIL BEAM', nova: 'NOVA BOMB', plate: 'HULL PLATING', cell: 'SHIELD CELLS',
+            engine: 'ENGINE SPEED', power: 'WEAPON POWER', hull: 'HULL REPAIR', shield: 'SHIELD BOOST',
+          };
+          if (['triple', 'seeker', 'plasma', 'rail', 'nova'].includes(p.kind)) {
+            applyWeapon(p.kind); // banner set inside: slot / replace / top-up
+          } else if (['plate', 'cell', 'engine', 'power'].includes(p.kind)) {
+            applyUpgrade(p.kind);
+            showBanner(names[p.kind] + ' +1 (x' + S.upg[p.kind] + ', NO LIMIT)', 2);
+          } else if (p.kind === 'hull') { S.hull = Math.min(S.maxHull, S.hull + 40); showBanner('HULL +40', 2); }
+          else { S.shield += 50; showBanner('SHIELD +50', 2); }
+          sfxPickup(); pulseBoth(0.4, 50); bumpPulse(0.25); hudDirty = true;
+        }
+      }
+    }
+
+    // --- boss ---
+    if (S.bossHp > 0) {
+      bossT += dt;
+      boss.position.x = Math.sin(bossT * 0.5) * 5;
+      boss.position.y = 1 + Math.sin(bossT * 0.8) * 0.8;
+      boss.rotation.y = Math.sin(bossT * 0.5) * 0.15;
+      bossFireT -= dt;
+      if (bossFireT <= 0) {
+        bossFireT = bossFireInterval;
+        bossVolley();
+        if (bossDouble) bossVolleyPending = 0.25;
+      }
+      if (bossVolleyPending > 0) {
+        bossVolleyPending -= dt;
+        if (bossVolleyPending <= 0) bossVolley();
+      }
+      for (const list of [pBolts, pPlasma]) {
+        for (const b of list) {
+          if (!b.on) continue;
+          const dx = b.m.position.x - boss.position.x, dy = b.m.position.y - boss.position.y, dz = b.m.position.z - (-52);
+          if (Math.abs(dx) < 7.5 && Math.abs(dy) < 2.5 && Math.abs(dz) < 5) {
+            b.on = false; b.m.visible = false;
+            S.bossHp -= b.dmg;
+            burst(b.m.position.x, b.m.position.y, b.m.position.z, 6, 4);
+            hudDirty = true;
+            if (S.bossHp <= 0) bossDown();
+            break;
+          }
+        }
+      }
+    }
+
+    // --- player bolts + plasma move ---
+    for (const list of [pBolts, pPlasma]) {
+      for (const b of list) {
+        if (!b.on) continue;
+        b.m.position.x += b.vx * dt; b.m.position.y += b.vy * dt; b.m.position.z += b.vz * dt;
+        if (b.m.position.z < -95) { b.on = false; b.m.visible = false; }
+      }
+    }
+    // --- enemy bolts move + hit player ---
+    for (const b of eBolts) {
+      if (!b.on) continue;
+      b.m.position.x += b.vx * dt; b.m.position.y += b.vy * dt; b.m.position.z += b.vz * dt;
+      if (b.m.position.z > 8) { b.on = false; b.m.visible = false; continue; }
+      if (b.m.position.z > -1.5) {
+        const dx = b.m.position.x - px, dy = b.m.position.y - py;
+        if (Math.hypot(dx, dy) < 0.9) {
+          b.on = false; b.m.visible = false;
+          damagePlayer(15);
+        }
+      }
+    }
+
+    // --- wave clear check (grants a bonus upgrade, stacked without limit) ---
+    if (!anyEnemy && S.spawnQueue <= 0 && S.bossHp <= 0 && S.mode === 'play') {
+      S.wave++;
+      grantWaveBonus();
+      startWave(S.wave);
+    }
+
+    // --- particles ---
+    for (let i = 0; i < PARTS; i++) {
+      if (pLife[i] <= 0) continue;
+      pLife[i] -= dt;
+      if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; continue; } // hide dead sparks
+      pPos[i * 3] += pVel[i * 3] * dt;
+      pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
+      pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+    }
+    pGeo.attributes.position.needsUpdate = true;
+
+    // --- shockwaves ---
+    for (const s of SHOCKS) {
+      if (!s.on) continue;
+      s.t += dt;
+      const k = s.t / 0.8;
+      if (k >= 1) { s.on = false; s.m.visible = false; continue; }
+      s.m.scale.setScalar(s.m.scale.x * (1 + dt * 3));
+      s.m.material.opacity = 0.9 * (1 - k);
+    }
+
+    // --- engine glow flicker, nav light blink, trails, muzzle flash ---
+    const flick = 0.75 + Math.sin(time * 31) * 0.25;
+    if (engineFlare > 0) engineFlare -= dt;
+    const flare = engineFlare > 0 ? 1.45 : 1; // brief flare on every volley
+    const glowDim = perfValve.glowsOn ? 1 : 0.55; // valve L2 dims glows (registry)
+    for (const g of engineGlows) g.scale.set(0.9 * flick * flare * glowDim, 0.9 * flick * flare * glowDim, 1);
+    const blink = (time % 1.4) < 0.9;
+    navL.material = blink ? MAT.navRed : MAT.hullDark;
+    navR.material = blink ? MAT.navGreen : MAT.hullDark;
+    updateTrails();
+    if (muzzleT > 0) {
+      muzzleT -= dt;
+      muzzle.material.opacity = Math.max(0, muzzleT / 0.06) * 0.9;
+      if (muzzleT <= 0) muzzle.material.opacity = 0;
+    }
+
+    // --- camera shake + message timer ---
+    if (S.shake > 0) {
+      S.shake -= dt;
+      camera.position.set(rand(-0.08, 0.08) * S.shake, rand(-0.08, 0.08) * S.shake, 0);
+    } else camera.position.set(0, 0, 0);
+    if (S.msgT > 0) { S.msgT -= dt; if (S.msgT <= 0) { S.msg = ''; hudDirty = true; } }
+    if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) bannerMesh.visible = false; }
+    // Frame-time valve: EMA fed only during active play (warm-up after a
+    // start/resume is not gameplay frame time). Tier progression still
+    // holds while degraded (see checkTier).
+    if (perfWarmup > 0) perfWarmup -= dt;
+    else perfValve.update(dt);
+    checkTier();
+    drawHUD(S);
+  } else {
+    ship.position.set(Math.sin(time * 0.5) * 1.5, Math.sin(time * 0.8) * 0.4, 0);
+    ship.rotation.z = Math.sin(time * 0.5) * 0.15;
+    const flick = 0.75 + Math.sin(time * 31) * 0.25;
+    for (const g of engineGlows) g.scale.set(0.9 * flick, 0.9 * flick, 1);
+  }
+
+  // Gentle nebula drift for speed sensation
+  neb1.position.z += dt * 0.4; if (neb1.position.z > -60) neb1.position.z = -340;
+  neb4.position.z += dt * 0.3; if (neb4.position.z > -60) neb4.position.z = -310;
+  updateShootingStar(dt);
+
+  // ---- always-on cinematic upkeep (runs in menu, play, and paused) ----
+  cockpit.visible = (S.mode === 'play');
+  pauseMesh.visible = paused && S.mode === 'play';
+  const trailsOn = S.mode === 'play' && perfValve.trailsOn;
+  trails[0].mesh.visible = trailsOn; trails[1].mesh.visible = trailsOn;
+  // Perf readout refresh: HUD redraws at 2 Hz so the frame-time / valve /
+  // framebuffer numbers stay fresh (drawHUD is dirty-gated otherwise).
+  perfHudT += dt;
+  if (perfHudT >= 0.5) { perfHudT = 0; hudDirty = true; }
+  // Boss-encounter staging + combat pulse (Bible §3.5/§7.4): while the
+  // Ravager lives the light shifts red and a vignette pulses at the view
+  // edges. No new lights are added — the existing sun/hemi are re-aimed.
+  {
+    const bossAlive = S.bossHp > 0;
+    const k = Math.min(1, 1.5 * dt);
+    sunBase += ((bossAlive ? 2.2 : 1.6) - sunBase) * k;
+    hemi.intensity += ((bossAlive ? 0.5 : 0.7) - hemi.intensity) * k;
+    sun.color.lerp(bossAlive ? _sunBoss : _sunNormal, k);
+    if (degraded) combatPulse = 0; // valve freezes the pulse at base values
+    else combatPulse = Math.max(0, combatPulse - 1.8 * dt);
+    sun.intensity = sunBase + combatPulse * 0.5;
+    if (bossAlive && perfValve.level < 2) {
+      bossFlash = Math.max(0, bossFlash - 1.2 * dt);
+      vignetteMesh.visible = true;
+      vignetteMesh.material.opacity = Math.min(0.5, bossFlash + 0.10 + 0.06 * Math.sin(time * 4));
+    } else vignetteMesh.visible = false;
+  }
+  syncEnemyInstances();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(tick);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
