@@ -926,6 +926,14 @@ function pollXR(dt) {
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
+    // Thumbstick indices — VERIFIED Nov 15, 2026 against the W3C WebXR
+    // Gamepads Module §3.3 ("xr-standard" mapping): axes[2] = thumbstick X,
+    // axes[3] = thumbstick Y; axes[0]/[1] are the TOUCHPAD (placeholder 0 on
+    // Touch controllers, which have no touchpad — the spec REQUIRES the
+    // placeholders be kept because the thumbstick follows them, so
+    // axes.length is 4). The oculus-touch-v2 input profile agrees
+    // (thumbstick at axes[2]/[3]). Do NOT "fix" this to axes[0]/[1] — that
+    // is the Gamepad API "standard" (non-XR) layout, a different mapping.
     if (gp.axes && gp.axes.length > 3) {
       const ax = gp.axes[2] || 0, ay = gp.axes[3] || 0;
       if (src.handedness === 'left') {

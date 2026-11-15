@@ -370,8 +370,46 @@ const porchBulbMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive:
 const carGlassMat = new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.15, metalness: 0.5 });
 const headlightMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffe6a0, emissiveIntensity: 0.8 });
 const taillightMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2211, emissiveIntensity: 0.6 });
+
+// ============ shared-material + shared-geometry caches ============
+// Identical material parameters return ONE material instead of a new program
+// per call (addBox alone created ~300). Materials in these caches are NEVER
+// mutated after creation — anything animated per-mesh (lamp flicker, muzzle
+// flash, blood particles) keeps its own material by construction and is
+// never routed through here.
+const _matCache = new Map();
+function _matKey(kind, o) {
+  return [kind, o.map ? o.map.uuid : '', o.color ?? 0xffffff, o.roughness ?? 1, o.metalness ?? 0, o.emissive ?? 0, o.emissiveIntensity ?? 1, o.opacity ?? 1, o.transparent ? 1 : 0, o.depthWrite === false ? 0 : 1].join('|');
+}
+function sharedStdMat(o) {
+  const k = _matKey('std', o);
+  let m = _matCache.get(k);
+  if (!m) { m = new THREE.MeshStandardMaterial(o); _matCache.set(k, m); }
+  return m;
+}
+function sharedBasicMat(o) {
+  const k = _matKey('basic', o);
+  let m = _matCache.get(k);
+  if (!m) { m = new THREE.MeshBasicMaterial(o); _matCache.set(k, m); }
+  return m;
+}
+function sharedSpriteMat(o) {
+  const k = _matKey('sprite', o);
+  let m = _matCache.get(k);
+  if (!m) { m = new THREE.SpriteMaterial(o); _matCache.set(k, m); }
+  return m;
+}
+// Plane geometries are never mutated after creation (mesh.scale is used for
+// sizing), so identical (w, d) planes share one geometry.
+const _planeGeoCache = new Map();
+function sharedPlaneGeo(w, d) {
+  const k = w + 'x' + d;
+  let g = _planeGeoCache.get(k);
+  if (!g) { g = new THREE.PlaneGeometry(w, d); _planeGeoCache.set(k, g); }
+  return g;
+}
 function flatTex(w, d, x, z, y, tex, color) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: tex, color: color || 0xffffff, roughness: 1 }));
+  const m = new THREE.Mesh(sharedPlaneGeo(w, d), sharedStdMat({ map: tex, color: color || 0xffffff, roughness: 1 }));
   m.rotation.x = -Math.PI / 2;
   m.position.set(x, y, z);
   scene.add(m);
@@ -380,7 +418,7 @@ function flatTex(w, d, x, z, y, tex, color) {
 
 // ============ ground, road, sidewalks, plaza ============
 function flat(w, d, x, z, y, color) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color, roughness: 1 }));
+  const m = new THREE.Mesh(sharedPlaneGeo(w, d), sharedStdMat({ color, roughness: 1 }));
   m.rotation.x = -Math.PI / 2;
   m.position.set(x, y, z);
   scene.add(m);
@@ -407,7 +445,7 @@ for (let i = 0; i < 5; i++) flat(1.2, 8, -14 + i * 2.2, 0, 0.05, 0x3a3d48);
 // scattered grass / dirt patches off the road
 for (let i = 0; i < 22; i++) {
   const patch = new THREE.Mesh(new THREE.CircleGeometry(rand(0.8, 2.2), 12),
-    new THREE.MeshStandardMaterial({ color: i % 2 ? 0x0a140c : 0x171208, roughness: 1 }));
+    sharedStdMat({ color: i % 2 ? 0x0a140c : 0x171208, roughness: 1 }));
   patch.rotation.x = -Math.PI / 2;
   const side = Math.random() < 0.5 ? -1 : 1;
   patch.position.set(rand(-215, 215), 0.01, side * rand(8.5, 105));
@@ -446,7 +484,7 @@ const colliders = [];
 const furniture = [];
 function addBox(w, h, d, x, y, z, color, opts) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, ...(opts || {}) }));
+    sharedStdMat({ color, roughness: 1, metalness: 0, ...(opts || {}) }));
   m.position.set(x, y, z);
   scene.add(m);
   return m;
@@ -487,6 +525,44 @@ function rayVsBox(ox, oy, oz, dx, dy, dz, b, top) {
     }
   }
   return tmin;
+}
+
+// ============ instanced collectors for repeated building elements ============
+// Each group holds identical geometry+material; transforms are collected
+// while buildBuilding runs and flushed to one InstancedMesh per group after
+// the BUILDINGS loop. Unit-box groups scale the instance matrix —
+// BoxGeometry UVs are 0-1 per face, so a scaled unit box renders identically
+// to a per-size box (same texture stretch as before). Colliders are data-only
+// and are pushed exactly as before; only the mesh creation changes.
+const _unitBoxGeo = new THREE.BoxGeometry(1, 1, 1);
+const _winGeo = new THREE.PlaneGeometry(1.15, 1.0);
+const _panelGeo = new THREE.BoxGeometry(1.15, 2.6, 0.06);
+const _bulbGeo = new THREE.SphereGeometry(0.07, 8, 6);
+const _ipoolGeo = new THREE.CircleGeometry(3.6, 20);
+const _instGroups = new Map();
+const _instDummy = new THREE.Object3D();
+function _instPush(key, geo, mat, x, y, z, sx, sy, sz, rotY) {
+  let g = _instGroups.get(key);
+  if (!g) { g = { geo, mat, mats: [] }; _instGroups.set(key, g); }
+  _instDummy.position.set(x, y, z);
+  _instDummy.rotation.set(0, rotY || 0, 0);
+  _instDummy.scale.set(sx === undefined ? 1 : sx, sy === undefined ? 1 : sy, sz === undefined ? 1 : sz);
+  _instDummy.updateMatrix();
+  g.mats.push(_instDummy.matrix.clone());
+}
+// Any plain colored box: grouped by color, unit box scaled to size.
+function instBox(color, w, h, d, x, y, z) {
+  _instPush('box|' + color, _unitBoxGeo, sharedStdMat({ color, roughness: 1, metalness: 0 }), x, y, z, w, h, d, 0);
+}
+function _instFlush() {
+  for (const g of _instGroups.values()) {
+    const im = new THREE.InstancedMesh(g.geo, g.mat, g.mats.length);
+    im.frustumCulled = false; // bounds are the base geometry's (see reeds)
+    g.mats.forEach((m, i) => im.setMatrixAt(i, m));
+    im.instanceMatrix.needsUpdate = true;
+    scene.add(im);
+  }
+  _instGroups.clear();
 }
 
 // ============ town: buildings ============
@@ -531,13 +607,13 @@ function buildBuilding(b) {
   const cx = (b.x0 + b.x1) / 2, doorW = 2.4, dL = cx - doorW / 2, dR = cx + doorW / 2;
   const dir = b.side === 'N' ? 1 : -1; // front faces the street (+z for N, -z for S)
   const wallTex = b.kind === 'diner' || b.kind === 'gas' ? brickTex : b.kind === 'hardware' || b.kind === 'house' ? sidingTex : concreteWallTex;
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, color: b.color, roughness: 1 });
+  const wallMat = sharedStdMat({ map: wallTex, color: b.color, roughness: 1 });
   function wall(x0, x1, z0, z1) {
     colliders.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), z0: Math.min(z0, z1), z1: Math.max(z0, z1), h: WALL_H });
     const w = Math.abs(x1 - x0) || WALL_T, d = Math.abs(z1 - z0) || WALL_T;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_H, d), wallMat);
-    m.position.set((x0 + x1) / 2, WALL_H / 2, (z0 + z1) / 2);
-    scene.add(m);
+    // Instanced: same position/size as the old per-wall mesh; walls sharing
+    // a (texture, color) land in one InstancedMesh (19 groups for 150 walls).
+    _instPush('wall|' + wallTex.uuid + '|' + b.color, _unitBoxGeo, wallMat, (x0 + x1) / 2, WALL_H / 2, (z0 + z1) / 2, w, WALL_H, d, 0);
   }
   wall(b.x0, b.x1, backZ - dir * WALL_T / 2, backZ + dir * WALL_T / 2); // back
   wall(b.x0 - WALL_T / 2, b.x0 + WALL_T / 2, zMin, zMax); // left
@@ -558,16 +634,16 @@ function buildBuilding(b) {
       // chimney sitting on the roof slope
       const ox = bw * 0.3;
       const slopeY = WALL_H + roofH * (1 - Math.abs(ox) / (bw / 2));
-      addBox(0.5, 0.9, 0.5, cx + ox, slopeY + 0.35, mid, 0x4a3330);
+      instBox(0x4a3330, 0.5, 0.9, 0.5, cx + ox, slopeY + 0.35, mid);
     } else {
       // cross on the front gable peak
       const gz = frontZ + dir * 0.55;
-      addBox(0.09, 0.9, 0.09, cx, WALL_H + roofH + 0.35, gz, 0xd8d2c4);
-      addBox(0.55, 0.09, 0.09, cx, WALL_H + roofH + 0.55, gz, 0xd8d2c4);
+      instBox(0xd8d2c4, 0.09, 0.9, 0.09, cx, WALL_H + roofH + 0.35, gz);
+      instBox(0xd8d2c4, 0.55, 0.09, 0.09, cx, WALL_H + roofH + 0.55, gz);
     }
   } else {
-    addBox(bw, 0.3, 10.8, cx, WALL_H + 0.15, mid, 0x11131a);
-    addBox(bw + 0.2, 0.5, 11.0, cx, WALL_H + 0.55, mid, 0x9a928a); // parapet block (one mesh)
+    instBox(0x11131a, bw, 0.3, 10.8, cx, WALL_H + 0.15, mid);
+    instBox(0x9a928a, bw + 0.2, 0.5, 11.0, cx, WALL_H + 0.55, mid); // parapet block (one instance)
   }
   // sign (unchanged texture + street-facing orientation)
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(10, b.x1 - b.x0 - 2), 1.5),
@@ -578,8 +654,7 @@ function buildBuilding(b) {
   // windows: framed canvas-texture planes (lit = warm glow), front + both side walls
   function addWin(x, y, z, rotY) {
     const lit = Math.random() < 0.4;
-    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 1.0), lit ? winLitMat : winDarkMat);
-    win.position.set(x, y, z); win.rotation.y = rotY; scene.add(win);
+    _instPush(lit ? 'winLit' : 'winDark', _winGeo, lit ? winLitMat : winDarkMat, x, y, z, 1, 1, 1, rotY);
   }
   for (let i = 0; i < 3; i++) {
     const wx = b.x0 + (i + 0.5) * (b.x1 - b.x0) / 3;
@@ -591,21 +666,16 @@ function buildBuilding(b) {
   addWin(b.x1 + WALL_T / 2 + 0.02, 1.8, zMin + 2.5, Math.PI / 2);
   addWin(b.x1 + WALL_T / 2 + 0.02, 1.8, zMax - 2.5, Math.PI / 2);
   // door frame + open panels lying flat against the front wall (never block the gap)
-  addBox(0.18, 2.9, WALL_T + 0.2, dL, 1.45, frontZ, 0x2a2018);
-  addBox(0.18, 2.9, WALL_T + 0.2, dR, 1.45, frontZ, 0x2a2018);
-  addBox(doorW + 0.36, 0.25, WALL_T + 0.2, cx, 2.95, frontZ, 0x2a2018);
-  const panelGeo = new THREE.BoxGeometry(1.15, 2.6, 0.06);
+  instBox(0x2a2018, 0.18, 2.9, WALL_T + 0.2, dL, 1.45, frontZ);
+  instBox(0x2a2018, 0.18, 2.9, WALL_T + 0.2, dR, 1.45, frontZ);
+  instBox(0x2a2018, doorW + 0.36, 0.25, WALL_T + 0.2, cx, 2.95, frontZ);
   for (const px of [dL - 0.62, dR + 0.62]) {
-    const p = new THREE.Mesh(panelGeo, doorMat);
-    p.position.set(px, 1.3, frontZ + dir * 0.19);
-    scene.add(p);
+    _instPush('doorPanel', _panelGeo, doorMat, px, 1.3, frontZ + dir * 0.19, 1, 1, 1, 0);
   }
   // porch light by the door (emissive bulb + warm glow sprite)
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), porchBulbMat);
-  bulb.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
-  scene.add(bulb);
+  _instPush('porchBulb', _bulbGeo, porchBulbMat, dR + 1.6, 2.5, frontZ + dir * 0.28, 1, 1, 1, 0);
   if (b.kind !== 'house') { // Quest perf: skip porch glow sprites on houses (bulbs stay)
-    const pglow = new THREE.Sprite(new THREE.SpriteMaterial({ map: porchGlowTex, transparent: true, opacity: 0.3, depthWrite: false }));
+    const pglow = new THREE.Sprite(sharedSpriteMat({ map: porchGlowTex, transparent: true, opacity: 0.3, depthWrite: false }));
     pglow.scale.set(1.1, 1.1, 1); pglow.position.set(dR + 1.6, 2.5, frontZ + dir * 0.28);
     scene.add(pglow);
     valveGlows.push(pglow); // atmosphere only: the valve may hide it at L2
@@ -613,7 +683,7 @@ function buildBuilding(b) {
   // interior furniture (player collision only — zombies shamble through it, v1 kink)
   const fz = (dz) => b.side === 'N' ? -7 - dz : 7 + dz;
   function furn(w, d, x, dz, color, h) {
-    addBox(w, h || 0.9, d, x, (h || 0.9) / 2, fz(dz), color);
+    instBox(color, w, h || 0.9, d, x, (h || 0.9) / 2, fz(dz));
     furniture.push({ x0: x - w / 2, x1: x + w / 2, z0: Math.min(fz(dz) - d / 2, fz(dz) + d / 2), z1: Math.max(fz(dz) - d / 2, fz(dz) + d / 2) });
   }
   if (b.kind === 'diner') {
@@ -638,17 +708,26 @@ function buildBuilding(b) {
   // floor pool inside, so interiors read as lit rooms through the doorway.
   // Sprites only — no new real lights (the game already has its 3).
   if (b.kind === 'diner' || b.kind === 'pharmacy' || b.kind === 'hardware' || b.kind === 'sheriff' || b.kind === 'fire' || b.kind === 'library') {
-    const iglow = new THREE.Sprite(new THREE.SpriteMaterial({ map: porchGlowTex, transparent: true, opacity: 0.35, depthWrite: false }));
+    const iglow = new THREE.Sprite(sharedSpriteMat({ map: porchGlowTex, transparent: true, opacity: 0.35, depthWrite: false }));
     iglow.scale.set(4.5, 3.2, 1); iglow.position.set(cx, 2.0, fz(5));
     scene.add(iglow);
     valveGlows.push(iglow);
-    const ipool = new THREE.Mesh(new THREE.CircleGeometry(3.6, 20),
-      new THREE.MeshBasicMaterial({ map: porchGlowTex, transparent: true, opacity: 0.13, depthWrite: false }));
+    // Stays an individual mesh (not instanced): it is transparent, and
+    // instancing would sort all 7 pools as one object at the origin.
+    // Geometry + material are shared instead.
+    const ipool = new THREE.Mesh(_ipoolGeo,
+      sharedBasicMat({ map: porchGlowTex, transparent: true, opacity: 0.13, depthWrite: false }));
     ipool.rotation.x = -Math.PI / 2; ipool.position.set(cx, 0.06, fz(5));
     scene.add(ipool);
   }
 }
 BUILDINGS.forEach(buildBuilding);
+// Flush the building instancing collectors: walls, windows, door frames +
+// panels, porch bulbs, furniture, flat roofs, chimneys and the church cross
+// become one InstancedMesh per geometry+material group. Signs (unique
+// textures), pitched roofs (extrude UVs scale with the shape) and glow
+// sprites (billboarded) stay individual by design.
+_instFlush();
 
 // map bounds + street-end barricades
 colliders.push({ x0: -220, x1: 220, z0: -110.4, z1: -110, h: 3.4 });
@@ -677,7 +756,7 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
 { // Hollow Lake, east side: water you cannot walk into (colliders leave a dock corridor)
   const lake = new THREE.Mesh(new THREE.CircleGeometry(17, 28), waterMat);
   lake.rotation.x = -Math.PI / 2; lake.position.set(93, 0.06, -25); lake.scale.set(1.25, 0.85, 1); scene.add(lake);
-  const shore = new THREE.Mesh(new THREE.CircleGeometry(18.5, 28), new THREE.MeshStandardMaterial({ color: 0x8a7a52, roughness: 1 }));
+  const shore = new THREE.Mesh(new THREE.CircleGeometry(18.5, 28), sharedStdMat({ color: 0x8a7a52, roughness: 1 }));
   shore.rotation.x = -Math.PI / 2; shore.position.set(93, 0.03, -25); shore.scale.set(1.25, 0.85, 1); scene.add(shore);
   lake.position.y = 0.06; // water sits just above the sand ring edge
   colliders.push({ x0: 80, x1: 110, z0: -36, z1: -27, h: 1 });
@@ -743,8 +822,19 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
     const lf = new THREE.Mesh(parkLeaf, parkLeafMat); lf.position.set(tx, 4.0, tz); lf.scale.y = 1.25; scene.add(lf);
     const lf2 = new THREE.Mesh(parkLeaf, parkLeafMat); lf2.position.set(tx + 0.7, 3.2, tz); lf2.scale.setScalar(0.7); scene.add(lf2);
   }
-  // low wooden fence along the park's south edge
-  for (let x = -94; x <= -62; x += 4) addBox(0.14, 0.9, 0.14, x, 0.45, -22.5, 0x6a5a40);
+  // low wooden fence along the park's south edge (posts instanced: 9 -> 1)
+  {
+    const postMesh = new THREE.InstancedMesh(_unitBoxGeo, sharedStdMat({ color: 0x6a5a40, roughness: 1, metalness: 0 }), 9);
+    postMesh.frustumCulled = false;
+    const d = new THREE.Object3D();
+    let pi = 0;
+    for (let x = -94; x <= -62; x += 4) {
+      d.position.set(x, 0.45, -22.5); d.rotation.set(0, 0, 0); d.scale.set(0.14, 0.9, 0.14); d.updateMatrix();
+      postMesh.setMatrixAt(pi++, d.matrix);
+    }
+    postMesh.instanceMatrix.needsUpdate = true;
+    scene.add(postMesh);
+  }
   addBox(32, 0.1, 0.1, -78, 0.75, -22.5, 0x6a5a40);
 }
 // fire hydrants, mailboxes, fences (shared, cheap)
@@ -791,7 +881,7 @@ for (const cx2 of [-128, 180]) {
 { // Second pond, south-west at (-160, 45): water you cannot walk into
   const pond = new THREE.Mesh(new THREE.CircleGeometry(12, 24), waterMat);
   pond.rotation.x = -Math.PI / 2; pond.position.set(-160, 0.06, 45); pond.scale.set(1.3, 0.9, 1); scene.add(pond);
-  const sand = new THREE.Mesh(new THREE.CircleGeometry(13.5, 24), new THREE.MeshStandardMaterial({ color: 0x8a7a52, roughness: 1 }));
+  const sand = new THREE.Mesh(new THREE.CircleGeometry(13.5, 24), sharedStdMat({ color: 0x8a7a52, roughness: 1 }));
   sand.rotation.x = -Math.PI / 2; sand.position.set(-160, 0.03, 45); sand.scale.set(1.3, 0.9, 1); scene.add(sand);
   colliders.push({ x0: -176, x1: -144, z0: 34, z1: 56, h: 1 });
 }
@@ -810,7 +900,19 @@ for (const cx2 of [-128, 180]) {
     const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 220), railMat);
     rail.position.set(133 + rz, 0.08, 0); scene.add(rail);
   }
-  for (let z = -108; z <= 108; z += 6) addBox(3.4, 0.08, 1.2, 133, 0.05, z, 0x4a3524);
+  // Instanced rail ties: 37 -> 1 draw call (same pattern as the reeds).
+  {
+    const tieMesh = new THREE.InstancedMesh(_unitBoxGeo, sharedStdMat({ color: 0x4a3524, roughness: 1, metalness: 0 }), 37);
+    tieMesh.frustumCulled = false;
+    const d = new THREE.Object3D();
+    let ti = 0;
+    for (let z = -108; z <= 108; z += 6) {
+      d.position.set(133, 0.05, z); d.rotation.set(0, 0, 0); d.scale.set(3.4, 0.08, 1.2); d.updateMatrix();
+      tieMesh.setMatrixAt(ti++, d.matrix);
+    }
+    tieMesh.instanceMatrix.needsUpdate = true;
+    scene.add(tieMesh);
+  }
 }
 { // HOLLOW WOODS — walkable forest, north-west: x -215..-135, z -105..-50.
   // Trees are spaced ~7-8 m apart on a jittered grid so the player can walk
@@ -853,14 +955,15 @@ for (const cx2 of [-128, 180]) {
   }
   // Winding dirt paths through the forest (flat planes, rotated in plan view)
   function dirtPath(x, z, w, d, rotZ) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: 0x3a2e20, roughness: 1 }));
+    const m = new THREE.Mesh(sharedPlaneGeo(w, d), sharedStdMat({ color: 0x3a2e20, roughness: 1 }));
     m.rotation.x = -Math.PI / 2; m.rotation.z = rotZ; m.position.set(x, 0.04, z); scene.add(m);
   }
   dirtPath(-175, -77, 78, 2.6, 0.12); dirtPath(-195, -88, 30, 2.4, -0.5);
   dirtPath(-155, -66, 30, 2.4, 0.6); dirtPath(-175, -95, 40, 2.4, 0.05);
   // Clearings, fallen logs, stumps, bushes, mushrooms, rocks
+  const clearGeo = new THREE.CircleGeometry(6, 20);
   for (const [cx, cz] of [[-175, -77], [-195, -65]]) {
-    const cl = new THREE.Mesh(new THREE.CircleGeometry(6, 20), new THREE.MeshStandardMaterial({ color: 0x1a2e14, roughness: 1 }));
+    const cl = new THREE.Mesh(clearGeo, sharedStdMat({ color: 0x1a2e14, roughness: 1 }));
     cl.rotation.x = -Math.PI / 2; cl.position.set(cx, 0.05, cz); scene.add(cl);
   }
   const logGeo = new THREE.CylinderGeometry(0.35, 0.4, 4, 10);
@@ -1045,11 +1148,12 @@ const lamps = [];
 });
 const sharedLeafMat = new THREE.MeshStandardMaterial({ color: 0x16240f, roughness: 1 });
 const sharedLeaf2Mat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
+const streetTrunkMat = sharedStdMat({ color: 0x14100c, roughness: 1 });
 for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62, -12]]) {
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 3.4, 7), new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 }));
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 3.4, 7), streetTrunkMat);
   trunk.position.set(x, 1.7, z); scene.add(trunk);
   for (let i = 0; i < 2; i++) {
-    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.08, 1.8, 6), new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 }));
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.08, 1.8, 6), streetTrunkMat);
     br.position.set(x + rand(-0.8, 0.8), 3.2 + i * 0.7, z + rand(-0.8, 0.8));
     br.rotation.z = rand(-0.9, 0.9); br.rotation.x = rand(-0.9, 0.9);
     scene.add(br);
@@ -1060,7 +1164,7 @@ for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62
   leaf2.position.set(x + 0.6, 3.6, z + 0.4); scene.add(leaf2);
 }
 for (let i = 0; i < 7; i++) {
-  const stain = new THREE.Mesh(new THREE.CircleGeometry(rand(0.5, 1.1), 10), new THREE.MeshStandardMaterial({ color: 0x2a0505, roughness: 1 }));
+  const stain = new THREE.Mesh(new THREE.CircleGeometry(rand(0.5, 1.1), 10), sharedStdMat({ color: 0x2a0505, roughness: 1 }));
   stain.rotation.x = -Math.PI / 2; stain.rotation.z = Math.random() * Math.PI;
   stain.position.set(rand(-55, 55), 0.06, rand(-4, 4));
   scene.add(stain);
@@ -1373,6 +1477,10 @@ function spawnDirector(dt) {
 
 // ============ pickups ============
 const pickups = [];
+// One shared pickup-glow texture + material (was a fresh canvas texture and
+// SpriteMaterial per pickup — 7 identical pairs). The glow is never mutated
+// (pickups hide via group visibility), so sharing is safe.
+const pickupGlowTex = glowTexture('rgba(140,255,170,0.85)', 'rgba(60,255,120,0)');
 function addPickup(kind, x, z) {
   const g = new THREE.Group();
   let label = '';
@@ -1423,7 +1531,7 @@ function addPickup(kind, x, z) {
     const b = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.7 }));
     g.add(b); label = 'FOOD';
   }
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(140,255,170,0.85)', 'rgba(60,255,120,0)'), transparent: true, opacity: 0.6, depthWrite: false }));
+  const glow = new THREE.Sprite(sharedSpriteMat({ map: pickupGlowTex, transparent: true, opacity: 0.6, depthWrite: false }));
   glow.scale.set(1.4, 1.4, 1); g.add(glow);
   const lab = labelSprite(label, '#eaffea'); lab.position.y = 0.55; g.add(lab);
   // DH4: tall glowing beacon beam on every weapon pickup, so it is visible

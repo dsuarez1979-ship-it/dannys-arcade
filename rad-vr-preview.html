@@ -227,12 +227,19 @@ renderer.xr.setFoveation(0);   // valve L0: no foveation at boot
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-// NO real-time shadow maps (Bible §2: none on new work). Rad's 1024^2 sun
-// shadows were its biggest perf risk: a full extra depth pass of ~70 casters
-// plus PCFSoft sampling across the road ribbon. Grounding now comes from
-// instanced blob shadows under cars and roadside props (see below).
-// Trade-off recorded in the build notes; to restore, re-enable shadowMap
-// here and the castShadow / receiveShadow flags that were removed.
+// Real-time sun shadows: HYBRID (Nov 15 shadow revision). The prototype first
+// removed them outright; Danny ordered the removal reviewed, and the evidence
+// supports restoring them selectively. The instancing work already cut the
+// depth pass from live's 72 individual casters to 7-8 instanced draw calls
+// (3 car-body InstancedMeshes + pylon/palm/pine IMs + 2 overpasses), and
+// r160 renders the shadow map ONCE per frame even in stereo — verified against
+// the three.module.js source (shadowMap.render runs in WebGLRenderer.render,
+// before the per-eye ArrayCamera loop). Same 1024^2 PCFSoft quality as live.
+// Blob shadows stay as contact darkening + the only grounding for objects
+// outside the +/-55 m shadow box. Full investigation:
+// rad-shadow-revision-build-notes-2026-11-15.md.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -253,6 +260,18 @@ const hemiLight = new THREE.HemisphereLight(0xffc38a, 0x2a1544, 0.55);
 scene.add(hemiLight);
 const sunLight = new THREE.DirectionalLight(0xff9a5c, 1.35);
 sunLight.position.set(-60, 120, -180);
+// Sun shadow config (live values, restored verbatim): 1024^2 PCFSoft map,
+// +/-55 m box around the player, near 10 / far 320, bias -0.0005. The shadow
+// camera's projection is re-derived every shadow render by three.js (r160),
+// so no manual updateProjectionMatrix call is needed. The light position is
+// re-set every frame from the per-TOD sun offset (see tick); the target stays
+// at the origin, where the player is.
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(1024, 1024);
+sunLight.shadow.camera.left = -55; sunLight.shadow.camera.right = 55;
+sunLight.shadow.camera.top = 55; sunLight.shadow.camera.bottom = -55;
+sunLight.shadow.camera.near = 10; sunLight.shadow.camera.far = 320;
+sunLight.shadow.bias = -0.0005;
 scene.add(sunLight);
 scene.add(sunLight.target);
 
@@ -530,6 +549,7 @@ const road = new THREE.Mesh(roadGeo, new THREE.MeshStandardMaterial({
   roughness: 0.92, metalness: 0.0, envMapIntensity: 0.25, side: THREE.DoubleSide
 }));
 road.frustumCulled = false;
+road.receiveShadow = true;   // hybrid shadows: road is the main receiver
 scene.add(road);
 
 // Road markings in their OWN mesh with an unlit material. Previously the marking
@@ -597,6 +617,7 @@ const median = new THREE.Mesh(medGeo, new THREE.MeshStandardMaterial({
   vertexColors: true, roughness: 0.95, metalness: 0.0, envMapIntensity: 0.25, side: THREE.DoubleSide
 }));
 median.frustumCulled = false;
+median.receiveShadow = true;   // hybrid shadows: median is the second receiver
 scene.add(median);
 
 // Steel guardrails on both outer edges: continuous W-beam bands following the road
@@ -780,6 +801,7 @@ const PYLON_N = 24;
 const pylonIM = new THREE.InstancedMesh(pylonGeo, pylonMat, PYLON_N);
 pylonIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 pylonIM.frustumCulled = false;
+pylonIM.castShadow = true;   // hybrid shadows: pylons are long-shadow casters
 scene.add(pylonIM);
 // Shared billboard glow quads: ONE InstancedMesh replaces every glow sprite
 // (24 pylon heads + 24 car head/tail glows = 48 sprites -> 1 draw call).
@@ -816,6 +838,7 @@ const PALM_N = 20;
 const palmIM = new THREE.InstancedMesh(palmGeo, palmMat, PALM_N);
 palmIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 palmIM.frustumCulled = false;
+palmIM.castShadow = true;   // hybrid shadows
 scene.add(palmIM);
 for (let i = 0; i < PALM_N; i++) palmIM.setMatrixAt(i, ZERO_MAT);
 
@@ -831,6 +854,7 @@ const PINE_N = 16;
 const pineIM = new THREE.InstancedMesh(pineGeo, pineMat, PINE_N);
 pineIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 pineIM.frustumCulled = false;
+pineIM.castShadow = true;   // hybrid shadows
 scene.add(pineIM);
 for (let i = 0; i < PINE_N; i++) pineIM.setMatrixAt(i, ZERO_MAT);
 
@@ -936,9 +960,12 @@ postIM.frustumCulled = false;
 scene.add(postIM);
 for (let i = 0; i < POST_N; i++) postIM.setMatrixAt(i, ZERO_MAT);
 
-// Blob shadows for roadside props (the real-time sun shadows are gone — see
-// renderer setup). One InstancedMesh, fixed slots: pylons 0-23, palms 24-43,
-// pines 44-59. A hidden prop gets a zero-scale matrix.
+// Blob shadows for roadside props: contact darkening under each prop + the
+// only grounding for props outside the real-time shadow box (+/-55 m). The
+// real-time sun shadows are restored (hybrid — see renderer setup); the blobs
+// read as ambient-occlusion contact patches, not second shadows. One
+// InstancedMesh, fixed slots: pylons 0-23, palms 24-43, pines 44-59. A hidden
+// prop gets a zero-scale matrix.
 const PROP_BLOB_CAP = 60;
 const propBlobGeo = new THREE.CircleGeometry(1, 16); propBlobGeo.rotateX(-Math.PI / 2);
 const propBlobs = new THREE.InstancedMesh(propBlobGeo,
@@ -1122,7 +1149,7 @@ const overpassMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const overpasses = [];
 for (let i = 0; i < 2; i++) {
   const o = new THREE.Mesh(overpassGeo, overpassMat);
-  o.visible = false; scene.add(o); overpasses.push(o);
+  o.visible = false; o.castShadow = true; scene.add(o); overpasses.push(o);   // hybrid shadows: the deck shadow sweeps the road as you drive under
 }
 
 function updateProps(playerX) {
@@ -1504,6 +1531,10 @@ VARIANTS.forEach(v => {
     tail: mk(pg.tail, carTailMat)
   });
 });
+// Car bodies cast real-time sun shadows (live did the same — body only, not
+// glass/trim/wheels, whose shadows fall inside the body's). 3 instanced draw
+// calls cover all 12 cars.
+carPartIM.forEach(p => { p.body.castShadow = true; });
 const tireIM = new THREE.InstancedMesh(tireGeoI, carTireMat, CAR_N * 4);
 const rimIM = new THREE.InstancedMesh(rimFaceGeoI, rimFaceMat, CAR_N * 4);
 const carBlobIM = new THREE.InstancedMesh(blobGeoI, blobMat, CAR_N);

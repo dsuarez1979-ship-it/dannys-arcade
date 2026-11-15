@@ -1708,11 +1708,16 @@ function pollInput(dt) {
       for (const src of session.inputSources) {
         const gp = src.gamepad;
         if (!gp) continue;
-        // Quest thumbstick X is axes[0] (the old axes[2] never fired on
-        // Quest — its gamepads report only 2 axes — which is part of why
-        // the sticks felt dead). Either stick steers; strongest wins.
-        if (gp.axes && gp.axes.length > 0) {
-          const ax = gp.axes[0] || 0;
+        // Thumbstick X is axes[2] — W3C WebXR Gamepads Module §3.3,
+        // "xr-standard" mapping: axes[0]/[1] are the PRIMARY TOUCHPAD
+        // (placeholder 0 on Touch controllers, which have no touchpad)
+        // and axes[2]/[3] are the PRIMARY THUMBSTICK. Reading axes[0]
+        // here made stick steering dead in VR (ax was always 0). DO NOT
+        // "fix" this back to axes[0] — see the Star Strike axis
+        // resolution notes (star-strike-axis-resolution-build-notes-2026-11-15.md).
+        // Either stick steers; strongest wins.
+        if (gp.axes && gp.axes.length > 2) {
+          const ax = gp.axes[2] || 0;
           if (Math.abs(ax) > DEAD && Math.abs(ax) > Math.abs(steer)) steer = ax;
         }
         if (gp.buttons && gp.buttons[0] && gp.buttons[0].value > 0.35) {
