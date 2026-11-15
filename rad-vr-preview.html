@@ -2,20 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <title>RAD VR — Sunset Highway Racer</title>
 <style>
+  *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#160a2e;
     font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
   canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (plain
+     align-items:center would clip the top). The ENTER VR button sits above
+     the detail paragraphs in the DOM so it is visible on load. */
   #panel {
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
     z-index:10; text-align:center; color:#fff;
   }
-  #panel .box { max-width:560px; padding:24px 20px; }
+  #panel .box { width:100%; max-width:560px; margin:auto; min-width:0; }
   #panel h1 {
-    font-size:64px; letter-spacing:6px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    font-size:clamp(36px, 9vw, 64px); letter-spacing:clamp(2px, 1vw, 6px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
     background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(255,113,206,.25);
@@ -24,12 +33,14 @@
   #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#ffeef8; }
   #panel p.small { font-size:13px; color:#e8c9e2; }
   #vrBtn {
-    margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    margin-top:20px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
     padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+    min-height:56px; width:min(100%, 340px);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  #perfNote { margin-top:10px; font-size:12px; color:#9fe8d8; line-height:1.5; min-height:18px; overflow-wrap:break-word; }
   /* Shared arcade scoreboard cell: small dark translucent rectangle, thin neon
      border, TOP-LEFT. Mirrored 1:1 by the VR camera-attached plane below. */
   #hud {
@@ -58,9 +69,27 @@
     padding:9px 16px; margin:0 4px;
   }
   .todOpt.sel { background:linear-gradient(92deg,#27e8ff,#2bff88); color:#06121f; border-color:transparent; }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+    #perfNote { margin-top:6px; font-size:11px; }
+    #todRow { margin:8px 0 0; }
+  }
+  @media (max-width:520px) {
+    #hudL1 { font-size:17px; } #hudL2 { font-size:12px; } #hudL3 { font-size:11px; }
+  }
 </style>
 <script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
 </script>
 </head>
 <body>
@@ -70,6 +99,9 @@
     <h1>RAD VR</h1>
     <div class="sub">Sunset Highway Racer</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+    <div id="perfNote"></div>
     <p><b>Thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> = gas &nbsp;·&nbsp; <b>Left trigger</b> = brake</p>
     <p class="small">Two-way highway: cross the median to face oncoming traffic — wrong-way near misses score double and build a bonus.</p>
     <p class="small">No headset handy? Desktop preview works too — arrow keys / WASD drive, M mutes.</p>
@@ -84,8 +116,6 @@
     <p class="small">In game: press <b>A</b> on the right controller (or <b>T</b> on desktop) to cycle Day → Sunset → Night.</p>
     <p class="small">In VR: <b>B</b> pauses (menu: mute · comfort vignette · restart) · <b>Y</b> mutes. Desktop: <b>P</b> pauses, <b>M</b> mutes.</p>
     <p class="small"><button class="todOpt" id="vigBtn">◐ COMFORT VIGNETTE: OFF</button></p>
-    <button id="vrBtn">ENTER VR</button>
-    <div id="status"></div>
   </div>
 </div>
 
@@ -95,6 +125,7 @@
 
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';   // Round 2: licensed Kenney car models (progressive enhancement; the game plays fully on procedural cars if the loads fail)
 
 // ============================== helpers ==============================
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -205,6 +236,80 @@ function pulseHaptics(hand, strength, ms) {
   }
 }
 
+// ============================== performance capture (V2.0, local only) ==============================
+// Automatic frame-time + valve-state capture during play, stored LOCALLY on
+// the device (localStorage) ONLY — never transmitted anywhere, no personal
+// data of any kind. Only what the browser can actually measure (frame times
+// + valve state); NO GPU-level claims. The last session's summary shows on
+// the launch menu so Danny never has to copy numbers by hand.
+const PERF_LOG_KEY = GAME_ID + ':perf-log';   // 'rad-vr:perf-log'
+const PERF_MAX_SESSIONS = 5;                  // bounded: keep the last 5 sessions
+const PERF_SAMPLE_MS = 1000;                  // sample about once per second during active play
+const PERF_SAVE_SEC = 60;                     // re-save the running summary every 60 s (crash-safe)
+const PERF_MAX_SAMPLES = 7200;                // in-memory cap: 2 h of 1/s samples
+const perfSessionStartedAt = new Date().toISOString();
+let perfSamples = [];      // frame-time EMA samples (ms), this session only — summaries are stored, not raw samples
+let perfPlaySec = 0;       // active-play seconds (menu/pause time excluded)
+let perfValveSec = [0, 0, 0];
+let perfSawVR = false;
+let perfLastSampleMs = 0, perfLastSaveSec = 0;
+function loadPerfLog() {
+  try {
+    const raw = lsGet(PERF_LOG_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function summarizePerf() {
+  const vals = perfSamples.slice().sort((a, b) => a - b);
+  const n = vals.length;
+  const q = (p) => n ? vals[Math.min(n - 1, Math.max(0, Math.ceil(p * n) - 1))] : null;
+  return {
+    v: 1, startedAt: perfSessionStartedAt,
+    playSec: Math.round(perfPlaySec),
+    samples: n,
+    emaMin: n ? Math.round(vals[0] * 10) / 10 : null,
+    emaMedian: n ? Math.round(q(0.5) * 10) / 10 : null,
+    emaP95: n ? Math.round(q(0.95) * 10) / 10 : null,
+    valveSec: perfValveSec.map(s => Math.round(s * 10) / 10),
+    vr: perfSawVR
+  };
+}
+function savePerfLog() {
+  try {
+    const log = loadPerfLog();
+    const s = summarizePerf();
+    const i = log.findIndex(e => e && e.startedAt === perfSessionStartedAt);
+    if (i >= 0) log[i] = s; else log.push(s);
+    while (log.length > PERF_MAX_SESSIONS) log.shift();
+    lsSet(PERF_LOG_KEY, JSON.stringify(log));
+  } catch (e) { /* storage unavailable: the game still plays */ }
+}
+function fmtPlaySec(sec) {
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return m > 0 ? m + 'm ' + String(s).padStart(2, '0') + 's' : s + 's';
+}
+function refreshPerfNote() {
+  const el = document.getElementById('perfNote');
+  if (!el) return;
+  const log = loadPerfLog();
+  const last = log.length ? log[log.length - 1] : null;
+  let line = 'Performance: no sessions logged yet.';
+  if (last && last.samples) {
+    const tot = last.valveSec[0] + last.valveSec[1] + last.valveSec[2];
+    const pct = (v) => tot > 0 ? Math.round(v / tot * 100) : 0;
+    line = 'Last session: ' + fmtPlaySec(last.playSec) + (last.vr ? ' · VR' : ' · desktop') +
+      ' · frame median ' + last.emaMedian + ' ms · p95 ' + last.emaP95 + ' ms' +
+      ' · valve L0 ' + pct(last.valveSec[0]) + '% / L1 ' + pct(last.valveSec[1]) + '% / L2 ' + pct(last.valveSec[2]) + '%';
+  } else if (last) {
+    line = 'Last session: ' + fmtPlaySec(last.playSec) + ' · too short to sample.';
+  }
+  el.textContent = line + ' Session performance is logged locally on this device only (' + PERF_LOG_KEY + ') — never sent anywhere.';
+}
+window.addEventListener('pagehide', savePerfLog);
+window.addEventListener('beforeunload', savePerfLog);
+refreshPerfNote();   // show the previous session's summary on the menu at boot
+
 // Scratch objects for per-frame instanced-matrix math (zero allocation).
 // camQuat holds the camera's WORLD quaternion each frame (billboard quads).
 const _m4a = new THREE.Matrix4(), _m4b = new THREE.Matrix4(), _m4c = new THREE.Matrix4(),
@@ -314,7 +419,7 @@ scene.add(sunLight.target);
 }
 
 // ============================== environment (sky, sun, mountains) ==============================
-let skyGeoRef, sunDiscRef, sunGlowRef, starsRef, mMatRef, mMat2Ref, sunFaceTexRef;
+let skyGeoRef, sunDiscRef, sunGlowRef, starsRef, mMatRef, mMat2Ref, sunFaceTexRef, cloudMatRef;
 const envGroup = new THREE.Group();
 scene.add(envGroup);
 {
@@ -433,6 +538,31 @@ scene.add(envGroup);
     });
     envGroup.add(new THREE.Mesh(mergeParts(parts), par ? mMat : mMat2));
   });
+  // High clouds: soft painted billboards (one merged mesh, 1 draw call).
+  // Static in envGroup; tinted per TOD by setTimeOfDay (cloudMatRef).
+  const cloudCv = document.createElement('canvas'); cloudCv.width = 256; cloudCv.height = 128;
+  const cg = cloudCv.getContext('2d');
+  [[64, 80, 55], [120, 62, 70], [180, 78, 60], [150, 95, 45], [95, 100, 40]].forEach(b => {
+    const gr = cg.createRadialGradient(b[0], b[1], 4, b[0], b[1], b[2]);
+    gr.addColorStop(0, 'rgba(255,255,255,0.85)');
+    gr.addColorStop(0.6, 'rgba(255,255,255,0.35)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    cg.fillStyle = gr;
+    cg.beginPath(); cg.arc(b[0], b[1], b[2], 0, Math.PI * 2); cg.fill();
+  });
+  const cloudTex = new THREE.CanvasTexture(cloudCv);
+  cloudTex.colorSpace = THREE.SRGBColorSpace;
+  const cloudMat = new THREE.MeshBasicMaterial({ map: cloudTex, transparent: true, opacity: 0.5,
+    depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide });
+  const cloudParts = [];
+  [[-600, 320, -1200, 420, 90], [200, 380, -1300, 520, 110], [900, 300, -1100, 380, 80],
+   [-1100, 260, -900, 340, 70], [500, 240, -700, 300, 60], [-200, 420, -1400, 600, 120]].forEach(c => {
+    cloudParts.push({ geo: new THREE.PlaneGeometry(1, 1), matrix: m4(c[0], c[1], c[2], 0, 0, 0, c[3], c[4], 1), color: WHITE });
+  });
+  const clouds = new THREE.Mesh(mergeParts(cloudParts), cloudMat);
+  clouds.frustumCulled = false;
+  envGroup.add(clouds);
+  cloudMatRef = cloudMat;
 }
 
 // ============================== track generation (segments) ==============================
@@ -500,7 +630,11 @@ for (let s = 0; s < DRAW; s++) {
 }
 // Realistic asphalt canvas texture: dark gray noise, tyre-worn tracks, cracks,
 // repair patches. Paint lives in geometry markings, not the texture.
-// The far-right column (u ~0.99) is a solid paint patch the marking quads sample.
+// Cross-section UVs (CROSS_U) put the ROAD BAND at u 0.06..0.94 so a real
+// photo texture (Poly Haven asphalt_02, loaded progressively) tiles ~3 m
+// across it; the ground bands sample thin edge slivers (vertex colors dominate
+// there). The canvas below is drawn for the same layout and stays as the
+// fallback when the photo texture cannot load.
 function makeAsphaltTexture() {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
   const g = cv.getContext('2d');
@@ -510,18 +644,17 @@ function makeAsphaltTexture() {
     g.fillStyle = 'rgba(' + v + ',' + v + ',' + (v + 12) + ',' + (0.05 + Math.random() * 0.10) + ')';
     g.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
   }
-  // Tyre-polished dark tracks inside the road band (u 0.38..0.62 -> x 195..317)
+  // Tyre-polished dark tracks at the 8 wheel lines (lanes at x ±2.4/±6.0 m,
+  // wheels ±0.8 m off lane centre; road band u 0.06..0.94 maps x -7.8..7.8 m)
   g.fillStyle = 'rgba(12,12,18,0.20)';
-  [206, 234, 266, 296].forEach(x => { g.fillRect(x - 6, 0, 12, 512); });
+  [60, 106, 164, 210, 302, 348, 406, 452].forEach(x => { g.fillRect(x - 6, 0, 12, 512); });
   // (No painted lines in the texture — real markings are geometry quads.)
-  // Occasional cracks / tar seams across the segment
+  // Occasional cracks / tar seams across the road band
   g.fillStyle = 'rgba(10,10,14,0.35)';
-  for (let i = 0; i < 4; i++) g.fillRect(195, Math.random() * 512, 122, 2);
-  // Dark repair patches
+  for (let i = 0; i < 4; i++) g.fillRect(31, Math.random() * 512, 450, 2);
+  // Dark repair patches inside the road band
   g.fillStyle = 'rgba(20,20,28,0.45)';
-  g.fillRect(200, 60, 60, 90); g.fillRect(260, 330, 45, 70);
-  // Solid paint patch for the dash quads
-  g.fillStyle = '#e9e9e4'; g.fillRect(505, 0, 7, 512);
+  g.fillRect(60, 60, 80, 90); g.fillRect(330, 330, 70, 70);
   const tex = new THREE.CanvasTexture(cv);
   tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -530,7 +663,7 @@ function makeAsphaltTexture() {
 }
 const roadNor = new Float32Array(DRAW * VERTS_PER_SEG * 3);
 const roadUV = new Float32Array(DRAW * VERTS_PER_SEG * 2);
-const CROSS_U = [0.30, 0.365, 0.38, 0.62, 0.635, 0.70];   // matches CROSS_X bands
+const CROSS_U = [0.0, 0.02, 0.06, 0.94, 0.98, 1.0];   // road band u 0.06..0.94 (photo texture tiles ~3 m); ground samples edge slivers
 for (let s = 0; s < DRAW; s++) {
   const b = s * VERTS_PER_SEG;
   for (let p = 0; p < 6; p++) {
@@ -544,21 +677,26 @@ roadGeo.setAttribute('color', new THREE.BufferAttribute(roadCol, 3).setUsage(THR
 roadGeo.setAttribute('normal', new THREE.BufferAttribute(roadNor, 3).setUsage(THREE.DynamicDrawUsage));
 roadGeo.setAttribute('uv', new THREE.BufferAttribute(roadUV, 2));
 roadGeo.setIndex(roadIdx);
+const roadCanvasTex = makeAsphaltTexture();
 const road = new THREE.Mesh(roadGeo, new THREE.MeshStandardMaterial({
-  map: makeAsphaltTexture(), vertexColors: true,
+  map: roadCanvasTex, vertexColors: true,
   roughness: 0.92, metalness: 0.0, envMapIntensity: 0.25, side: THREE.DoubleSide
 }));
 road.frustumCulled = false;
 road.receiveShadow = true;   // hybrid shadows: road is the main receiver
 scene.add(road);
 
-// Road markings in their OWN mesh with an unlit material. Previously the marking
-// quads shared the road's MeshStandardMaterial but their normals were never set,
-// so the lit shader shaded them black — the white lines were invisible. Unlit
-// vertex colors read as white/yellow in any light, day or night.
+// Road markings in their OWN mesh. Previously unlit (MeshBasicMaterial): the
+// marking quads shared the road's lit material but their normals were never
+// set, so the lit shader shaded them black. The fix is real normals (set per
+// segment in updateRoad, matching the road slope) + a lit Lambert material, so
+// lane lines now RECEIVE shadows like the asphalt instead of glowing through
+// them (the bright-lines-inside-shadows defect from the shadow revision).
+// Lambert + hemisphere light keeps them readable at night.
 const MARK_VERTS = 24;   // 6 marking quads x 4 verts
 const markPos = new Float32Array(DRAW * MARK_VERTS * 3);
 const markCol = new Float32Array(DRAW * MARK_VERTS * 3);
+const markNor = new Float32Array(DRAW * MARK_VERTS * 3);
 const markIdx = [];
 for (let s = 0; s < DRAW; s++) {
   const b = s * MARK_VERTS;
@@ -570,9 +708,11 @@ for (let s = 0; s < DRAW; s++) {
 const markGeo = new THREE.BufferGeometry();
 markGeo.setAttribute('position', new THREE.BufferAttribute(markPos, 3).setUsage(THREE.DynamicDrawUsage));
 markGeo.setAttribute('color', new THREE.BufferAttribute(markCol, 3).setUsage(THREE.DynamicDrawUsage));
+markGeo.setAttribute('normal', new THREE.BufferAttribute(markNor, 3).setUsage(THREE.DynamicDrawUsage));
 markGeo.setIndex(markIdx);
-const markings = new THREE.Mesh(markGeo, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide }));
+const markings = new THREE.Mesh(markGeo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 markings.frustumCulled = false;
+markings.receiveShadow = true;   // hybrid shadows: lane lines now shadow with the road
 scene.add(markings);
 
 
@@ -620,8 +760,9 @@ median.frustumCulled = false;
 median.receiveShadow = true;   // hybrid shadows: median is the second receiver
 scene.add(median);
 
-// Steel guardrails on both outer edges: continuous W-beam bands following the road
-const GUARD_VERTS = 8;   // 2 sides x 4 verts (vertical band)
+// Steel guardrails on both outer edges: continuous W-beam bands following the road,
+// plus a support post at each segment's near edge (same mesh, no new draw call)
+const GUARD_VERTS = 16;   // 2 sides x (4 band verts + 4 post verts)
 const GUARD_X = ROAD_HALF + RUMBLE_W + 0.25;
 const guardPos = new Float32Array(DRAW * GUARD_VERTS * 3);
 const guardCol = new Float32Array(DRAW * GUARD_VERTS * 3);
@@ -629,8 +770,9 @@ const guardIdx = [];
 for (let s = 0; s < DRAW; s++) {
   const b = s * GUARD_VERTS;
   for (let sd = 0; sd < 2; sd++) {
-    const gb2 = b + sd * 4;
-    guardIdx.push(gb2, gb2 + 2, gb2 + 1, gb2 + 1, gb2 + 2, gb2 + 3);
+    const gb2 = b + sd * 8;
+    guardIdx.push(gb2, gb2 + 2, gb2 + 1, gb2 + 1, gb2 + 2, gb2 + 3);           // band
+    guardIdx.push(gb2 + 4, gb2 + 6, gb2 + 5, gb2 + 5, gb2 + 6, gb2 + 7);       // post
   }
 }
 const guardGeo = new THREE.BufferGeometry();
@@ -641,6 +783,7 @@ const guardrail = new THREE.Mesh(guardGeo, new THREE.MeshStandardMaterial({ vert
 guardrail.frustumCulled = false;
 scene.add(guardrail);
 const COL_GUARD_A = new THREE.Color(0xb9c2cc), COL_GUARD_B = new THREE.Color(0x9aa4ae);
+const COL_GUARD_POST = new THREE.Color(0x6a7076);   // support posts: darker galvanised steel
 const COL_MED_A = new THREE.Color(0x8f8c99), COL_MED_B = new THREE.Color(0x807d8a);
 
 // Per-slot road-centre poses (near edge), recomputed every frame; traffic reuses them
@@ -675,9 +818,11 @@ function updateRoad(position, playerX) {
       setCol(roadCol, b + 6 + p, stripCols[p]);
     }
     // Real US markings: solid lines always, dashed lines on even segments only.
-    // Written to the separate UNLIT markings mesh (0.28 wide, +0.06 above the
-    // surface) so white reads as white in any light and never z-fights.
+    // Written to the separate LIT markings mesh (0.28 wide, +0.06 above the
+    // surface) with the road-slope normal, so the paint receives shadows.
     const showDash = (seg.index % 2 === 0);
+    const dyS = far.y - near.y, nLen = Math.sqrt(SEG_LEN * SEG_LEN + dyS * dyS);
+    const nY = SEG_LEN / nLen, nZ = dyS / nLen;
     for (let d = 0; d < 6; d++) {
       const db = s * MARK_VERTS + d * 4;
       const mk = MARKINGS[d];
@@ -689,22 +834,28 @@ function updateRoad(position, playerX) {
       } else {
         for (let k = 0; k < 4; k++) setVert(markPos, db + k, near.x - playerX, near.y - 1, near.z);
       }
-      for (let k = 0; k < 4; k++) setCol(markCol, db + k, mk.col);
+      for (let k = 0; k < 4; k++) { setCol(markCol, db + k, mk.col); setNor(markNor, db + k, nY, nZ); }
     }
     // Analytic ribbon normals from the hill slope (for the PBR sheen)
-    const dyS = far.y - near.y, nLen = Math.sqrt(SEG_LEN * SEG_LEN + dyS * dyS);
-    const nY = SEG_LEN / nLen, nZ = dyS / nLen;
     for (let p = 0; p < 12; p++) setNor(roadNor, b + p, nY, nZ);
     // Guardrail bands on both outer edges (vertical steel strips, alternating tint)
     const gb2 = s * GUARD_VERTS;
     const grdC = seg.alt ? COL_GUARD_B : COL_GUARD_A;
     [-GUARD_X, GUARD_X].forEach((gx, si) => {
-      const vb = gb2 + si * 4;
+      const vb = gb2 + si * 8;
       setVert(guardPos, vb,     near.x + gx - playerX, near.y + 0.15, near.z);
       setVert(guardPos, vb + 1, near.x + gx - playerX, near.y + 0.78, near.z);
       setVert(guardPos, vb + 2, far.x  + gx - playerX, far.y  + 0.15, far.z);
       setVert(guardPos, vb + 3, far.x  + gx - playerX, far.y  + 0.78, far.z);
       for (let k = 0; k < 4; k++) setCol(guardCol, vb + k, grdC);
+      // Support post at the segment's near edge: a darker vertical strip just
+      // outside the band (real W-beam guardrails read as band + posts).
+      const px = gx + (gx > 0 ? 0.05 : -0.05);
+      setVert(guardPos, vb + 4, near.x + px - playerX, near.y, near.z);
+      setVert(guardPos, vb + 5, near.x + px - playerX, near.y + 0.78, near.z);
+      setVert(guardPos, vb + 6, near.x + px - playerX, near.y, near.z - 0.14);
+      setVert(guardPos, vb + 7, near.x + px - playerX, near.y + 0.78, near.z - 0.14);
+      for (let k = 0; k < 4; k++) setCol(guardCol, vb + 4 + k, COL_GUARD_POST);
     });
     // Low concrete median strip (slightly raised, alternating tint)
     const mb = s * MED_VERTS;
@@ -720,6 +871,7 @@ function updateRoad(position, playerX) {
   roadGeo.attributes.normal.needsUpdate = true;
   markGeo.attributes.position.needsUpdate = true;
   markGeo.attributes.color.needsUpdate = true;
+  markGeo.attributes.normal.needsUpdate = true;
   medGeo.attributes.position.needsUpdate = true;
   medGeo.attributes.color.needsUpdate = true;
   guardGeo.attributes.position.needsUpdate = true;
@@ -826,28 +978,90 @@ scene.add(glowQuads);
 for (let i = 0; i < GLOW_CAP; i++) glowQuads.setMatrixAt(i, ZERO_MAT);
 glowQuads.instanceColor.needsUpdate = true;
 
-const palmGeo = mergeParts([
-  { geo: new THREE.CylinderGeometry(0.09, 0.17, 3.8, 5), matrix: m4(0.25, 1.9, 0, 0, 0, 0.13, 1, 1, 1), color: new THREE.Color(0x3a2340) },
-  { geo: new THREE.ConeGeometry(0.10, 2.7, 4), matrix: m4(1.15, 4.15, 0, 0, 0, 1.15, 1, 1, 1),  color: new THREE.Color(0x1e4d3a) },
-  { geo: new THREE.ConeGeometry(0.10, 2.7, 4), matrix: m4(-0.75, 4.15, 0.3, 0.5, 0, -1.15, 1, 1, 1), color: new THREE.Color(0x1e4d3a) },
-  { geo: new THREE.ConeGeometry(0.10, 2.7, 4), matrix: m4(0.45, 4.15, -1.0, -1.0, 0, 0.4, 1, 1, 1),  color: new THREE.Color(0x265c40) },
-  { geo: new THREE.ConeGeometry(0.10, 2.7, 4), matrix: m4(0.45, 4.15, 1.05, 1.0, 0, 0.35, 1, 1, 1),  color: new THREE.Color(0x265c40) }
+// Wet-street reflections (visual references 01/04): elongated additive streaks
+// on the road under each streetlight head, stretching toward the driver — the
+// cheap read of a rain-slick road. Night only (faint at sunset); a valve
+// registry item (hidden at L2 with the other glows). 1 draw call.
+const wetStreakMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, opacity: 0,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+const wetStreakGeo = new THREE.PlaneGeometry(1, 1); wetStreakGeo.rotateX(-Math.PI / 2);
+const wetStreakIM = new THREE.InstancedMesh(wetStreakGeo, wetStreakMat, PYLON_N);
+wetStreakIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+wetStreakIM.frustumCulled = false;
+wetStreakIM.visible = false;
+scene.add(wetStreakIM);
+let wetStreaks = 0.25;   // wet factor for the current TOD (day 0 / sunset 0.25 / night 1) — set by setTimeOfDay
+[0x27e8ff, 0xff3df0, 0xffb35c].forEach((c, k) => {
+  const col = new THREE.Color(c).multiplyScalar(0.6);
+  for (let i = k; i < PYLON_N; i += 3) wetStreakIM.setColorAt(i, col);
+});
+for (let i = 0; i < PYLON_N; i++) wetStreakIM.setMatrixAt(i, ZERO_MAT);
+wetStreakIM.instanceColor.needsUpdate = true;
+
+// Palm frond texture: a feathery frond silhouette (central rib + leaflets),
+// alpha-tested so the crowns read as real palm leaves instead of cones.
+const frondTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, 128, 256);
+  g.strokeStyle = '#2a7a4a'; g.lineWidth = 5;
+  g.beginPath(); g.moveTo(64, 250); g.lineTo(64, 8); g.stroke();   // rib (base at canvas bottom = v 0)
+  g.lineWidth = 4;
+  for (let i = 0; i < 14; i++) {
+    const y = 20 + i * 16, len = 20 + 36 * Math.sin(Math.PI * i / 13);   // longest mid-frond
+    g.strokeStyle = i % 2 ? '#2f8a52' : '#276e44';
+    g.beginPath(); g.moveTo(64, y); g.lineTo(64 - len, y + 22); g.stroke();
+    g.beginPath(); g.moveTo(64, y); g.lineTo(64 + len, y + 22); g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+})();
+// One curved frond: a tapered plane, base at the origin, tip drooping down.
+function frondGeometry() {
+  const geo = new THREE.PlaneGeometry(0.62, 3.0, 1, 6);
+  geo.translate(0, 1.5, 0);   // base at the origin, tip at y=3
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i), t = y / 3;   // 0 at base, 1 at tip
+    pos.setX(i, pos.getX(i) * (1 - t * 0.72));  // taper toward the tip
+    pos.setZ(i, -1.15 * t * t);                 // droop
+    pos.setY(i, y - 0.55 * t * t);              // tip falls
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+const palmTrunkGeo = mergeParts([
+  { geo: new THREE.CylinderGeometry(0.09, 0.17, 3.8, 5), matrix: m4(0.25, 1.9, 0, 0, 0, 0.13, 1, 1, 1), color: new THREE.Color(0x3a2340) }
 ]);
+// Six fronds radiating from the crown: tilt out (Rx) THEN yaw (Ry) — the
+// matrix is Ry * Rx, built explicitly because m4's XYZ Euler cannot express it.
+const palmFrondGeo = mergeParts([0, 1, 2, 3, 4, 5].map(k => {
+  const a = k / 6 * Math.PI * 2 + 0.3, tilt = -(0.85 + (k % 3) * 0.18);
+  const fm = new THREE.Matrix4().makeRotationY(a)
+    .multiply(new THREE.Matrix4().makeRotationX(tilt)).setPosition(0.45, 3.85, 0);
+  return { geo: frondGeometry(), matrix: fm, color: new THREE.Color(0xffffff) };
+}));
 const palmMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const palmFrondMat = new THREE.MeshLambertMaterial({ map: frondTex, alphaTest: 0.4, side: THREE.DoubleSide });
 const PALM_N = 20;
-const palmIM = new THREE.InstancedMesh(palmGeo, palmMat, PALM_N);
+const palmIM = new THREE.InstancedMesh(palmTrunkGeo, palmMat, PALM_N);
 palmIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 palmIM.frustumCulled = false;
 palmIM.castShadow = true;   // hybrid shadows
 scene.add(palmIM);
-for (let i = 0; i < PALM_N; i++) palmIM.setMatrixAt(i, ZERO_MAT);
+const palmFrondIM = new THREE.InstancedMesh(palmFrondGeo, palmFrondMat, PALM_N);
+palmFrondIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+palmFrondIM.frustumCulled = false;
+palmFrondIM.castShadow = true;   // hybrid shadows: frond-shaped shadows (depth respects alphaTest)
+scene.add(palmFrondIM);
+for (let i = 0; i < PALM_N; i++) { palmIM.setMatrixAt(i, ZERO_MAT); palmFrondIM.setMatrixAt(i, ZERO_MAT); }
 
-// Pine trees: trunk + three stacked cones, more shape than a palm silhouette
+// Pine trees: trunk + three stacked cones, deeper less-saturated greens
 const pineGeo = mergeParts([
   { geo: new THREE.CylinderGeometry(0.12, 0.2, 1.4, 6), matrix: m4(0, 0.7, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x3a2340) },
-  { geo: new THREE.ConeGeometry(1.25, 1.9, 8), matrix: m4(0, 2.1, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x14532d) },
-  { geo: new THREE.ConeGeometry(0.95, 1.7, 8), matrix: m4(0, 3.2, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x1a6b3a) },
-  { geo: new THREE.ConeGeometry(0.62, 1.5, 8), matrix: m4(0, 4.2, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x22a05a) }
+  { geo: new THREE.ConeGeometry(1.25, 1.9, 8), matrix: m4(0, 2.1, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x12402a) },
+  { geo: new THREE.ConeGeometry(0.95, 1.7, 8), matrix: m4(0, 3.2, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x17552f) },
+  { geo: new THREE.ConeGeometry(0.62, 1.5, 8), matrix: m4(0, 4.2, 0, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x1e6b3a) }
 ]);
 const pineMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const PINE_N = 16;
@@ -857,6 +1071,19 @@ pineIM.frustumCulled = false;
 pineIM.castShadow = true;   // hybrid shadows
 scene.add(pineIM);
 for (let i = 0; i < PINE_N; i++) pineIM.setMatrixAt(i, ZERO_MAT);
+// Per-instance brightness jitter (deterministic by index) so no two trees match
+for (let i = 0; i < PALM_N; i++) {
+  const b = 0.88 + hash1(i * 3 + 1) * 0.24;
+  palmIM.setColorAt(i, new THREE.Color(b, b, b));
+  palmFrondIM.setColorAt(i, new THREE.Color(b, b, b));
+}
+palmIM.instanceColor.needsUpdate = true;
+palmFrondIM.instanceColor.needsUpdate = true;
+for (let i = 0; i < PINE_N; i++) {
+  const b = 0.88 + hash1(i * 7 + 2) * 0.24;
+  pineIM.setColorAt(i, new THREE.Color(b, b, b));
+}
+pineIM.instanceColor.needsUpdate = true;
 
 // Real US-style road signs (canvas textures, no external files; fictional place
 // names only). Speed limit, green highway direction/exit, yellow diamond warnings,
@@ -1023,6 +1250,12 @@ function makeBuildingTextures(facade, neon) {
         g.fillRect(9 + c * 19, 16 + r * 14, 10, 8);
       }
     }
+    // Lit ground-floor storefront band (warm shopfront glow at sunset/night;
+    // nearly dark by day). The map canvas draws the shopfronts at the bottom.
+    g.globalAlpha = Math.min(1, litRatio * 1.4);
+    g.fillStyle = '#ffb45c';
+    g.fillRect(0, H - 26, W, 18);
+    g.globalAlpha = 1;
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }
@@ -1174,6 +1407,13 @@ function updateProps(playerX) {
         _m4a.compose(_v1, camQuat, _s1);
         glowQuads.setMatrixAt(idx, _m4a);
       } else glowQuads.setMatrixAt(idx, ZERO_MAT);
+      // Wet reflection streak on the road under the head (night/sunset only)
+      if (streetlightsOn && glowsOn && wetStreaks > 0) {
+        _v1.set(px - seg.side * 1.35, pose.y + 0.07, pose.z + 3.5);
+        _s1.set(1.4, 1, 8);
+        _m4a.compose(_v1, _q1.identity(), _s1);
+        wetStreakIM.setMatrixAt(idx, _m4a);
+      } else wetStreakIM.setMatrixAt(idx, ZERO_MAT);
       _v1.set(px, pose.y + 0.02, pose.z);
       _s1.set(1.1, 1, 1.9);
       _m4a.compose(_v1, _q1.identity(), _s1);
@@ -1214,6 +1454,7 @@ function updateProps(playerX) {
       _v1.set(px, pose.y, pose.z);
       _m4a.compose(_v1, _q1, _sOne);
       palmIM.setMatrixAt(idx, _m4a);
+      palmFrondIM.setMatrixAt(idx, _m4a);   // fronds share the trunk's instance matrix
       _v1.set(px, pose.y + 0.02, pose.z);
       _s1.set(1.7, 1, 1.7);
       _m4a.compose(_v1, _q1.identity(), _s1);
@@ -1288,8 +1529,8 @@ function updateProps(playerX) {
       postIM.setMatrixAt(idx, _m4a);
     }
   }
-  for (; pi < PYLON_N; pi++) { pylonIM.setMatrixAt(pi, ZERO_MAT); glowQuads.setMatrixAt(pi, ZERO_MAT); propBlobs.setMatrixAt(pi, ZERO_MAT); }
-  for (; pa < PALM_N; pa++) { palmIM.setMatrixAt(pa, ZERO_MAT); propBlobs.setMatrixAt(24 + pa, ZERO_MAT); }
+  for (; pi < PYLON_N; pi++) { pylonIM.setMatrixAt(pi, ZERO_MAT); glowQuads.setMatrixAt(pi, ZERO_MAT); propBlobs.setMatrixAt(pi, ZERO_MAT); wetStreakIM.setMatrixAt(pi, ZERO_MAT); }
+  for (; pa < PALM_N; pa++) { palmIM.setMatrixAt(pa, ZERO_MAT); palmFrondIM.setMatrixAt(pa, ZERO_MAT); propBlobs.setMatrixAt(24 + pa, ZERO_MAT); }
   for (; pn < PINE_N; pn++) { pineIM.setMatrixAt(pn, ZERO_MAT); propBlobs.setMatrixAt(44 + pn, ZERO_MAT); }
   for (; mi < POST_N; mi++) postIM.setMatrixAt(mi, ZERO_MAT);
   for (; si < signs.length; si++) signs[si].visible = false;
@@ -1300,10 +1541,12 @@ function updateProps(playerX) {
   beaconGeo.attributes.position.needsUpdate = true;
   pylonIM.instanceMatrix.needsUpdate = true;
   palmIM.instanceMatrix.needsUpdate = true;
+  palmFrondIM.instanceMatrix.needsUpdate = true;
   pineIM.instanceMatrix.needsUpdate = true;
   postIM.instanceMatrix.needsUpdate = true;
   propBlobs.instanceMatrix.needsUpdate = true;
   glowQuads.instanceMatrix.needsUpdate = true;
+  wetStreakIM.instanceMatrix.needsUpdate = true;
   for (let v = 0; v < 3; v++) {
     bldgMeshes[v].count = bldgCount[v];
     bldgMeshes[v].instanceMatrix.needsUpdate = true;
@@ -1838,9 +2081,13 @@ function updateTraffic(dt, positionNow) {
     car.pos.copy(_v1); car.quat.copy(_q1);
     const parts = carPartIM[car.vi];
     parts.body.setMatrixAt(car.slot, _m4a);
-    parts.glass.setMatrixAt(car.slot, _m4a);
-    parts.dark.setMatrixAt(car.slot, _m4a);
-    parts.trim.setMatrixAt(car.slot, _m4a);
+    if (!kenneyCarsOn) {
+      // Procedural cars: glass canopy + dark trim + chrome trim. Kenney cars
+      // carry all of that in the body texture (hidden at activation).
+      parts.glass.setMatrixAt(car.slot, _m4a);
+      parts.dark.setMatrixAt(car.slot, _m4a);
+      parts.trim.setMatrixAt(car.slot, _m4a);
+    }
     parts.head.setMatrixAt(car.slot, _m4a);
     parts.tail.setMatrixAt(car.slot, _m4a);
     // Wheels: spin angle advances with road speed; each wheel instance is
@@ -1856,10 +2103,14 @@ function updateTraffic(dt, positionNow) {
         _s1.set(1, v.wheelR, v.wheelR);
         _m4d.scale(_s1);
         tireIM.setMatrixAt(ci * 4 + w, _m4d);
-        _m4d.copy(_m4a).multiply(_m4c).multiply(_m4b);
-        _s1.set(1, v.wheelR * 0.62, v.wheelR * 0.62);
-        _m4d.scale(_s1);
-        rimIM.setMatrixAt(ci * 4 + w, _m4d);
+        if (!kenneyCarsOn) {
+          // Procedural cars: separate textured rim faces. Kenney wheels carry
+          // their own rims (rimIM is hidden at activation).
+          _m4d.copy(_m4a).multiply(_m4c).multiply(_m4b);
+          _s1.set(1, v.wheelR * 0.62, v.wheelR * 0.62);
+          _m4d.scale(_s1);
+          rimIM.setMatrixAt(ci * 4 + w, _m4d);
+        }
         w++;
       });
     });
@@ -1927,6 +2178,170 @@ function updateTraffic(dt, positionNow) {
   glowQuads.instanceMatrix.needsUpdate = true;
 }
 
+// ============================== licensed assets (Round 2, progressive enhancement) ==============================
+// Professional models/textures replace procedural stand-ins ONLY if they load
+// successfully; every failure falls back silently to the procedural build, so
+// the game always plays. Sources + licences are recorded in
+// round-2-asset-register-rad.md. Paths are tried in order: the deployed layout
+// (assets/rad/... next to the page) first, then the workspace layout
+// (../assets/rad/... — the prototype served from its own directory).
+let kenneyCarsOn = false, asphaltOn = false;
+const ASSET_BASES = ['assets/rad/', '../assets/rad/'];
+const gltfLoader = new GLTFLoader();
+const texLoader = new THREE.TextureLoader();
+function loadGLB(rel, onLoad) {
+  const bases = ASSET_BASES.slice();
+  const tryNext = () => {
+    if (!bases.length) { onLoad(null); return; }
+    gltfLoader.load(bases.shift() + rel, onLoad, undefined, () => tryNext());
+  };
+  tryNext();
+}
+function loadTexture(rel, onLoad) {
+  const bases = ASSET_BASES.slice();
+  const tryNext = () => {
+    if (!bases.length) { onLoad(null); return; }
+    texLoader.load(bases.shift() + rel, onLoad, undefined, () => tryNext());
+  };
+  tryNext();
+}
+// Kenney car models (CC0, Car Kit 3.1 — verified by parsing the GLBs): one per
+// traffic variant + the standalone symmetric wheel. Bodies are rescaled to the
+// existing variant footprints (len/wid/roof) so collision, near-miss, lamp,
+// blob, and pool math — all driven by variant data — stays exactly valid.
+// Kenney front is +Z; the game front is -Z, so bodies rotate 180° about Y.
+const KENNEY_CARS = [
+  { file: 'kenney/sedan-sports.glb', roof: 1.10 },   // variant 0 (supercar slot)
+  { file: 'kenney/sedan.glb',       roof: 1.36 },   // variant 1 (sedan slot)
+  { file: 'kenney/suv.glb',         roof: 1.64 }    // variant 2 (SUV slot)
+];
+function kenneyBodyGeometry(gltf, vi) {
+  let body = null, spoiler = null;
+  gltf.scene.traverse(o => {
+    if (!o.isMesh) return;
+    if (o.name === 'body') body = o;
+    else if (o.name === 'spoiler') spoiler = o;
+  });
+  if (!body) return null;
+  const v = VARIANTS[vi];
+  const bg = body.geometry.clone();
+  bg.computeBoundingBox();
+  const bb = bg.boundingBox, sz = new THREE.Vector3();
+  bb.getSize(sz);
+  // Kenney bodies are centred in X/Z with their base at y=0. Scale to the
+  // variant footprint, rotate 180° about Y (Kenney front +Z -> game front
+  // -Z), rest the base at y=0.30 like the procedural bodies. Scale and the
+  // 180° Y rotation commute (diagonal scale), so one m4() composes them.
+  const mat = m4(0, 0.30, 0, 0, Math.PI, 0, v.wid / sz.x, (KENNEY_CARS[vi].roof - 0.30) / sz.y, v.len / sz.z);
+  const parts = [{ geo: bg, matrix: mat, color: WHITE_C }];
+  if (spoiler) {
+    const sg = spoiler.geometry.clone();
+    // The spoiler node is a child of the body node: bake its local offset
+    // (read from the node, not hardcoded) before the shared body transform.
+    sg.applyMatrix4(new THREE.Matrix4().makeTranslation(spoiler.position.x, spoiler.position.y, spoiler.position.z));
+    parts.push({ geo: sg, matrix: mat, color: WHITE_C });
+  }
+  return mergeParts(parts);
+}
+function kenneyWheelGeometry(gltf) {
+  let wheel = null;
+  gltf.scene.traverse(o => { if (o.isMesh) wheel = o; });
+  if (!wheel) return null;
+  const g = wheel.geometry.clone();
+  g.computeBoundingBox();
+  const bb = g.boundingBox, sz = new THREE.Vector3();
+  bb.getSize(sz);
+  // Normalise to the existing wheel system: unit radius (scaled per-instance
+  // by wheelR), 0.24 m tread width (the X instance scale is always 1).
+  // wheel-default is centred and symmetric (verified by parsing the GLB).
+  g.applyMatrix4(new THREE.Matrix4().makeScale(0.24 / sz.x, 1 / (sz.y / 2), 1 / (sz.z / 2)));
+  return g;
+}
+function activateKenneyCars(bodies, wheelGeo, colormapTex) {
+  // Shared materials from the Kenney palette texture: glossy paint for the
+  // bodies, matte rubber for the wheels. One texture, two materials.
+  const bodyMat = new THREE.MeshStandardMaterial({ map: colormapTex, roughness: 0.32, metalness: 0.25, envMapIntensity: 1.1 });
+  const wheelMat = new THREE.MeshStandardMaterial({ map: colormapTex, roughness: 0.9, metalness: 0.0 });
+  const white = new THREE.Color(0xffffff);
+  for (let vi = 0; vi < 3; vi++) {
+    const parts = carPartIM[vi];
+    parts.body.geometry.dispose();
+    parts.body.geometry = bodies[vi];
+    parts.body.material = bodyMat;
+    // Paint was per-car instanceColor; the Kenney texture carries the paint,
+    // so reset every slot to white (identity under multiplication).
+    for (let k = 0; k < CARS_PER_VARIANT; k++) parts.body.setColorAt(k, white);
+    parts.body.instanceColor.needsUpdate = true;
+    // The Kenney body carries its own glass/trim/detail in the texture:
+    // hide the procedural glass, dark-trim, and chrome-trim instances.
+    // (updateTraffic skips re-showing them once kenneyCarsOn is set.)
+    for (let k = 0; k < CARS_PER_VARIANT; k++) {
+      parts.glass.setMatrixAt(k, ZERO_MAT);
+      parts.dark.setMatrixAt(k, ZERO_MAT);
+      parts.trim.setMatrixAt(k, ZERO_MAT);
+    }
+    parts.glass.instanceMatrix.needsUpdate = true;
+    parts.dark.instanceMatrix.needsUpdate = true;
+    parts.trim.instanceMatrix.needsUpdate = true;
+  }
+  tireIM.geometry.dispose();
+  tireIM.geometry = wheelGeo;
+  tireIM.material = wheelMat;
+  rimIM.visible = false;   // the Kenney wheel carries its own rim faces
+  kenneyCarsOn = true;
+}
+function activateAsphalt(tex) {
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(5, 3.33);   // ~3 m tiles: road band is 15.6 m wide, segments are 10 m long
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  if (road.material.map === roadCanvasTex) roadCanvasTex.dispose();
+  road.material.map = tex;
+  road.material.needsUpdate = true;
+  asphaltOn = true;
+}
+function loadLicensedAssets() {
+  let done = 0;
+  const failed = [];
+  const total = 5;   // 3 car GLBs + 1 wheel GLB + 1 asphalt texture
+  const bodies = [null, null, null];
+  let wheelGeo = null, colormapTex = null;
+  const finish = () => {
+    if (done < total) return;
+    if (bodies[0] && bodies[1] && bodies[2] && wheelGeo && colormapTex) {
+      try { activateKenneyCars(bodies, wheelGeo, colormapTex); }
+      catch (e) { failed.push('kenney-activate'); }
+    } else if (!bodies[0] || !bodies[1] || !bodies[2] || !wheelGeo) failed.push('kenney-load');
+    assetLoadStatus = failed.length ? 'failed: ' + failed.join(', ') + ' (procedural fallback)' : 'ok';
+  };
+  KENNEY_CARS.forEach((kc, vi) => {
+    loadGLB(kc.file, (gltf) => {
+      done++;
+      if (gltf) {
+        try {
+          bodies[vi] = kenneyBodyGeometry(gltf, vi);
+          if (!colormapTex) gltf.scene.traverse(o => {
+            if (!colormapTex && o.isMesh && o.material && o.material.map) colormapTex = o.material.map;
+          });
+        } catch (e) { bodies[vi] = null; }
+      }
+      finish();
+    });
+  });
+  loadGLB('kenney/wheel-default.glb', (gltf) => {
+    done++;
+    if (gltf) { try { wheelGeo = kenneyWheelGeometry(gltf); } catch (e) { wheelGeo = null; } }
+    finish();
+  });
+  loadTexture('asphalt_02_diff_1k.jpg', (tex) => {
+    done++;
+    if (tex) { try { activateAsphalt(tex); } catch (e) { failed.push('asphalt-activate'); } }
+    else failed.push('asphalt-load');
+    finish();
+  });
+}
+loadLicensedAssets();
+
 // ============================== cockpit ==============================
 const cockpit = new THREE.Group();
 camera.add(cockpit);
@@ -1943,6 +2358,29 @@ camera.add(cockpit);
   grainTex.wrapS = grainTex.wrapT = THREE.RepeatWrapping;
   grainTex.repeat.set(4, 2);
   grainTex.colorSpace = THREE.SRGBColorSpace;
+  // Stitched dash-top seam (visual references 02/03): double red stitch lines
+  // along the dash brow, drawn into the grain texture's twin canvas.
+  const stitchCv = document.createElement('canvas'); stitchCv.width = 256; stitchCv.height = 64;
+  const sg = stitchCv.getContext('2d');
+  sg.fillStyle = '#1b1b21'; sg.fillRect(0, 0, 256, 64);
+  for (let i = 0; i < 500; i++) {
+    sg.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.16)';
+    sg.fillRect(Math.random() * 256, Math.random() * 64, 1.4, 1.4);
+  }
+  sg.fillStyle = '#c8443c';
+  for (let x = 4; x < 256; x += 10) { sg.fillRect(x, 10, 5, 2); sg.fillRect(x, 50, 5, 2); }
+  const stitchTex = new THREE.CanvasTexture(stitchCv);
+  stitchTex.wrapS = THREE.RepeatWrapping; stitchTex.repeat.set(3, 1);
+  stitchTex.colorSpace = THREE.SRGBColorSpace;
+  const dashTopMat = new THREE.MeshStandardMaterial({ map: stitchTex, roughness: 0.85, metalness: 0.05, envMapIntensity: 0.4 });
+  // Vent slat texture (shared by the dash vents and the hood vents)
+  const ventCv = document.createElement('canvas'); ventCv.width = 128; ventCv.height = 64;
+  const vg = ventCv.getContext('2d');
+  vg.fillStyle = '#0c0c10'; vg.fillRect(0, 0, 128, 64);
+  vg.fillStyle = '#2e2e38';
+  for (let i = 0; i < 4; i++) vg.fillRect(8, 8 + i * 13, 112, 5);
+  const ventTex = new THREE.CanvasTexture(ventCv); ventTex.colorSpace = THREE.SRGBColorSpace;
+  const ventMat = new THREE.MeshStandardMaterial({ map: ventTex, roughness: 0.7, metalness: 0.2 });
   const dashMat = new THREE.MeshStandardMaterial({ map: grainTex, roughness: 0.85, metalness: 0.05, envMapIntensity: 0.4 });
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x2a2a38, roughness: 0.4, metalness: 0.6, envMapIntensity: 0.8 });
   const hoodMat = new THREE.MeshPhysicalMaterial({
@@ -1953,7 +2391,7 @@ camera.add(cockpit);
   const dash = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.30, 0.34), dashMat);
   dash.position.set(0, -0.48, -0.60); dash.rotation.x = -0.30;
   cockpit.add(dash);
-  const dashTop = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.04, 0.5), trimMat);
+  const dashTop = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.04, 0.5), dashTopMat);
   dashTop.position.set(0, -0.36, -0.66); dashTop.rotation.x = -0.30;
   cockpit.add(dashTop);
   const ambStripMat = new THREE.MeshBasicMaterial({ color: 0xffe6b8, transparent: true, opacity: 0.35, toneMapped: false });
@@ -1975,21 +2413,42 @@ camera.add(cockpit);
   const crease = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 1.35), hoodMat);
   crease.position.set(0, -0.49, -1.45); crease.rotation.x = 0.08;
   cockpit.add(crease);
+  // Hood vents: dark slatted grilles flanking the centre crease (one merged mesh)
+  const hoodVentGeo = mergeParts([
+    { geo: new THREE.BoxGeometry(0.26, 0.015, 0.20), matrix: m4(-0.42, -0.45, -1.15, 0.08, 0, 0, 1, 1, 1), color: new THREE.Color(0xffffff) },
+    { geo: new THREE.BoxGeometry(0.26, 0.015, 0.20), matrix: m4(0.42, -0.45, -1.15, 0.08, 0, 0, 1, 1, 1), color: new THREE.Color(0xffffff) }
+  ]);
+  cockpit.add(new THREE.Mesh(hoodVentGeo, ventMat));
   const mirrorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.14, 0.03), dashMat);
   mirrorFrame.position.set(0, 0.30, -0.58);
   cockpit.add(mirrorFrame);
   const mirrorFace = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.11), mirrorMat);
   mirrorFace.position.set(0, 0.30, -0.564);
   cockpit.add(mirrorFace);
-  const mirrorStem = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.10, 0.03), dashMat);
-  mirrorStem.position.set(0, 0.40, -0.58); mirrorStem.rotation.x = 0.3;
+  const mirrorStem = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, 0.03), dashMat);
+  mirrorStem.position.set(0, 0.44, -0.58); mirrorStem.rotation.x = 0.3;
   cockpit.add(mirrorStem);
   // Steering wheel: tilt group -> spin group (spin follows steering input)
   const wheelTilt = new THREE.Group();
   wheelTilt.position.set(0, -0.44, -0.48); wheelTilt.rotation.x = -0.38;
   const wheelSpin = new THREE.Group();
   wheelSpin.scale.setScalar(0.85); // smaller rim so the gauge dials clear it
-  const leatherMat = new THREE.MeshStandardMaterial({ color: 0x17171c, roughness: 0.9, metalness: 0.05 });
+  // Stitched leather wheel rim (visual references 01/02): red stitch dashes
+  // along the rim's edges, drawn into the rim texture. Torus UVs: u runs
+  // around the ring, v around the tube — stitch rows sit at the v edges.
+  const wheelCv = document.createElement('canvas'); wheelCv.width = 256; wheelCv.height = 64;
+  const wg = wheelCv.getContext('2d');
+  wg.fillStyle = '#17171c'; wg.fillRect(0, 0, 256, 64);
+  for (let i = 0; i < 400; i++) {
+    wg.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.2)';
+    wg.fillRect(Math.random() * 256, Math.random() * 64, 1.4, 1.4);
+  }
+  wg.fillStyle = '#c8443c';
+  for (let x = 2; x < 256; x += 8) { wg.fillRect(x, 6, 4, 2); wg.fillRect(x, 56, 4, 2); }
+  const wheelTex = new THREE.CanvasTexture(wheelCv);
+  wheelTex.wrapS = THREE.RepeatWrapping; wheelTex.wrapT = THREE.RepeatWrapping;
+  wheelTex.colorSpace = THREE.SRGBColorSpace;
+  const leatherMat = new THREE.MeshStandardMaterial({ map: wheelTex, roughness: 0.9, metalness: 0.05 });
   const rim = new THREE.Mesh(new THREE.TorusGeometry(0.185, 0.028, 12, 32), leatherMat);
   wheelSpin.add(rim);
   const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.07, 0.05, 16), dashMat);
@@ -2008,36 +2467,69 @@ camera.add(cockpit);
     btn.position.set(bx, -0.075, 0.028); wheelSpin.add(btn);
   });
   wheelTilt.add(wheelSpin);
+  // Paddle shifters (column-mounted: fixed to the tilt group, NOT the spin group)
+  const paddleGeo = mergeParts([
+    { geo: new THREE.BoxGeometry(0.03, 0.11, 0.012), matrix: m4(-0.13, -0.02, -0.045, 0, 0, 0.12, 1, 1, 1), color: new THREE.Color(0xffffff) },
+    { geo: new THREE.BoxGeometry(0.03, 0.11, 0.012), matrix: m4(0.13, -0.02, -0.045, 0, 0, -0.12, 1, 1, 1), color: new THREE.Color(0xffffff) }
+  ]);
+  wheelTilt.add(new THREE.Mesh(paddleGeo, trimMat));
   cockpit.add(wheelTilt);
   cockpit.userData.wheelSpin = wheelSpin;
-  // Air vents: one shared slat texture, two panels flanking the cluster
-  const ventCv = document.createElement('canvas'); ventCv.width = 128; ventCv.height = 64;
-  const vg = ventCv.getContext('2d');
-  vg.fillStyle = '#0c0c10'; vg.fillRect(0, 0, 128, 64);
-  vg.fillStyle = '#2e2e38';
-  for (let i = 0; i < 4; i++) vg.fillRect(8, 8 + i * 13, 112, 5);
-  const ventTex = new THREE.CanvasTexture(ventCv); ventTex.colorSpace = THREE.SRGBColorSpace;
-  const ventMat = new THREE.MeshStandardMaterial({ map: ventTex, roughness: 0.7, metalness: 0.2 });
+  // Air vents: two panels flanking the cluster (texture shared with the hood vents)
   [-0.44, 0.44].forEach(vx => {
     const vent = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.10), ventMat);
     vent.position.set(vx, -0.42, -0.79); vent.rotation.x = -0.30;
     cockpit.add(vent);
   });
-  // Door-side trim hints: soft panels at the far edges of the dash
+  // Door-side trim: larger soft panels with a chrome strip along the top edge
   [-0.64, 0.64].forEach(tx => {
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.22, 0.30), dashMat);
-    trim.position.set(tx, -0.61, -0.45); trim.rotation.y = tx > 0 ? -0.5 : 0.5;
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.34, 0.42), dashMat);
+    trim.position.set(tx, -0.58, -0.42); trim.rotation.y = tx > 0 ? -0.5 : 0.5;
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.012, 0.40), trimMat);
+    strip.position.set(0, 0.16, 0);
+    trim.add(strip);
     cockpit.add(trim);
   });
   // A-pillars: slim dark posts at the far periphery of the windshield, so the
   // driver sits INSIDE a car rather than behind a floating dash. Kept thin
   // (0.035) and outboard so they never cover the road or the score cell.
+  // Lengthened to meet the roof header band below.
   [-0.62, 0.62].forEach(px => {
-    const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.75, 0.05), dashMat);
-    pillar.position.set(px, 0.0, -0.55);
+    const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.95, 0.05), dashMat);
+    pillar.position.set(px, 0.05, -0.55);
     pillar.rotation.z = px > 0 ? -0.28 : 0.28;
     cockpit.add(pillar);
   });
+  // Roof header band across the top of the windshield (refs 02/03): encloses
+  // the cabin; sits above the mirror and clear of the score cell (checked:
+  // the band subtends ~48° up from the eye, the score cell ~23°).
+  const header = new THREE.Mesh(new THREE.BoxGeometry(1.30, 0.12, 0.05), dashMat);
+  header.position.set(0, 0.55, -0.55); header.rotation.x = 0.30;
+  cockpit.add(header);
+  // Centre console: tunnel + cupholders + gear shifter (one merged mesh with
+  // vertex colours) + a small infotainment screen (static decoration — no live
+  // data is claimed on it). Sits low-centre, clear of the wheel and gauges.
+  const consoleGeo = mergeParts([
+    { geo: new THREE.BoxGeometry(0.30, 0.07, 0.50), matrix: m4(0, -0.70, -0.24, 0.28, 0, 0, 1, 1, 1), color: new THREE.Color(0x1b1b21) },
+    { geo: new THREE.CylinderGeometry(0.045, 0.045, 0.012, 16), matrix: m4(-0.07, -0.70, -0.10, 0.28, 0, 0, 1, 1, 1), color: new THREE.Color(0x0a0a0e) },
+    { geo: new THREE.CylinderGeometry(0.045, 0.045, 0.012, 16), matrix: m4(0.07, -0.70, -0.10, 0.28, 0, 0, 1, 1, 1), color: new THREE.Color(0x0a0a0e) },
+    { geo: new THREE.CylinderGeometry(0.016, 0.02, 0.10, 8), matrix: m4(0.09, -0.59, -0.32, 0.28, 0, 0, 1, 1, 1), color: new THREE.Color(0x2a2a38) },
+    { geo: new THREE.SphereGeometry(0.038, 12, 10), matrix: m4(0.09, -0.532, -0.334, 0, 0, 0, 1, 1, 1), color: new THREE.Color(0x17171c) }
+  ]);
+  cockpit.add(new THREE.Mesh(consoleGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.1, envMapIntensity: 0.4 })));
+  const conCv = document.createElement('canvas'); conCv.width = 128; conCv.height = 64;
+  const cc = conCv.getContext('2d');
+  cc.fillStyle = '#05070d'; cc.fillRect(0, 0, 128, 64);
+  cc.strokeStyle = '#27e8ff'; cc.lineWidth = 2; cc.strokeRect(3, 3, 122, 58);
+  cc.fillStyle = '#27e8ff'; cc.font = '900 22px Arial'; cc.textAlign = 'center';
+  cc.fillText('RAD', 64, 26);
+  cc.fillStyle = '#ff3df0';
+  [18, 30, 24, 38, 28, 20, 32].forEach((h, i) => cc.fillRect(16 + i * 14, 56 - h, 9, h));
+  const conTex = new THREE.CanvasTexture(conCv); conTex.colorSpace = THREE.SRGBColorSpace;
+  const conScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.20, 0.10),
+    new THREE.MeshBasicMaterial({ map: conTex, toneMapped: false }));
+  conScreen.position.set(0, -0.605, -0.42); conScreen.rotation.x = -1.29;
+  cockpit.add(conScreen);
 }
 // Red crash flash (camera-space quad)
 const flashMat = new THREE.MeshBasicMaterial({ color: 0xff2233, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
@@ -2232,23 +2724,54 @@ const gaugeCluster = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.28),
   new THREE.MeshBasicMaterial({ map: gaugeTex, toneMapped: false }));
 gaugeCluster.position.set(0, -0.20, -0.72); gaugeCluster.rotation.x = -0.30;
 cockpit.add(gaugeCluster);
-function drawGaugeDial(g, cx, cy, r, value, max, label, unit, glow) {
+function drawGaugeDial(g, cx, cy, r, value, max, label, unit, glow, nums, redline) {
   g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2);
   g.fillStyle = '#0a0a12'; g.fill();
   g.lineWidth = 4; g.strokeStyle = '#3a3a48'; g.stroke();
   const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
+  // Redline arc (tach only): the top of the rev range reads as a red zone
+  if (redline > 0) {
+    g.beginPath(); g.arc(cx, cy, r - 6, a0 + (a1 - a0) * redline, a1);
+    g.lineWidth = 5; g.strokeStyle = '#ff2b2b'; g.stroke();
+  }
   for (let i = 0; i <= 10; i++) {
     const a = a0 + (a1 - a0) * i / 10;
     g.beginPath();
     g.moveTo(cx + Math.cos(a) * (r - 10), cy + Math.sin(a) * (r - 10));
     g.lineTo(cx + Math.cos(a) * (r - 2), cy + Math.sin(a) * (r - 2));
     g.lineWidth = i % 5 === 0 ? 4 : 2; g.strokeStyle = '#c8ccd4'; g.stroke();
+    if (i < 10) {   // minor ticks between majors
+      for (let j = 1; j <= 4; j++) {
+        const ma = a0 + (a1 - a0) * (i + j / 5) / 10;
+        g.beginPath();
+        g.moveTo(cx + Math.cos(ma) * (r - 7), cy + Math.sin(ma) * (r - 7));
+        g.lineTo(cx + Math.cos(ma) * (r - 2), cy + Math.sin(ma) * (r - 2));
+        g.lineWidth = 1; g.strokeStyle = '#7a8090'; g.stroke();
+      }
+    }
   }
+  // Numerals around the dial (refs 02/03: numbered dials, not bare ticks)
+  g.font = '700 15px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = glow > 0.5 ? '#dfe8ff' : '#8a90a0';
+  nums.forEach(n => {
+    const a = a0 + (a1 - a0) * n.at;
+    g.fillText(n.text, cx + Math.cos(a) * (r - 30), cy + Math.sin(a) * (r - 30));
+  });
+  g.textBaseline = 'alphabetic';
   const na = a0 + (a1 - a0) * clamp(value / max, 0, 1);
-  g.beginPath(); g.moveTo(cx, cy);
-  g.lineTo(cx + Math.cos(na) * (r - 14), cy + Math.sin(na) * (r - 14));
+  const nx = cx + Math.cos(na) * (r - 14), ny = cy + Math.sin(na) * (r - 14);
+  g.beginPath(); g.moveTo(cx + 2, cy + 2); g.lineTo(nx + 2, ny + 2);   // needle drop-shadow
+  g.lineWidth = 5; g.strokeStyle = 'rgba(0,0,0,0.55)'; g.stroke();
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(nx, ny);
   g.lineWidth = 5; g.strokeStyle = glow > 0.5 ? '#ff5a3c' : '#c8553d'; g.stroke();
   g.beginPath(); g.arc(cx, cy, 7, 0, Math.PI * 2); g.fillStyle = '#d8dce4'; g.fill();
+  // Glass glare: a soft diagonal sheen over the dial face
+  const gl = g.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+  gl.addColorStop(0, 'rgba(255,255,255,0.10)');
+  gl.addColorStop(0.35, 'rgba(255,255,255,0.02)');
+  gl.addColorStop(0.6, 'rgba(255,255,255,0)');
+  g.fillStyle = gl;
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
   g.font = '700 22px Arial'; g.textAlign = 'center';
   g.fillStyle = glow > 0.5 ? '#eaf2ff' : '#9aa0ac';
   g.fillText(label, cx, cy + r - 26);
@@ -2261,8 +2784,10 @@ function drawGauges(mph) {
   if (gaugeGlow > 0.5) { g.fillStyle = 'rgba(80,140,255,0.08)'; g.fillRect(0, 0, 512, 256); }
   const gear = mph < 1 ? 'N' : Math.min(5, Math.floor(mph / 32) + 1);
   const rpm = mph < 1 ? 900 : 900 + ((mph % 32) / 32) * 5200;
-  drawGaugeDial(g, 118, 118, 92, mph, 180, 'SPEED', Math.round(mph) + ' MPH', gaugeGlow);
-  drawGaugeDial(g, 394, 118, 92, rpm, 8000, 'TACH', (Math.round(rpm / 100) / 10) + 'k RPM', gaugeGlow);
+  drawGaugeDial(g, 118, 118, 92, mph, 180, 'SPEED', Math.round(mph) + ' MPH', gaugeGlow,
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => ({ at: i / 9, text: String(i * 20) })), 0);
+  drawGaugeDial(g, 394, 118, 92, rpm, 8000, 'TACH', (Math.round(rpm / 100) / 10) + 'k RPM', gaugeGlow,
+    [0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => ({ at: i / 8, text: String(i) })), 0.8);
   const fuel = Math.max(0, 1 - distance / 60000);
   const temp = clamp(0.35 + speed / MAX_SPEED * 0.55, 0, 1);
   g.font = '700 20px Arial'; g.textAlign = 'center';
@@ -2408,6 +2933,45 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
 const DEAD = 0.12;
+// --- Steering model (Round 2 — owner verdict "aiming completely off") ---
+// DETERMINATION (code evidence, see rad-round-2-build-notes-2026-11-15.md):
+// Rad has NO targeting. No raycaster, no target-ray/grip pose is ever read
+// (grep-verified: zero getController / raycast / targetRay references); the
+// three weapons are non-aimed (radial horn blast, rear oil slick, turbo
+// boost); the pause menu is thumbstick-navigated. "Aiming" here means
+// STEERING. Two defects made steering feel wrong: (1) the car moved on the
+// RAW stick value while the steering wheel, body yaw, and lean all followed
+// a SMOOTHED value — the visual tool and the actual motion disagreed by
+// ~150 ms, so the car never went where the wheel pointed; (2) BOTH sticks
+// steered with plain max-magnitude selection, so a resting thumb on the idle
+// stick could hijack steering from the driving hand. Fixed below: car,
+// wheel, and body all derive from ONE smoothed value; one stick owns
+// steering at a time (hysteresis prevents fighting); the deadzone is
+// rescaled so there is no jump at its edge. Signs verified consistent:
+// stick right -> playerX increases -> world shifts left -> car moves right;
+// wheel turns clockwise; dolly yaws right. Steering was never inverted.
+// Pure helpers (verbatim-extracted by rad-round-2-steering-test.mjs — keep
+// them side-effect-free and independent of renderer/session state):
+const STEER_TAU = 0.10;            // steering smoothing time constant (s) — one value drives car + wheel + body
+const STEER_SWITCH_MARGIN = 0.20;  // a challenger stick must beat the incumbent by this much to take over steering
+function rescaleDeadzone(ax, dead) {
+  if (Math.abs(ax) <= dead) return 0;
+  return Math.sign(ax) * (Math.abs(ax) - dead) / (1 - dead);
+}
+function selectSteerStick(lx, rx, prevHand, dead, margin) {
+  const l = rescaleDeadzone(lx, dead), r = rescaleDeadzone(rx, dead);
+  if (l === 0 && r === 0) return { value: 0, hand: prevHand };   // both centred: keep the incumbent hand
+  let hand = prevHand;
+  if (hand === 'left') { if (Math.abs(r) > Math.abs(l) + margin) hand = 'right'; }
+  else if (hand === 'right') { if (Math.abs(l) > Math.abs(r) + margin) hand = 'left'; }
+  else hand = Math.abs(l) >= Math.abs(r) ? 'left' : 'right';    // no incumbent: larger deflection wins
+  return { value: hand === 'left' ? l : r, hand };
+}
+function smoothToward(current, target, dt, tau) {
+  if (dt <= 0) return current;
+  return current + (target - current) * (1 - Math.exp(-dt / tau));
+}
+let steerHand = null;   // which stick currently owns steering ('left' | 'right' | null)
 let prevSqL = false, prevSqR = false, prevTodR = false;
 let prevBtnB = false, prevBtnY = false, prevTrigR = false;
 function xrBtnPressed(gp, i) { return (gp.buttons && gp.buttons[i]) ? (gp.buttons[i].pressed || gp.buttons[i].value > 0.5) : false; }
@@ -2419,12 +2983,14 @@ function pollXRInput() {
   if (!renderer.xr.isPresenting) return r;
   const session = renderer.xr.getSession();
   if (!session) return r;
+  let lx = 0, rx = 0;   // raw stick X per hand; selection happens after the loop (single owner + hysteresis)
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
     if (gp.axes && gp.axes.length > 2) {
       const ax = gp.axes[2] || 0;
-      if (Math.abs(ax) > DEAD && Math.abs(ax) > Math.abs(r.steer)) r.steer = ax;
+      if (src.handedness === 'left') lx = ax;
+      else rx = ax;   // 'right' and 'none' both count as the right stick
       const ay = gp.axes[3] || 0;
       if (Math.abs(ay) > Math.abs(r.menuY)) r.menuY = ay;
     }
@@ -2458,6 +3024,12 @@ function pollXRInput() {
       prevBtnY = yb;
     }
   }
+  // Steering: ONE stick owns it at a time (hysteresis), deadzone rescaled.
+  // The old max-magnitude rule let a resting thumb on the idle stick hijack
+  // steering from the driving hand.
+  const sel = selectSteerStick(lx, rx, steerHand, DEAD, STEER_SWITCH_MARGIN);
+  steerHand = sel.hand;
+  r.steer = sel.value;
   return r;
 }
 let prevKeyB = false, prevKeyH = false, prevKeyO = false, prevKeyT = false;
@@ -2497,6 +3069,66 @@ function readInputs() {
   };
 }
 
+// ============================== steering diagnostic (?debug=aim) ==============================
+// Temporary developer diagnostic (Standard §5): shows the interaction truth
+// for steering — the raw stick value vs the smoothed value the car actually
+// uses, the lateral velocity, and projected heading lines in the scene.
+// OFF by default; enabled only with ?debug=aim in the URL. Nothing here runs
+// in normal gameplay (no overlay div, no lines in the scene).
+const DEBUG_AIM = new URLSearchParams(window.location.search).get('debug') === 'aim';
+let dbgLatVel = 0, dbgRawLatVel = 0, dbgInputSteer = 0;
+let dbgOverlay = null, dbgAimGroup = null, dbgLineActual = null, dbgLineRaw = null, dbgMarker = null;
+let assetLoadStatus = 'pending';   // 'pending' | 'ok' | 'failed: ...' (licensed assets)
+if (DEBUG_AIM) {
+  dbgOverlay = document.createElement('div');
+  dbgOverlay.style.cssText = 'position:fixed;top:12px;left:12px;z-index:30;background:rgba(0,0,0,0.75);color:#7df9ff;font:12px/1.5 monospace;padding:8px 10px;border:1px solid #27e8ff;border-radius:6px;white-space:pre;pointer-events:none;';
+  document.body.appendChild(dbgOverlay);
+}
+const AIM_LINE_PTS = 9;
+function buildAimDebug() {
+  if (!DEBUG_AIM) return;
+  dbgAimGroup = new THREE.Group();
+  const mkLine = (color) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(AIM_LINE_PTS * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false, toneMapped: false }));
+    l.frustumCulled = false; l.renderOrder = 990;
+    return l;
+  };
+  dbgLineActual = mkLine(0x27e8ff);   // cyan: where the car ACTUALLY goes (smoothed steer)
+  dbgLineRaw = mkLine(0xffaa00);      // amber: where the RAW stick points (the old behaviour)
+  dbgAimGroup.add(dbgLineActual); dbgAimGroup.add(dbgLineRaw);
+  dbgMarker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.45, 24),
+    new THREE.MeshBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthTest: false, toneMapped: false }));
+  dbgMarker.rotation.x = -Math.PI / 2; dbgMarker.renderOrder = 990;
+  dbgAimGroup.add(dbgMarker);
+  scene.add(dbgAimGroup);
+}
+function updateAimDebug() {
+  if (!DEBUG_AIM || !dbgAimGroup) return;
+  const write = (line, latVel) => {
+    const pos = line.geometry.attributes.position;
+    for (let k = 0; k < AIM_LINE_PTS; k++) {
+      const t = (k / (AIM_LINE_PTS - 1)) * 1.2;
+      pos.setXYZ(k, latVel * t, 0.15, -2.2 - speed * t);
+    }
+    pos.needsUpdate = true;
+  };
+  write(dbgLineActual, dbgLatVel);
+  write(dbgLineRaw, dbgRawLatVel);
+  dbgMarker.position.set(dbgLatVel * 1.0, 0.12, -2.2 - speed * 1.0);
+}
+function updateAimOverlay() {
+  if (!DEBUG_AIM || !dbgOverlay) return;
+  dbgOverlay.textContent =
+    'STEER raw ' + dbgInputSteer.toFixed(3) + '  smooth ' + steerSmooth.toFixed(3) +
+    '  hand ' + (steerHand || '-') +
+    '\nlatVel ' + dbgLatVel.toFixed(2) + ' m/s (raw would be ' + dbgRawLatVel.toFixed(2) + ')' +
+    '\nplayerX ' + playerX.toFixed(2) + '  speed ' + (speed * 2.23694).toFixed(0) + ' MPH' +
+    '\nvalve L' + perfValve.level + '  EMA ' + perfValve.ema.toFixed(1) + ' ms' +
+    '\nassets: ' + assetLoadStatus + (kenneyCarsOn ? ' · kenney cars ON' : ' · procedural cars') + (asphaltOn ? ' · photo asphalt ON' : ' · canvas asphalt');
+}
+
 // ============================== ENTER VR flow ==============================
 const vrBtn = document.getElementById('vrBtn');
 const statusEl = document.getElementById('status');
@@ -2511,7 +3143,7 @@ function setStatus(msg) { statusEl.textContent = msg; }
 const todBtn = document.getElementById('todBtn');
 function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; todBtn.style.display = 'block'; }
 function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; todBtn.style.display = 'none'; }
-document.querySelectorAll('.todOpt').forEach(el => el.addEventListener('click', () => setTimeOfDay(el.dataset.tod)));
+document.querySelectorAll('.todOpt[data-tod]').forEach(el => el.addEventListener('click', () => setTimeOfDay(el.dataset.tod)));
 todBtn.addEventListener('click', () => cycleTimeOfDay());
 
 if (navigator.xr && navigator.xr.isSessionSupported) {
@@ -2537,7 +3169,7 @@ vrBtn.addEventListener('click', async () => {
     await renderer.xr.setSession(session);
     hidePanel();
     perfWarmup = 2;
-    session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+    session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; savePerfLog(); refreshPerfNote(); });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
@@ -2545,7 +3177,7 @@ vrBtn.addEventListener('click', async () => {
       await renderer.xr.setSession(session);
       hidePanel();
       perfWarmup = 2;
-      session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); vrBtn.disabled = false; savePerfLog(); refreshPerfNote(); });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
@@ -2733,19 +3365,22 @@ const TOD = {
     sky: [0x2f6fd0, 0x6fa8e0, 0xa8d0f0, 0xd8ecf8], fog: [0x9fc8e8, 90, 1200],
     hemi: [0xbfd9ff, 0x5a6b52, 0.9], sun: [0xfff1d6, 2.2], sunOff: [-30, 170, -60],
     stars: 0, mtn: [0x5a6b8a, 0x6b7d99], disc: [0xfff6c8, -150, 800, -1100, 1, 0],
-    glow: [0xfff6c8, 0], head: [false, 90, 0, 0.0], street: false, emi: ['emiDay', 0.6], expo: 1.05
+    glow: [0xfff6c8, 0], head: [false, 90, 0, 0.0], street: false, emi: ['emiDay', 0.6], expo: 1.05,
+    wet: 0, cloud: [0xffffff, 0.55]
   },
   sunset: {
     sky: [0x1b1035, 0x7b2d8b, 0xe84a73, 0xff9e4f], fog: [0x54224e, 55, 720],
     hemi: [0xffc38a, 0x2a1544, 0.55], sun: [0xff9a5c, 1.35], sunOff: [-40, 90, -90],
     stars: 0.45, mtn: [0x2a1544, 0x3a1c55], disc: [0xffd319, 150, 165, -1375, 1, 0.30],
-    glow: [0xff2975, 0.30], head: [true, 90, 0.07, 0.5], street: true, emi: ['emiSunset', 1.15], expo: 1.12
+    glow: [0xff2975, 0.42], head: [true, 90, 0.07, 0.5], street: true, emi: ['emiSunset', 1.15], expo: 1.12,
+    wet: 0.25, cloud: [0xffb08a, 0.5]
   },
   night: {
     sky: [0x01010a, 0x0a0a28, 0x141438, 0x232350], fog: [0x04040c, 40, 520],
     hemi: [0x33456e, 0x0a0a18, 0.4], sun: [0x8fa8e8, 0.5], sunOff: [70, 150, -130],
     stars: 0.95, mtn: [0x080818, 0x101024], disc: [0xdfe8ff, 300, 700, -1200, 0.55, 0.12],
-    glow: [0x8fa8ff, 0.12], head: [true, 150, 0.15, 0.7], street: true, emi: ['emiNight', 1.5], expo: 0.95
+    glow: [0x8fa8ff, 0.12], head: [true, 150, 0.15, 0.7], street: true, emi: ['emiNight', 1.5], expo: 0.95,
+    wet: 1.0, cloud: [0x2a2a55, 0.25]
   }
 };
 function setTimeOfDay(mode) {
@@ -2782,8 +3417,17 @@ function setTimeOfDay(mode) {
   dashGlow.material.opacity = mode === 'night' ? 0.28 : mode === 'sunset' ? 0.16 : 0.05;
   gaugeGlow = mode === 'night' ? 1 : mode === 'sunset' ? 0.7 : 0.25;
   bldgMats.forEach(b => { b.mat.emissiveMap = b[t.emi[0]]; b.mat.emissiveIntensity = t.emi[1]; b.mat.needsUpdate = true; });
+  // Wet-look asphalt (visual references 01/04): at night the road reads as
+  // rain-slick — lower roughness, stronger env reflections; sunset gets a
+  // hint of it; day stays dry matte. Streetlight streaks follow the wet factor.
+  road.material.roughness = 0.92 - 0.42 * t.wet;
+  road.material.envMapIntensity = 0.25 + 0.65 * t.wet;
+  wetStreaks = t.wet;
+  wetStreakIM.visible = t.wet > 0;
+  wetStreakMat.opacity = 0.30 * t.wet;
+  if (cloudMatRef) { cloudMatRef.color.set(t.cloud[0]); cloudMatRef.opacity = t.cloud[1]; }
   renderer.toneMappingExposure = t.expo;
-  document.querySelectorAll('.todOpt').forEach(el => el.classList.toggle('sel', el.dataset.tod === mode));
+  document.querySelectorAll('.todOpt[data-tod]').forEach(el => el.classList.toggle('sel', el.dataset.tod === mode));
   const tb = document.getElementById('todBtn');
   if (tb) tb.textContent = 'TIME: ' + mode.toUpperCase();
 }
@@ -2792,6 +3436,7 @@ function cycleTimeOfDay() {
 }
 
 // ============================== main loop ==============================
+buildAimDebug();   // no-op unless ?debug=aim
 const clock = new THREE.Clock();
 let dashTimer = 0, hudMph = -1;
 
@@ -2809,7 +3454,23 @@ function tick() {
     if (perfWarmup > 0) perfWarmup -= dt;
     else perfValve.update(ft, dt);
   }
+  // V2.0 perf capture: accumulate play time + valve time, sample ~1/s, save ~1/min.
+  // Paused/menu time is excluded; only active-play frame times are recorded.
+  if (!paused) {
+    perfPlaySec += dt;
+    perfValveSec[perfValve.level] += dt;
+    if (renderer.xr.isPresenting) perfSawVR = true;
+    if (ftNow - perfLastSampleMs >= PERF_SAMPLE_MS && perfSamples.length < PERF_MAX_SAMPLES) {
+      perfLastSampleMs = ftNow;
+      perfSamples.push(perfValve.ema);
+    }
+    if (perfPlaySec - perfLastSaveSec >= PERF_SAVE_SEC) {
+      perfLastSaveSec = perfPlaySec;
+      savePerfLog();
+    }
+  }
   const input = readInputs();
+  dbgInputSteer = input.steer;   // steering diagnostic (?debug=aim)
   // Pause / mute work whether or not the game is paused.
   if (input.pause) setPaused(!paused);
   if (input.mute) setMuted(!muted);
@@ -2842,10 +3503,17 @@ function tick() {
   const speedPercent = speed / MAX_SPEED;
 
   // --- steering & lateral motion ---
-  steerSmooth = lerp(steerSmooth, input.steer, 1 - Math.pow(0.0015, dt));
+  // Round 2 fix: the car, the wheel, and the body lean ALL derive from the
+  // same smoothed value. The old code moved the car on the RAW stick value
+  // while the wheel followed the smoothed one, so the car never went where
+  // the wheel pointed (the "aiming completely off" report). steerRate and
+  // the centrifugal term are unchanged racing mechanics.
+  steerSmooth = smoothToward(steerSmooth, input.steer, dt, STEER_TAU);
   const seg = findSegment(position);
   const steerRate = (2.6 + 10.5 * speedPercent) * (1 + upgrades.grip * 0.06);  // m/s lateral at full lock
-  playerX += input.steer * steerRate * dt;
+  playerX += steerSmooth * steerRate * dt;
+  dbgLatVel = steerSmooth * steerRate;   // steering diagnostic (?debug=aim)
+  dbgRawLatVel = input.steer * steerRate;
   playerX -= seg.curve * speed * speed * 0.55 * dt / (1 + upgrades.grip * 0.05);  // centrifugal push out of bends
   playerX = clamp(playerX, -17, 17);
 
@@ -2970,11 +3638,14 @@ function tick() {
     hudL1.textContent = l1; hudL2.textContent = l2; hudL3.textContent = l3;
     drawScoreCell(l1, l2, l3);
     scoreCell.visible = renderer.xr.isPresenting;
+    updateAimOverlay();
   }
   updateAudio(speedPercent, input.gas);
 
+  updateAimDebug();
   renderer.render(scene, camera);
 }
+setTimeOfDay('sunset');   // apply the default mode's full state at boot (wet-look, streaks, clouds, lights)
 renderer.setAnimationLoop(tick);
 
 window.addEventListener('resize', () => {

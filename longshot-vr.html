@@ -2,20 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <title>LONGSHOT VR — Original Mountain Sniper Range</title>
 <style>
+  *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#1a0e08;
     font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
   canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (the previous
+     align-items:center clipped the top once content overflowed, even though
+     overflow-y:auto was set). The ENTER VR button sits above the detail
+     paragraphs in the DOM so it is visible on load. */
   #panel {
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background:radial-gradient(900px 600px at 50% 25%, #3d1e0a 0%, #1a0e08 55%, #0a0503 100%);
-    z-index:10; text-align:center; color:#fff; overflow-y:auto;
+    z-index:10; text-align:center; color:#fff;
   }
-  #panel .box { max-width:680px; padding:24px 20px; }
+  #panel .box { width:100%; max-width:680px; margin:auto; min-width:0; }
   #panel h1 {
-    font-size:58px; letter-spacing:8px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    font-size:clamp(34px, 9vw, 58px); letter-spacing:clamp(2px, 1vw, 8px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
     background:linear-gradient(92deg,#ffd319 10%,#ff7e47 55%,#27e8ff 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(255,126,71,.35);
@@ -31,9 +41,10 @@
   #panel .wpnBtn.sel { background:rgba(255,126,71,.25); border-color:#ffd319; box-shadow:0 0 18px rgba(255,211,25,.4); }
   #panel .wpnBtn b { display:block; font-size:15px; color:#ffd319; letter-spacing:1px; }
   #vrBtn {
-    margin-top:16px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    margin-top:16px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#1a0e08; background:linear-gradient(92deg,#ffd319,#ff7e47); border:none; border-radius:12px;
     padding:16px 42px; box-shadow:0 6px 30px rgba(255,126,71,.45);
+    min-height:56px; width:min(100%, 340px);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
@@ -41,7 +52,7 @@
     position:fixed; left:12px; top:52px; z-index:5;
     color:#7df9ff; font-size:14px; font-weight:800; letter-spacing:1px; line-height:1.5;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:pre;
-    background:rgba(8,4,2,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px;
+    background:rgba(8,4,2,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px; max-width:calc(100vw - 24px);
   }
   #hud b { color:#ffd319; }
   #hud .wind { color:#2bff88; }
@@ -49,7 +60,7 @@
     position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
     color:#ffd319; font-size:28px; font-weight:900; letter-spacing:2px; text-align:center;
     text-shadow:0 2px 12px #000, 0 0 24px rgba(255,211,25,.5); pointer-events:none; display:none;
-    background:rgba(10,6,2,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px;
+    background:rgba(10,6,2,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px; max-width:calc(100vw - 32px);
   }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
@@ -60,6 +71,21 @@
     position:fixed; top:12px; left:12px; z-index:20; color:#bfeaff; font-size:13px;
     text-decoration:none; background:rgba(20,10,4,.72); border:1px solid #27e8ff;
     border-radius:8px; padding:8px 12px;
+  }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+    #panel .wpnRow { margin:8px 0; }
+  }
+  @media (max-width:520px) {
+    #hud { font-size:12px; }
+    #banner { font-size:20px; }
   }
 </style>
 <script type="importmap">
@@ -73,20 +99,20 @@
     <h1>LONGSHOT</h1>
     <div class="sub">An original VR mountain sniper range — endless targets, no fail state, ever</div>
     <p>You hold a fixed firing position on a golden-hour mountain range. Steel plates at <b>100 / 300 / 600 yards</b>, sliding movers, pop-ups behind the berms, and drifting balloons — farther targets score more, and the wind pushes long shots sideways, so read the flags and compensate.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
     <p><b>Pick your rifle</b> (or cycle in-game with <b>B</b>):</p>
     <div class="wpnRow" id="wpnRow"></div>
     <p><b>VR:</b> aim with the <b>right controller</b> &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Hold squeeze or A</b> = scope (aim snaps to scope center) &nbsp;·&nbsp; guns are <b>always loaded — no reloading, ever</b> &nbsp;·&nbsp; <b>B</b> cycles rifles</p>
     <p><b>Desktop:</b> mouse aims &nbsp;·&nbsp; click fires &nbsp;·&nbsp; hold right-click or Shift = scope &nbsp;·&nbsp; always loaded, no reloading &nbsp;·&nbsp; 1–4 switch rifles &nbsp;·&nbsp; M mutes</p>
     <p class="small">Targets respawn endlessly and your score only ever climbs. There is no fail screen and no end — shoot as long as you like.</p>
-    <button id="vrBtn">ENTER VR</button>
-    <div id="status"></div>
   </div>
 </div>
 
 <div id="hud"></div>
 <div id="banner"></div>
 <button id="muteBtn">SOUND: ON</button>
-<a id="backLink" href="./">← Danny's Arcade</a>
+<a id="backLink" href="../">← Danny's Arcade</a>
 
 <script type="module">
 import * as THREE from 'three';

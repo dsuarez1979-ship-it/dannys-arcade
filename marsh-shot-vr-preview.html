@@ -2,25 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>MARSH SHOT VR — Danny's Arcade</title>
 <style>
+  *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; overflow: hidden; background: #0a0618; height: 100%; font-family: Arial, sans-serif; }
   #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  .panel { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(5, 2, 18, 0.82); color: #fff; text-align: center; z-index: 10; padding: 20px; }
-  .panel h1 { font-size: 44px; margin: 0 0 6px; color: #ffd319; text-shadow: 0 0 18px #ff2fd6, 0 0 42px #27e8ff; letter-spacing: 2px; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (the previous
+     justify-content:center clipped the top once content overflowed). The
+     ENTER VR button sits above the detail paragraphs in the DOM so it is
+     visible on load. */
+  .panel { position: fixed; inset: 0; height: 100vh; height: 100dvh; display: flex; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; background: rgba(5, 2, 18, 0.82); color: #fff; text-align: center; z-index: 10; padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .panel .box { margin: auto; width: 100%; max-width: 600px; min-width: 0; }
+  .panel h1 { font-size: clamp(28px, 8vw, 44px); margin: 0 0 6px; color: #ffd319; text-shadow: 0 0 18px #ff2fd6, 0 0 42px #27e8ff; letter-spacing: 2px; overflow-wrap: break-word; }
   .panel p { max-width: 560px; line-height: 1.5; color: #cfe8ff; margin: 8px 0; font-size: 17px; }
   .panel .sub { color: #9fd8ff; font-size: 15px; }
-  .btn { margin-top: 16px; padding: 16px 34px; font-size: 22px; font-weight: bold; border: 0; border-radius: 12px; background: #ffd319; color: #1a0b2e; cursor: pointer; box-shadow: 0 0 24px #ff2fd6; }
+  .btn { margin-top: 16px; padding: 16px 34px; font-size: clamp(18px, 3.4vw, 22px); font-weight: bold; border: 0; border-radius: 12px; background: #ffd319; color: #1a0b2e; cursor: pointer; box-shadow: 0 0 24px #ff2fd6; }
+  #vrBtn { min-height: 56px; width: min(100%, 340px); }
   .btn:disabled { opacity: 0.5; }
   .backlink { margin-top: 18px; font-size: 16px; }
   .backlink a { color: #27e8ff; }
   #status { margin-top: 12px; color: #ffd319; font-size: 15px; min-height: 20px; }
-  #hud { position: fixed; top: 10px; left: 10px; z-index: 5; background: rgba(2, 8, 24, 0.72); border: 2px solid #27e8ff; box-shadow: 0 0 14px rgba(255, 47, 214, 0.45); border-radius: 8px; padding: 8px 12px; color: #7df9ff; font-weight: bold; font-size: 16px; line-height: 1.45; white-space: nowrap; pointer-events: none; }
+  #hud { position: fixed; top: 10px; left: 10px; z-index: 5; background: rgba(2, 8, 24, 0.88); border: 2px solid #27e8ff; box-shadow: 0 0 14px rgba(255, 47, 214, 0.45); border-radius: 8px; padding: 8px 12px; color: #d8fbff; font-weight: bold; font-size: 16px; line-height: 1.45; white-space: nowrap; pointer-events: none; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9); max-width: calc(100vw - 24px); }
   #hud b { color: #ffd319; }
-  #banner { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); z-index: 6; display: none; background: rgba(2, 8, 24, 0.8); border: 3px solid #ffd319; box-shadow: 0 0 24px #27e8ff; color: #ffd319; font-weight: bold; font-size: 30px; padding: 12px 26px; border-radius: 12px; pointer-events: none; text-align: center; }
+  #banner { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); z-index: 6; display: none; background: rgba(2, 8, 24, 0.8); border: 3px solid #ffd319; box-shadow: 0 0 24px #27e8ff; color: #ffd319; font-weight: bold; font-size: clamp(20px, 5vw, 30px); padding: 12px 26px; border-radius: 12px; pointer-events: none; text-align: center; max-width: calc(100vw - 32px); }
   #cross { position: fixed; z-index: 4; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 3px solid #27e8ff; border-radius: 50%; box-shadow: 0 0 12px #ff2fd6; pointer-events: none; display: none; }
   #cross::after { content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; background: #ffd319; border-radius: 50%; }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height: 560px) {
+    .panel h1 { font-size: 30px; }
+    .panel p { font-size: 14px; margin: 5px 0; }
+    .panel .sub { font-size: 13px; }
+    .btn { margin-top: 10px; padding: 12px 28px; }
+    #vrBtn { min-height: 48px; }
+    #status { margin-top: 8px; }
+  }
+  @media (max-width: 520px) {
+    #hud { font-size: 13px; padding: 6px 9px; }
+  }
 </style>
 </head>
 <body>
@@ -29,28 +51,52 @@
 <div id="banner"></div>
 <div id="cross"></div>
 <div class="panel" id="panel">
+  <div class="box">
   <h1>MARSH SHOT VR</h1>
-  <p class="sub" style="color:#ffd319">Cinematic prototype — not the live version. ACES lighting, richer marsh, in-VR pause + mute.</p>
+  <p class="sub" style="color:#ffd319">Round 2 prototype — aiming rebuilt (a shotgun in each hand, either trigger shoots) + licensed duck, goose, dog &amp; shotgun models.</p>
   <p>A bright day over the marsh. Wild birds cross the sky — take your shot.</p>
-  <p class="sub"><b>VR:</b> aim with your right controller, pull the trigger to shoot. <b>B</b> pauses, <b>A</b> toggles sound, grip restarts while paused.<br>
+  <button class="btn" id="vrBtn">ENTER VR</button>
+  <div id="status"></div>
+  <p class="sub"><b>VR:</b> aim with either controller, pull its trigger to shoot. <b>B</b> pauses, <b>A</b> toggles sound, grip restarts while paused.<br>
   <b>Desktop:</b> move the mouse to aim, click to shoot. <b>P</b> pauses, <b>M</b> mutes, <b>R</b> restarts while paused.<br>
   Farther and faster birds are worth more points. Rounds of 10 birds — every round gets faster.<br>
   No lives, no fail state — play as long as you like, rounds keep coming.</p>
-  <button class="btn" id="vrBtn">ENTER VR</button>
+  <p class="sub" style="font-size:12px;color:#7fb8d8">Models: “Mallard duck” &amp; “Duck” (Canada goose) by Poly by Google, CC-BY 3.0; dog &amp; shotgun by Quaternius, CC0 — via Poly Pizza. Add ?debug to the URL for the aim + performance diagnostics.</p>
+  <p class="sub" id="perfLast" style="font-size:13px;color:#9fd8ff">Performance: no session logged yet.</p>
+  <p class="sub" style="font-size:12px;color:#7fb8d8">Session performance (frame times + valve level) is logged locally on this device only — nothing is sent anywhere.</p>
   <button class="btn" id="soundBtn" style="padding:10px 20px;font-size:16px">SOUND: ON</button>
-  <div id="status"></div>
   <p class="backlink"><a href="../">← Danny's Arcade</a></p>
+  </div>
 </div>
 <script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// CINEMATIC PROTOTYPE (Nov 15, 2026) — Marsh Shot VR upgrade under the
-// Cinematic Realism Standard. ACES tone mapping, lit PBR materials, richer
-// marsh, spatial audio, haptics, in-VR pause + mute, frame-time valve.
+// ROUND 2 REBUILD (Nov 15, 2026) — Marsh Shot VR under the Cinematic
+// Realism Standard v1.3. Owner verdict Nov 15: aiming "completely off" and
+// graphics "still cartoonish" — NOT approved for live replacement.
+// PHASE 1 (aiming first): handedness-attached aim rigs (connected events,
+// never controller index), a shotgun in EACH hand aligned to its own target
+// ray by a runtime-measured grip→ray offset, both triggers shoot, ellipsoid
+// hit test (contact counts), fixed tracer hit point, ?debug aim diagnostic.
+// PHASE 2 (graphics): licensed GLTF duck/goose/dog/shotgun (CC-BY/CC0, see
+// the asset register), PBR water with normal-mapped ripples + sun specular,
+// a grassy bank with a wet mud shoreline, cattails, lily pads, distant
+// birds, a third fill light. Procedural models remain as the offline
+// fallback if an asset fails to load — the game never breaks on assets.
 // Prototype only: the live file is untouched until Danny validates on headset.
+
+// Debug diagnostics (aim ray + hit marker + perf line + asset status) are
+// OFF by default and enabled with ?debug or ?debug=aim in the URL. Normal
+// play is clean; Danny turns diagnostics on only for testing.
+const urlParams = new URLSearchParams(window.location.search);
+const DEBUG_MODE = urlParams.has('debug');
 
 // ============================== setup ==============================
 const canvas = document.getElementById('c');
@@ -81,8 +127,16 @@ scene.add(hemiLight);
 const sunLight = new THREE.DirectionalLight(0xffe8b0, 1.6);
 sunLight.position.set(-60, 95, -330);
 scene.add(sunLight);
+// Cool fill from behind-right (3rd light, Bible allows 2–3): rims the birds,
+// the dog, and the gun barrels from the opposite side of the sun, so nothing
+// reads as a flat silhouette against the sky. Low intensity — it shapes, it
+// does not compete with the golden-hour sun.
+const fillLight = new THREE.DirectionalLight(0x9fc8ff, 0.35);
+fillLight.position.set(80, 40, 60);
+scene.add(fillLight);
 
-const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3();
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3();
+const _hitP = new THREE.Vector3(), _bestHit = new THREE.Vector3(); // shot hit-point scratch (shootFrom)
 // clamp was dead code in the live build (Phase 1 audit); it is live now —
 // pulseHaptics() clamps strength through it.
 function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
@@ -130,7 +184,38 @@ sunGroup.position.set(-60, 95, -330);
 scene.add(sunGroup);
 // Daytime water: blue-green plane with a drifting ripple texture + soft sun
 // streak + pale sparkle lines that drift slowly across the surface.
-let waterTex = null;
+// ROUND 2: the water is a lit PBR surface now (MeshStandardMaterial with a
+// procedural ripple NORMAL map + the ripple canvas as a roughness map), so the
+// golden-hour sun lays a real moving specular glitter path on it instead of a
+// flat painted colour. The normal map is generated once at boot from two
+// sine-wave ripple fields — no external texture, no per-frame cost beyond
+// scrolling the map offsets.
+let waterTex = null, waterNormalTex = null;
+function rippleNormalTexture() {
+  const S = 128;
+  const cv = document.createElement('canvas'); cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      // Two ripple fields; analytic gradients give the normal directly.
+      const a = x * 0.30 + y * 0.13, b = x * 0.11 - y * 0.27;
+      const gx = 0.15 * Math.cos(a) + 0.055 * Math.cos(b);
+      const gy = 0.065 * Math.cos(a) - 0.135 * Math.cos(b);
+      const inv = 1 / Math.sqrt(gx * gx + gy * gy + 1);
+      const i = (y * S + x) * 4;
+      img.data[i] = (-gx * inv * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (-gy * inv * 0.5 + 0.5) * 255;
+      img.data[i + 2] = inv * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(9, 5);
+  return tex;
+}
 const streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false });
 let shimmerMesh = null;
 const shimmerBase = []; // {x, z, w, speed} per sparkle line — drifted in tick()
@@ -150,8 +235,14 @@ const shimmerBase = []; // {x, z, w, speed} per sparkle line — drifted in tick
   waterTex = new THREE.CanvasTexture(wcv);
   waterTex.wrapS = waterTex.wrapT = THREE.RepeatWrapping;
   waterTex.repeat.set(6, 3);
+  waterNormalTex = rippleNormalTexture();
+  // Lit water: low roughness + normal-mapped ripples = a live sun glitter
+  // path from the directional sun. Fog stays ON so the far water melts into
+  // the horizon haze (atmospheric perspective, cf. the coastal-sunset
+  // reference). The ripple canvas doubles as the roughness map: its pale
+  // streaks read as slightly rougher patches.
   const water = new THREE.Mesh(new THREE.PlaneGeometry(900, 500),
-    new THREE.MeshBasicMaterial({ map: waterTex, color: 0x3a8ab5, fog: false, toneMapped: false }));
+    new THREE.MeshStandardMaterial({ map: waterTex, color: 0x4a9ec2, roughness: 0.32, metalness: 0.55, roughnessMap: waterTex, normalMap: waterNormalTex, normalScale: new THREE.Vector2(0.6, 0.6) }));
   water.rotation.x = -Math.PI / 2; water.position.set(0, 0, -140);
   scene.add(water);
   const streakCv = document.createElement('canvas'); streakCv.width = 64; streakCv.height = 256;
@@ -178,9 +269,54 @@ const shimmerBase = []; // {x, z, w, speed} per sparkle line — drifted in tick
   }
   scene.add(shimmerMesh);
 }
+// ROUND 2 — the bank: the player no longer stands IN the water. A grassy
+// island disc (r 42 m) with a procedural mud/grass texture: green speckled
+// grass underfoot grading to dark wet mud at the waterline. The texture's
+// green channel doubles as the roughness map, so the dark wet-mud ring reads
+// as low-roughness sheen (the wet-surface cue from the visual references)
+// while the grass stays matte. The dog, the grass band, and the near reeds
+// all stand on this bank now; the water begins past its edge.
+{
+  const S = 512;
+  const cv = document.createElement('canvas'); cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createRadialGradient(S / 2, S / 2, S * 0.1, S / 2, S / 2, S * 0.5);
+  g.addColorStop(0, '#4d8a3c'); g.addColorStop(0.55, '#557f36');
+  g.addColorStop(0.78, '#6b5a33'); g.addColorStop(0.9, '#4a3a22'); g.addColorStop(1, '#33271a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+  // Speckle: thousands of tiny light/dark dots break the gradient into soil.
+  for (let i = 0; i < 9000; i++) {
+    const x = Math.random() * S, y = Math.random() * S;
+    const r = Math.hypot(x - S / 2, y - S / 2) / (S / 2);
+    ctx.fillStyle = Math.random() < 0.5
+      ? (r > 0.8 ? 'rgba(20,14,8,0.35)' : 'rgba(120,170,80,0.35)')
+      : (r > 0.8 ? 'rgba(150,120,80,0.3)' : 'rgba(30,60,20,0.35)');
+    ctx.fillRect(x, y, rand(1, 3), rand(1, 3));
+  }
+  // Grass-blade strokes across the inner disc.
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 1600; i++) {
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * S * 0.36;
+    const x = S / 2 + Math.cos(a) * r, y = S / 2 + Math.sin(a) * r;
+    ctx.strokeStyle = Math.random() < 0.5 ? 'rgba(90,140,55,0.6)' : 'rgba(140,190,90,0.55)';
+    ctx.beginPath(); ctx.moveTo(x, y);
+    ctx.lineTo(x + rand(-3, 3), y - rand(3, 8)); ctx.stroke();
+  }
+  const bankTex = new THREE.CanvasTexture(cv);
+  bankTex.colorSpace = THREE.SRGBColorSpace;
+  const bank = new THREE.Mesh(new THREE.CircleGeometry(42, 48),
+    new THREE.MeshStandardMaterial({ map: bankTex, roughnessMap: bankTex, roughness: 1.0, metalness: 0.05 }));
+  bank.rotation.x = -Math.PI / 2;
+  bank.position.set(0, 0.05, 6); // 5 cm above the water plane: no z-fighting at range
+  bank.receiveShadow = false;
+  scene.add(bank);
+}
 const _sm = new THREE.Matrix4(), _sq = new THREE.Quaternion(), _se = new THREE.Euler(-Math.PI / 2, 0, 0);
 function updateWater(dt, t) {
   if (waterTex) { waterTex.offset.x += dt * 0.004; waterTex.offset.y += dt * 0.0025; }
+  // The normal map scrolls on a slightly different vector so the glitter
+  // shimmers instead of sliding as one sheet with the colour map.
+  if (waterNormalTex) { waterNormalTex.offset.x += dt * 0.006; waterNormalTex.offset.y -= dt * 0.003; }
   streakMat.opacity = 0.6 + Math.sin(t * 0.5) * 0.12; // sun streak breathes gently
   _sq.setFromEuler(_se);
   for (let i = 0; i < shimmerBase.length; i++) {
@@ -240,12 +376,63 @@ scene.add(reedGroup, grassGroup);
   }
   grassGroup.add(blades);
 }
+// ROUND 2 — cattails + lily pads: the two plants that say "marsh". Cattails
+// (brown sausage heads on tall stalks) ring the waterline; lily pads float
+// on the open water past the bank edge, a few with small white flowers.
+// All instanced (4 draw calls total); the pads bob gently in updateWater.
+const lilyMesh = { pads: null, base: [] };
+{
+  const catStalkMat = new THREE.MeshStandardMaterial({ color: 0x2a5a28, roughness: 1, metalness: 0, flatShading: true });
+  const catStalks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.03, 0.05, 1, 5), catStalkMat, 60);
+  const catHeadMat = new THREE.MeshStandardMaterial({ color: 0x4a2c12, roughness: 0.95, metalness: 0 });
+  const catHeads = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 7), catHeadMat, 60);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3();
+  for (let i = 0; i < 60; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = side * rand(8, 60), z = rand(-34, -8), h = rand(1.8, 3.0);
+    e.set(rand(-0.08, 0.08), 0, rand(-0.08, 0.08)); q.setFromEuler(e);
+    m.compose(new THREE.Vector3(x, h / 2, z), q, new THREE.Vector3(1, h, 1));
+    catStalks.setMatrixAt(i, m);
+    m.compose(new THREE.Vector3(x, h - 0.2, z), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+    catHeads.setMatrixAt(i, m);
+  }
+  reedGroup.add(catStalks, catHeads);
+  const padMat = new THREE.MeshStandardMaterial({ color: 0x2f6b2a, roughness: 0.7, metalness: 0.05 });
+  const pads = new THREE.InstancedMesh(new THREE.CircleGeometry(0.5, 10), padMat, 40);
+  const flowerMat = new THREE.MeshStandardMaterial({ color: 0xf2ead8, roughness: 0.6, metalness: 0 });
+  const flowers = new THREE.InstancedMesh(new THREE.ConeGeometry(0.12, 0.22, 6), flowerMat, 8);
+  const pq = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+  for (let i = 0; i < 40; i++) {
+    const rec = { x: rand(-25, 25), z: rand(-70, -40), s: rand(0.5, 1.3), ph: rand(0, Math.PI * 2) };
+    lilyMesh.base.push(rec);
+    m.compose(new THREE.Vector3(rec.x, 0.06, rec.z), pq, new THREE.Vector3(rec.s, rec.s, 1));
+    pads.setMatrixAt(i, m);
+  }
+  for (let i = 0; i < 8; i++) {
+    const rec = lilyMesh.base[Math.floor(Math.random() * lilyMesh.base.length)];
+    m.compose(new THREE.Vector3(rec.x, 0.14, rec.z), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+    flowers.setMatrixAt(i, m);
+  }
+  lilyMesh.pads = pads;
+  scene.add(pads, flowers);
+}
 // Wind sway: whole-group rotation.z only (pivot is the ground line, so a
 // sideways lean reads as a breeze; rotation.x would bob far reeds vertically).
 // Two groups, different phase — the marsh does not sway as one rigid sheet.
 function swayReeds(t) {
   reedGroup.rotation.z = Math.sin(t * 0.6) * 0.010;
   grassGroup.rotation.z = Math.sin(t * 0.83 + 1.7) * 0.012;
+  // Lily pads ride the swell: a slow ±1.5 cm bob, phased per pad.
+  if (lilyMesh.pads) {
+    const m = _sm, q = _sq;
+    q.setFromEuler(_se);
+    for (let i = 0; i < lilyMesh.base.length; i++) {
+      const r = lilyMesh.base[i];
+      m.compose(_v.set(r.x, 0.06 + Math.sin(t * 0.7 + r.ph) * 0.015, r.z), q, _v2.set(r.s, r.s, 1));
+      lilyMesh.pads.setMatrixAt(i, m);
+    }
+    lilyMesh.pads.instanceMatrix.needsUpdate = true;
+  }
 }
 // Distant tree line + soft white clouds + low horizon hills (original shapes).
 // Trees are TWO InstancedMeshes (trunks + crowns, 24 trees in two depth
@@ -290,44 +477,144 @@ const clouds = [];
     scene.add(sp); clouds.push(sp);
   }
 }
+// ROUND 2 — distant ambient birds: three tiny dark "V" silhouettes gliding
+// far across the sky (non-interactive). They sell the marsh as a living
+// place with wildlife beyond the hunt. One InstancedMesh, 3 instances.
+const ambientBirds = [];
+let ambientBirdMesh = null;
+{
+  const geo = new THREE.BufferGeometry();
+  // A shallow "V": two triangles meeting at the body, ~2.4 m across.
+  const pos = new Float32Array([
+    -1.2, 0.25, 0, 0, 0, 0, -0.15, -0.05, 0,
+    1.2, 0.25, 0, 0.15, -0.05, 0, 0, 0, 0
+  ]);
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  ambientBirdMesh = new THREE.InstancedMesh(geo,
+    new THREE.MeshBasicMaterial({ color: 0x1c2733, side: THREE.DoubleSide, fog: false, toneMapped: false }), 3);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+  for (let i = 0; i < 3; i++) {
+    const rec = { x: rand(-200, 200), y: rand(25, 45), z: rand(-200, -120), speed: rand(1.5, 3) * (Math.random() < 0.5 ? 1 : -1), ph: rand(0, Math.PI * 2) };
+    ambientBirds.push(rec);
+    e.set(0, rec.speed > 0 ? 0 : Math.PI, 0); q.setFromEuler(e);
+    m.compose(new THREE.Vector3(rec.x, rec.y, rec.z), q, new THREE.Vector3(1, 1, 1));
+    ambientBirdMesh.setMatrixAt(i, m);
+  }
+  scene.add(ambientBirdMesh);
+}
+const _abm = new THREE.Matrix4(), _abq = new THREE.Quaternion(), _abe = new THREE.Euler();
+function updateAmbientBirds(dt, t) {
+  for (let i = 0; i < ambientBirds.length; i++) {
+    const r = ambientBirds[i];
+    r.x += r.speed * dt;
+    if (r.x > 260) r.x = -260; else if (r.x < -260) r.x = 260;
+    // A slow wingbeat: the whole "V" rocks gently (rotation.z wobble).
+    _abe.set(0, r.speed > 0 ? 0 : Math.PI, Math.sin(t * 1.4 + r.ph) * 0.12);
+    _abq.setFromEuler(_abe);
+    _abm.compose(_v.set(r.x, r.y + Math.sin(t * 0.5 + r.ph) * 0.6, r.z), _abq, _v2.set(1, 1, 1));
+    ambientBirdMesh.setMatrixAt(i, _abm);
+  }
+  ambientBirdMesh.instanceMatrix.needsUpdate = true;
+}
 
-// ============================== birds (pooled, realistic shapes, clear plumage) ==============================
-// Plumage palettes for generic wild waterfowl — all drawn procedurally, no borrowed art.
+// ============================== birds (licensed GLTF bodies + articulated wings) ==============================
+// ROUND 2: the birds are licensed GLTF waterfowl now — a mallard drake and a
+// Canada goose (Poly by Google, CC-BY 3.0, via Poly Pizza) — pitched forward
+// into flight attitude, with two-segment articulated wings (feather-textured
+// canvas; the outer segment lags the inner, like a real flap). No free
+// licensed flying-duck GLB with spread wings was found (see the asset
+// register), so the wings are a custom flight rig on the licensed bodies —
+// the detailed parts (body, head, bill, plumage) are the licensed asset.
+// If a GLB fails to load (offline), that palette falls back to the improved
+// procedural bird below — the game never breaks on assets.
+// Plumage palettes for generic wild waterfowl. `model` picks the GLB body;
+// `call` picks the spawn call (ducks quack, geese honk). Wing colour carries
+// the palette at distance — the wings are the biggest moving visual — while
+// the body carries the species texture.
 const PLUMAGE = [
-  { body: 0x6b4a2f, head: 0x1f9d55, beak: 0xff9f1a, wing: 0x4a3220, rim: 0x39ff88 }, // green-headed drake
-  { body: 0x8a6b45, head: 0x8a6b45, beak: 0xd9a441, wing: 0x6b4f30, rim: 0xffd319 }, // mottled brown
-  { body: 0xe8e8e8, head: 0xe8e8e8, beak: 0xff9f1a, wing: 0xc9c9c9, rim: 0x27e8ff }, // white bird
-  { body: 0x2a2a33, head: 0x2a2a33, beak: 0xffd319, wing: 0x1c1c22, rim: 0xff2fd6 }, // dark bird
+  { body: 0x6b4a2f, head: 0x1f9d55, beak: 0xff9f1a, wing: 0x4a3220, rim: 0x39ff88, model: 'mallard', call: 'quack' }, // green-headed drake
+  { body: 0x8a6b45, head: 0x8a6b45, beak: 0xd9a441, wing: 0x6b4f30, rim: 0xffd319, model: 'mallard', call: 'quack' }, // mottled brown
+  { body: 0xe8e8e8, head: 0xe8e8e8, beak: 0xff9f1a, wing: 0xc9c9c9, rim: 0x27e8ff, model: 'goose', call: 'honk' }, // white bird (goose)
+  { body: 0x2a2a33, head: 0x2a2a33, beak: 0xffd319, wing: 0x1c1c22, rim: 0xff2fd6, model: 'goose', call: 'honk' }, // dark bird (goose)
 ];
 function basic(c) { return new THREE.MeshBasicMaterial({ color: c }); }
-// Shared bird geometry: one set for all 12 pooled birds (was 12 duplicate
-// geometry sets). Shared per-palette materials: 4 palettes × 4 materials
-// (was 12 birds × 4 = 48 materials).
+// Feather texture for the wings: overlapping scalloped barbs in rows over a
+// transparent base. Cutout (alphaTest) — no transparency sorting cost.
+function featherTexture() {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, 256, 128);
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 8; col++) {
+      const x = col * 32 + (row % 2 ? 16 : 0), y = row * 30;
+      ctx.fillStyle = row % 2 ? 'rgba(255,255,255,0.95)' : 'rgba(205,205,205,0.95)';
+      ctx.beginPath();
+      ctx.ellipse(x + 16, y + 18, 18, 14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(60,60,60,0.5)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x + 16, y + 4); ctx.lineTo(x + 16, y + 32); ctx.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const featherTex = featherTexture();
+// Wing planform: a tapered shape, baked flat (length along X, chord along Z)
+// and shared by every bird. Inner segment (root half) + outer segment (tip
+// half) — the outer pivots at the inner tip, so the wing folds and sweeps
+// instead of flapping as one rigid slab.
+function wingGeo(len, rootChord, tipChord) {
+  const s = new THREE.Shape();
+  s.moveTo(0, -rootChord / 2);
+  s.lineTo(len, -tipChord / 2);
+  s.lineTo(len, tipChord / 2);
+  s.lineTo(0, rootChord / 2);
+  s.closePath();
+  const g = new THREE.ShapeGeometry(s);
+  g.rotateX(-Math.PI / 2); // lie flat: length stays X, chord goes to Z
+  return g;
+}
+const wingGeoInner = wingGeo(0.55, 0.62, 0.42);
+const wingGeoOuter = wingGeo(0.6, 0.42, 0.08);
+// Shared procedural bird geometry (fallback bodies): one set for all 12
+// pooled birds. Lit plumage with a faint rim emissive for distance readability.
 const birdGeos = {
   body: new THREE.SphereGeometry(0.55, 14, 10),
   tail: new THREE.BoxGeometry(0.7, 0.08, 0.45),
   neck: new THREE.CylinderGeometry(0.12, 0.16, 0.55, 8),
   head: new THREE.SphereGeometry(0.26, 12, 10),
   beak: new THREE.ConeGeometry(0.11, 0.42, 8),
-  wing: new THREE.BoxGeometry(0.9, 0.06, 1.1),
 };
-// Lit plumage (MeshStandardMaterial) with a faint rim emissive from the
-// palette's `rim` colour — the rim field existed in the live build but was
-// never used. It keeps silhouettes readable against the bright sky at distance.
 const PAL_MATS = PLUMAGE.map(pal => ({
   body: new THREE.MeshStandardMaterial({ color: pal.body, roughness: 0.8, metalness: 0, emissive: pal.rim, emissiveIntensity: 0.15 }),
   head: new THREE.MeshStandardMaterial({ color: pal.head, roughness: 0.8, metalness: 0, emissive: pal.rim, emissiveIntensity: 0.12 }),
   beak: new THREE.MeshStandardMaterial({ color: pal.beak, roughness: 0.6, metalness: 0 }),
-  wing: new THREE.MeshStandardMaterial({ color: pal.wing, roughness: 0.85, metalness: 0 }),
+  tail: new THREE.MeshStandardMaterial({ color: pal.wing, roughness: 0.85, metalness: 0 }),
+  wing: new THREE.MeshStandardMaterial({ color: pal.wing, roughness: 0.85, metalness: 0, map: featherTex, alphaTest: 0.35, side: THREE.DoubleSide }),
 }));
+// Per-model flight pitch (radians, nose-down): a rigid standing model cannot
+// have BOTH a level body and a forward neck, so the pitch splits the
+// difference — the mallard reads as level flight with its head up, the goose
+// as a descending glide. Estimated from the model thumbnails; tune after the
+// pixel captures if the attitude reads wrong. Target body lengths: mallard
+// 1.15 m, goose 1.3 m.
+const BIRD_MODEL_CFG = {
+  mallard: { file: 'mallard-duck.glb', pitch: -0.96, length: 1.15 },
+  goose: { file: 'canada-goose.glb', pitch: -0.7, length: 1.3 },
+};
+const birdModels = { mallard: null, goose: null }; // oriented GLTF scenes, set by the asset loader
 function makeBird(palIdx) {
   const pal = PLUMAGE[palIdx];
   const g = new THREE.Group();
-  const { body: bodyMat, head: headMat, beak: beakMat, wing: wingMat } = PAL_MATS[palIdx];
-  // Ellipsoid body, swept-back tail, neck + head + beak: a recognizable bird silhouette.
+  const { body: bodyMat, head: headMat, beak: beakMat, tail: tailMat, wing: wingMat } = PAL_MATS[palIdx];
+  // Procedural fallback body (hidden once the GLB for this palette loads):
+  // ellipsoid body, swept-back tail, neck + head + beak.
+  const proc = new THREE.Group();
   const body = new THREE.Mesh(birdGeos.body, bodyMat);
   body.scale.set(1.5, 0.75, 0.7);
-  const tail = new THREE.Mesh(birdGeos.tail, wingMat);
+  const tail = new THREE.Mesh(birdGeos.tail, tailMat);
   tail.position.set(-0.85, 0.08, 0); tail.rotation.z = 0.25;
   const neck = new THREE.Mesh(birdGeos.neck, headMat);
   neck.position.set(0.72, 0.35, 0); neck.rotation.z = -0.5;
@@ -335,23 +622,50 @@ function makeBird(palIdx) {
   head.position.set(0.95, 0.62, 0);
   const beak = new THREE.Mesh(birdGeos.beak, beakMat);
   beak.rotation.z = -Math.PI / 2; beak.position.set(1.28, 0.58, 0);
-  // Wings: broad flat shapes that flap around the body axis.
+  proc.add(body, tail, neck, head, beak);
+  g.add(proc);
+  // Slot for the GLB body (filled by the asset loader when the model arrives).
+  const gltfSlot = new THREE.Group();
+  g.add(gltfSlot);
+  // Articulated wings: inner segment pivots at the body, outer segment pivots
+  // at the inner tip (set slightly back so the wing sweeps). The baked-flat
+  // geometry has its length along X; rotation.y swings it out to ±Z.
   function wing(side) {
-    const w = new THREE.Group();
-    const slab = new THREE.Mesh(birdGeos.wing, wingMat);
-    slab.position.set(-0.05, 0, side * 0.55);
-    w.add(slab);
-    w.position.set(0.05, 0.18, 0);
-    return w;
+    const inner = new THREE.Group();
+    const innerMesh = new THREE.Mesh(wingGeoInner, wingMat);
+    innerMesh.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    inner.add(innerMesh);
+    const outer = new THREE.Group();
+    outer.position.set(-0.12, 0, side * 0.55);
+    const outerMesh = new THREE.Mesh(wingGeoOuter, wingMat);
+    outerMesh.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    outer.add(outerMesh);
+    inner.add(outer);
+    inner.position.set(0.05, 0.18, side * 0.12);
+    return { inner, outer };
   }
   const wingL = wing(1), wingR = wing(-1);
-  g.add(body, tail, neck, head, beak, wingL, wingR);
+  g.add(wingL.inner, wingR.inner);
   g.visible = false;
   scene.add(g);
-  return { g, wingL, wingR, pal, active: false, falling: false, dir: 1, speed: 5, y0: 4, z: -17, bob: 0, fallT: 0, hitR: 1.0, quackT: 4 };
+  // Hit ellipsoid radii (bird-local, metres): the body + the full wingspan.
+  // Sized from the designed silhouette (body ~1.15 m, span ~2.5 m) with a
+  // small margin — a shot that visibly strikes a wingtip now counts.
+  return { g, proc, gltfSlot, wingL, wingR, pal, active: false, falling: false, dir: 1, speed: 5, y0: 4, z: -17, bob: 0, fallT: 0, hitRx: 1.15, hitRy: 0.6, hitRz: 1.3, quackT: 4 };
 }
 const birds = [];
 for (let i = 0; i < 12; i++) birds.push(makeBird(Math.floor(Math.random() * PLUMAGE.length)));
+// Called by the asset loader when a bird GLB arrives: every pool bird of
+// that model swaps its procedural body for a clone of the licensed model.
+// Clones share geometry/materials, so the swap costs no extra GPU memory.
+function registerBirdModel(type, orientedScene) {
+  birdModels[type] = orientedScene;
+  for (const b of birds) {
+    if (b.pal.model !== type) continue;
+    b.proc.visible = false;
+    if (!b.gltfSlot.children.length) b.gltfSlot.add(orientedScene.clone());
+  }
+}
 function spawnBird() {
   const b = birds.find(x => !x.active);
   if (!b) return;
@@ -367,14 +681,14 @@ function spawnBird() {
   b.falling = false; b.fallT = 0;
   b.quackT = rand(2, 5);
   b.g.position.set(dir === 1 ? -10 : 10, b.y0, b.z);
-  // ORIENTATION RESET — the bug behind belly-up birds: a shot bird's tumble
-  // left a random roll in rotation.z, and respawns never cleared it. Reset all
-  // three axes so the belly faces DOWN and the beak points along travel.
+  // ORIENTATION RESET — a shot bird's tumble leaves a random roll in
+  // rotation.z, and respawns must clear it: belly DOWN, beak along travel.
   b.g.rotation.set(0, dir === 1 ? 0 : Math.PI, 0);
   b.g.visible = true;
   b.active = true;
   flutterSound();
-  quackSound(0.18, b.g.position); // spatial: quack comes from the bird's sky position
+  if (b.pal.call === 'honk') honkSound(0.16, b.g.position); // spatial: honk comes from the goose
+  else quackSound(0.18, b.g.position); // spatial: quack comes from the bird's sky position
 }
 function updateBirds(dt, t) {
   for (const b of birds) {
@@ -386,14 +700,22 @@ function updateBirds(dt, t) {
       if (b.g.position.y <= 0.25 || b.fallT > 1.4) { b.active = false; b.g.visible = false; }
       continue;
     }
+    // Two-segment flap: the outer segment lags the inner by ~0.6 rad, so the
+    // wing sweeps and folds instead of flapping as one rigid slab.
     const flap = Math.sin(t * 14 + b.bob) * 0.85;
-    b.wingL.rotation.x = flap; b.wingR.rotation.x = -flap;
+    const flapOuter = Math.sin(t * 14 + b.bob - 0.6) * 0.95;
+    b.wingL.inner.rotation.x = flap; b.wingR.inner.rotation.x = -flap;
+    b.wingL.outer.rotation.x = flapOuter; b.wingR.outer.rotation.x = -flapOuter;
     b.g.position.x += b.dir * b.speed * dt;
     b.g.position.y = b.y0 + Math.sin(t * 2 + b.bob) * 0.35;
-    // Occasional mid-flight quack, staggered per bird, quieter with distance.
+    // Gentle banking into the bob: the bird rolls a few degrees with its
+    // vertical motion, like a real bird riding the air.
+    b.g.rotation.z = Math.sin(t * 2 + b.bob + 0.9) * 0.08;
+    // Occasional mid-flight call, staggered per bird, quieter with distance.
     b.quackT -= dt;
     if (b.quackT <= 0) {
-      quackSound(0.22 - Math.abs(b.z) * 0.004, b.g.position);
+      if (b.pal.call === 'honk') honkSound(0.2 - Math.abs(b.z) * 0.004, b.g.position);
+      else quackSound(0.22 - Math.abs(b.z) * 0.004, b.g.position);
       b.quackT = rand(3.5, 7);
     }
     if ((b.dir === 1 && b.g.position.x > 10.5) || (b.dir === -1 && b.g.position.x < -10.5)) {
@@ -404,11 +726,15 @@ function updateBirds(dt, t) {
     }
   }
 }
-// ============================== marsh dog (ORIGINAL design) ==============================
-// An original retriever-style marsh dog with a neon collar. It waits in the
-// foreground grass at the bottom of the view. On a hit it pops up, barks happily, and
-// fetches (carries a small bird shape). On a miss it tilts its head and gives
-// a confused bark — sympathetic and funny, never mocking the player.
+// ============================== marsh dog (licensed GLTF Shiba + procedural fallback) ==============================
+// ROUND 2: the dog is a licensed GLTF Shiba Inu (Quaternius, CC0, skinned +
+// animated: Idle / Walk / Gallop / Jump / HeadLow clips) with a real fetch
+// run — on a hit it gallops out toward the fallen bird's side of the bank
+// and back, carrying the bird. If the GLB fails to load, the procedural
+// retriever below (breathing, ear twitch, bird-watching head, bounce fetch)
+// stays in place — the game never breaks on assets. The dog never swims:
+// the fetch target is clamped to the bank's water edge (a swimming animation
+// was not available; see the asset register).
 function barkSound(happy) {
   if (!AC || !soundOn) return;
   const t = AC.currentTime;
@@ -431,6 +757,13 @@ function barkSound(happy) {
   else { bark(0, 0.18); bark(0.22, 0.15); }
 }
 const dog = new THREE.Group();
+const dogProc = new THREE.Group(); // procedural fallback dog (hidden once the GLB arrives)
+dog.add(dogProc);
+const dogGltf = new THREE.Group(); // licensed GLB dog (hidden until loaded)
+dogGltf.visible = false;
+dog.add(dogGltf);
+let dogMixer = null, dogActions = {}, dogGltfActive = false, dogGltfCarried = null;
+const DOG_HOME = new THREE.Vector3(-1.4, 0, -4.5);
 {
   // Lit coat (MeshStandardMaterial) so the sun shapes the dog; the neon collar
   // keeps a faint emissive so it reads in the grass.
@@ -468,8 +801,8 @@ const dog = new THREE.Group();
       legs.setMatrixAt(i, lm);
     });
   }
-  dog.add(legs);
-  dog.add(body, chest, head, collar, tail);
+  dogProc.add(legs);
+  dogProc.add(body, chest, head, collar, tail);
   dog.userData.head = head; dog.userData.tail = tail;
   dog.userData.body = body; dog.userData.earL = earL; dog.userData.earR = earR;
   // Carried bird shown only during the fetch celebration.
@@ -484,30 +817,141 @@ const dog = new THREE.Group();
   dog.userData.carried = carried;
   // Soft blob shadow grounding the dog in the grass (1 draw call, no shadow
   // maps). Parented to the SCENE at the dog's spot, not to the dog — so it
-  // stays on the ground during the fetch bounce instead of lifting with it.
+  // stays on the ground during the fetch run instead of travelling with it.
+  // y 0.07 sits just above the bank disc (y 0.05).
   const blob = new THREE.Mesh(new THREE.CircleGeometry(0.65, 20),
     new THREE.MeshBasicMaterial({ color: 0x06130a, transparent: true, opacity: 0.35, depthWrite: false }));
-  blob.rotation.x = -Math.PI / 2; blob.position.set(-1.4, 0.02, -4.5); blob.scale.set(1, 1.4, 1);
+  blob.rotation.x = -Math.PI / 2; blob.position.set(-1.4, 0.07, -4.5); blob.scale.set(1, 1.4, 1);
   scene.add(blob);
   // Grass-band spot, bottom-left of the forward view: camera sits at
   // y 1.6, the dog is ~0.9 tall at z −4.5, sitting in the foreground grass
   // so it reads at the bottom of the comfortable Quest view cone without
   // blocking the birds or the aim.
-  dog.position.set(-1.4, 0, -4.5);
+  dog.position.copy(DOG_HOME);
   scene.add(dog);
 }
-const dogState = { mode: 'idle', t: 0, earT: 4, earSide: 0, earK: 0 };
-function dogFetch() {
+const dogState = { mode: 'idle', t: 0, earT: 4, earSide: 0, earK: 0, fetch: null };
+// Called by the asset loader when the Shiba GLB arrives: swap the procedural
+// dog for the animated one. Clip lookup matches by suffix — the file carries
+// each clip twice (plain name + 'AnimalArmature|' prefix).
+function registerDogModel(orientedScene, clips) {
+  dogGltf.add(orientedScene);
+  dogMixer = new THREE.AnimationMixer(orientedScene);
+  const findClip = (name) => clips.find(c => c.name === name || c.name.endsWith('|' + name)) || null;
+  for (const name of ['Idle', 'Gallop', 'Walk', 'Idle_2_HeadLow']) {
+    const clip = findClip(name);
+    if (clip) dogActions[name] = dogMixer.clipAction(clip);
+  }
+  if (dogActions.Idle) { dogActions.Idle.play(); dogActions.Idle.enabled = true; }
+  // Carried bird for the GLB dog: a small bird shape held at the mouth
+  // (positioned from the model's bounds — the mouth is up-forward).
+  const box = new THREE.Box3().setFromObject(orientedScene);
+  const carried = new THREE.Group();
+  const cBody = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), basic(0x6b4a2f));
+  cBody.scale.set(1.4, 0.7, 0.7);
+  const cWing = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.22), basic(0x4a3220));
+  cWing.position.set(0, 0.08, 0.14);
+  carried.add(cBody, cWing);
+  carried.position.set(0, box.max.y * 0.72, box.max.z * 0.85);
+  carried.visible = false;
+  dogGltf.add(carried);
+  dogGltfCarried = carried;
+  dogProc.visible = false;
+  dogGltf.visible = true;
+  dogGltfActive = true;
+}
+function dogPlayClip(name) {
+  if (!dogMixer || !dogActions[name]) return;
+  const next = dogActions[name];
+  const current = Object.values(dogActions).find(a => a.isRunning() && a !== next);
+  if (current) current.crossFadeTo(next, 0.25, true);
+  next.reset().play();
+}
+function dogFetch(fallPos) {
   dogState.mode = 'fetch'; dogState.t = 0;
   dog.userData.carried.visible = true;
+  if (dogGltfActive && fallPos) {
+    // Fetch target: toward the fallen bird, clamped to the bank (the dog
+    // never swims — the water edge is z −9 from its home at z −4.5).
+    dogState.fetch = {
+      phase: 'out',
+      tx: clamp(fallPos.x, -8, 8), tz: -9,
+      pauseT: 0
+    };
+    dogPlayClip('Gallop');
+  }
   barkSound(true);
 }
 function dogMiss() {
   if (dogState.mode === 'fetch') return; // never interrupt a fetch celebration
   dogState.mode = 'miss'; dogState.t = 0;
+  if (dogGltfActive) dogPlayClip('Idle_2_HeadLow'); // sympathetic head-low
   barkSound(false);
 }
+function resetDog() {
+  dogState.mode = 'idle'; dogState.t = 0; dogState.fetch = null;
+  dog.userData.carried.visible = false; dog.position.copy(DOG_HOME); dog.position.y = 0;
+  dog.rotation.set(0, 0, 0);
+  dog.userData.head.rotation.set(0, 0, 0);
+  if (dogGltfCarried) dogGltfCarried.visible = false;
+  if (dogGltfActive) dogPlayClip('Idle');
+}
+// GLB dog update: mixer + fetch run + miss head-low. The skeletal clips
+// provide the life (breathing, ear and tail motion live in the Idle clip),
+// so the procedural breathing/ear-twitch/glance code is not applied here.
+const _dogTarget = new THREE.Vector3();
+function updateDogGltf(dt, t) {
+  if (dogMixer) dogMixer.update(dt);
+  const st = dogState;
+  if (st.mode === 'fetch' && st.fetch) {
+    const f = st.fetch;
+    const speed = 3.5; // gallop across the bank
+    if (f.phase === 'out') {
+      _dogTarget.set(f.tx, 0, f.tz);
+      const d = _dogTarget.distanceTo(dog.position);
+      faceDogToward(_dogTarget, dt);
+      if (d > 0.15) {
+        dog.position.addScaledVector(_v.copy(_dogTarget).sub(dog.position).normalize(), Math.min(speed * dt, d));
+      } else {
+        f.phase = 'pause'; f.pauseT = 0;
+        if (dogGltfCarried) dogGltfCarried.visible = true;
+        dogPlayClip('Idle');
+      }
+    } else if (f.phase === 'pause') {
+      f.pauseT += dt;
+      if (f.pauseT > 0.5) { f.phase = 'back'; dogPlayClip('Gallop'); }
+    } else if (f.phase === 'back') {
+      const d = DOG_HOME.distanceTo(dog.position);
+      faceDogToward(DOG_HOME, dt);
+      if (d > 0.15) {
+        dog.position.addScaledVector(_v.copy(DOG_HOME).sub(dog.position).normalize(), Math.min(speed * dt, d));
+      } else {
+        st.mode = 'idle'; st.fetch = null; dog.position.copy(DOG_HOME);
+        if (dogGltfCarried) dogGltfCarried.visible = false;
+        dogPlayClip('Idle');
+      }
+    }
+    return;
+  }
+  if (st.mode === 'miss') {
+    st.t += dt;
+    if (st.t > 1.6) { st.mode = 'idle'; dogPlayClip('Idle'); }
+    return;
+  }
+  // Idle: face the player again (the run may have left the dog turned).
+  dog.rotation.y += (0 - dog.rotation.y) * Math.min(1, dt * 3);
+}
+// Turn the dog toward a target position (yaw only, smoothed). The GLB dog
+// faces +Z after orientation, so yaw = atan2(dx, dz).
+function faceDogToward(target, dt) {
+  const yaw = Math.atan2(target.x - dog.position.x, target.z - dog.position.z);
+  let d = yaw - dog.rotation.y;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  dog.rotation.y += d * Math.min(1, dt * 6);
+}
 function updateDog(dt, t) {
+  if (dogGltfActive) { updateDogGltf(dt, t); return; }
   const { head, tail, carried, body, earL, earR } = dog.userData;
   const st = dogState;
   // Breathing: a slow rise/fall of the chest — the dog is alive even at rest.
@@ -623,10 +1067,213 @@ function updateTracers(dt) {
     tr.t += dt; tr.line.material.opacity = Math.max(0, 0.9 * (1 - tr.t / 0.2));
   }
 }
-// VR laser sight: faint cyan line from the right controller, helps aiming.
-const sightGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -30)]);
-const sight = new THREE.Line(sightGeo, new THREE.LineBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0.35, toneMapped: false }));
-sight.visible = false; sight.frustumCulled = false; scene.add(sight);
+// ============================== aim rigs: controllers, shotguns, sights (ROUND 2 — PHASE 1) ==============================
+// ROOT CAUSE of "aiming completely off" (audit, Nov 15 — see the build notes):
+// the round-1 build had NO rendered weapon at all — the player aimed an
+// invisible gun using only a faint 1 px cyan line against a bright sky — and
+// the tracer on a HIT was drawn to the wrong point (it overshot the bird by
+// the full range), so even good shots LOOKED like misses; the hit sphere
+// (r 1.0) was smaller than the bird's 2.2 m wingspan, so visible wingtip hits
+// counted as misses; and aim was mapped by controller INDEX, which three.js
+// assigns in connection order, not by session.inputSources index (r160
+// WebXRManager.onInputSourcesChange) — a reconnect could silently aim from
+// the wrong hand. The ray DIRECTION itself was correct (getController is the
+// target-ray space, updated from the current frame's pose before the
+// animation callback runs — verified against the r160 source), so the fix is
+// the sight picture + the feedback + the attachment, not the ray math.
+// The fix: a shotgun in EACH hand, each barrel aligned to its own hand's
+// target ray by a RUNTIME-MEASURED grip→ray offset (self-calibrating across
+// hardware — no hardcoded angle); controllers attached by handedness from the
+// 'connected' event, never by index; either trigger shoots from its own
+// hand; the tracer ends exactly where the shot hit.
+function makeSightLine(color, opacity, len) {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -(len || 30))]);
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity, toneMapped: false }));
+  line.visible = false; line.frustumCulled = false; scene.add(line);
+  return line;
+}
+function updateSightLine(line, origin, dir, len) {
+  line.visible = true;
+  const pos = line.geometry.attributes.position;
+  pos.setXYZ(0, origin.x, origin.y, origin.z);
+  pos.setXYZ(1, origin.x + dir.x * len, origin.y + dir.y * len, origin.z + dir.z * len);
+  pos.needsUpdate = true;
+}
+// One sight line per hand (scene-level, world-space endpoints).
+const sights = { left: makeSightLine(0x27e8ff, 0.45, 30), right: makeSightLine(0x27e8ff, 0.45, 30) };
+// Debug visuals (?debug only — zero cost otherwise): a bright orange ray per
+// hand + a hit-point marker showing where the ray would strike.
+const debugViz = { left: null, right: null, markerL: null, markerR: null };
+if (DEBUG_MODE) {
+  debugViz.left = makeSightLine(0xff5a2a, 0.9, 40);
+  debugViz.right = makeSightLine(0xff5a2a, 0.9, 40);
+  for (const key of ['markerL', 'markerR']) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff5a2a, transparent: true, opacity: 0.9, depthTest: false, toneMapped: false }));
+    m.visible = false; m.renderOrder = 999; m.frustumCulled = false;
+    scene.add(m);
+    debugViz[key] = m;
+  }
+}
+// Procedural fallback shotgun (shown until the GLB loads, or if it fails):
+// blued-steel barrel + receiver, walnut stock + pump, brass bead. Built so
+// the barrel lies along -Z with the grip at the origin — the same contract
+// the GLB orientation helper produces. Muzzle: 0.82 m forward, 0.06 m up.
+function buildProceduralGun() {
+  const gun = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0x2a2e35, roughness: 0.35, metalness: 0.85 });
+  const steelDark = new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 0.45, metalness: 0.8 });
+  const walnut = new THREE.MeshStandardMaterial({ color: 0x5a3a1a, roughness: 0.55, metalness: 0.05 });
+  const brass = new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.3, metalness: 0.9 });
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.7, 10), steel);
+  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.45);
+  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.28), steelDark);
+  receiver.position.set(0, 0.03, -0.05);
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.3), walnut);
+  stock.position.set(0, -0.01, 0.22); stock.rotation.x = 0.12;
+  const pump = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.18, 10), walnut);
+  pump.rotation.x = Math.PI / 2; pump.position.set(0, 0.03, -0.28);
+  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.008, 6, 14), steelDark);
+  guard.position.set(0, -0.045, -0.02);
+  const bead = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 6), brass);
+  bead.position.set(0, 0.085, -0.79);
+  gun.add(barrel, receiver, stock, pump, guard, bead);
+  return gun;
+}
+const aimRigs = { left: null, right: null };
+const _rq = new THREE.Quaternion(), _gq = new THREE.Quaternion(), _aq = new THREE.Quaternion();
+const _rv = new THREE.Vector3();
+let gunModel = null, gunMuzzleLocal = null; // licensed shotgun, set by the asset loader
+function registerGunModel(orientedScene, muzzleLocal) {
+  gunModel = orientedScene; gunMuzzleLocal = muzzleLocal;
+  for (const hand of ['left', 'right']) {
+    const rig = aimRigs[hand];
+    if (rig) swapGunToGltf(rig);
+  }
+}
+function swapGunToGltf(rig) {
+  if (!gunModel || rig.gunIsGltf) return;
+  rig.gunGroup.remove(rig.gun);
+  const gltfGun = gunModel.clone();
+  rig.gunGroup.add(gltfGun);
+  rig.gun = gltfGun; rig.gunIsGltf = true;
+  // Muzzle offset from the oriented model (gun-local coords).
+  rig.muzzleFwd = -gunMuzzleLocal.z;
+  rig.muzzleUp = gunMuzzleLocal.y;
+  rig.flash.position.set(0, rig.muzzleUp, -rig.muzzleFwd);
+}
+function attachRig(inputSource, rayGroup, gripGroup) {
+  const hand = inputSource.handedness;
+  if (hand !== 'left' && hand !== 'right') return;
+  if (aimRigs[hand]) return; // already attached
+  const gunGroup = new THREE.Group();
+  gripGroup.add(gunGroup);
+  const gun = buildProceduralGun();
+  gunGroup.add(gun);
+  const rig = {
+    hand, src: inputSource, ray: rayGroup, grip: gripGroup,
+    gunGroup, gun, gunIsGltf: false,
+    muzzleFwd: 0.82, muzzleUp: 0.06, // procedural gun's muzzle (GLB swap updates these)
+    aligned: false, rayGripDeg: 0, prevTrig: false,
+    flash: null, flashT: 99, recoil: 0
+  };
+  // Muzzle flash sprite (per hand, visible ~60 ms per shot).
+  const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: softGlowTex, color: 0xffd27a, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+  flash.scale.set(0.35, 0.35, 1);
+  flash.visible = false;
+  flash.position.set(0, rig.muzzleUp, -rig.muzzleFwd);
+  gunGroup.add(flash);
+  rig.flash = flash;
+  aimRigs[hand] = rig;
+  if (gunModel) swapGunToGltf(rig); // the GLB already loaded — swap in now
+}
+function detachRig(inputSource) {
+  const hand = inputSource.handedness;
+  const rig = aimRigs[hand];
+  if (!rig || rig.src !== inputSource) return;
+  rig.grip.remove(rig.gunGroup);
+  if (sights[hand]) sights[hand].visible = false;
+  if (debugViz[hand]) debugViz[hand].visible = false;
+  const mk = hand === 'left' ? debugViz.markerL : debugViz.markerR;
+  if (mk) mk.visible = false;
+  aimRigs[hand] = null;
+}
+// Controller groups: created once at boot, added to the scene (the gun is a
+// child of the grip group, so the groups must be in the scene graph to
+// render). Attached by handedness from the 'connected' event — NEVER by
+// controller index (Bible §3.8; r160 assigns slots in connection order).
+for (let i = 0; i < 2; i++) {
+  const rayGroup = renderer.xr.getController(i);
+  const gripGroup = renderer.xr.getControllerGrip(i);
+  scene.add(rayGroup);
+  scene.add(gripGroup);
+  rayGroup.addEventListener('connected', (e) => attachRig(e.data, rayGroup, gripGroup));
+  rayGroup.addEventListener('disconnected', (e) => detachRig(e.data));
+}
+// Align a rig's gun to its target ray: measure the fixed rigid offset
+// between this hand's grip pose and its target-ray pose, then set the gun's
+// local rotation so the gun's barrel (-Z) lies exactly along the ray. The
+// offset is fixed per hardware, so it is measured once per connection and
+// cached. No hardcoded angle — the runtime tells us the truth.
+function alignGunToRay(rig) {
+  if (rig.aligned) return;
+  if (!rig.grip.visible || !rig.ray.visible) return; // poses not valid yet
+  rig.grip.getWorldQuaternion(_gq);
+  rig.ray.getWorldQuaternion(_rq);
+  _aq.copy(_gq).invert().multiply(_rq); // grip⁻¹ × ray
+  rig.gunGroup.quaternion.copy(_aq);
+  rig.aligned = true;
+  // The grip↔ray angle (for the debug HUD): the quaternion's rotation angle.
+  rig.rayGripDeg = 2 * Math.acos(Math.min(1, Math.abs(_aq.w))) * 180 / Math.PI;
+}
+// Current-frame aim pose for a rig: origin + direction of the target ray.
+// The XR manager updates the controller groups from the current XRFrame
+// BEFORE the animation callback runs (r160 WebXRManager.onAnimationFrame),
+// so these reads are current-frame, not one frame stale.
+function getRigRay(rig, originOut, dirOut) {
+  rig.ray.getWorldPosition(originOut);
+  rig.ray.getWorldQuaternion(_rq);
+  dirOut.set(0, 0, -1).applyQuaternion(_rq);
+}
+// Shot origin: the muzzle (the gun's axes coincide with the ray's axes after
+// alignment, so the gun-local muzzle offset maps through the ray orientation).
+function getRigMuzzle(rig, originOut, dirOut) {
+  getRigRay(rig, originOut, dirOut);
+  _rv.set(0, 1, 0).applyQuaternion(_rq);
+  originOut.addScaledVector(dirOut, rig.muzzleFwd).addScaledVector(_rv, rig.muzzleUp);
+}
+function hideAimVisuals() {
+  sights.left.visible = false; sights.right.visible = false;
+  if (debugViz.left) debugViz.left.visible = false;
+  if (debugViz.right) debugViz.right.visible = false;
+  if (debugViz.markerL) debugViz.markerL.visible = false;
+  if (debugViz.markerR) debugViz.markerR.visible = false;
+}
+// Debug diagnostic (?debug only): a bright ray + a hit-point marker showing
+// the closest approach of this ray to any active bird — the true hit point
+// if the player fired now — or a point 15 m out when no bird is near.
+function updateAimDebug(rig) {
+  const ray = debugViz[rig.hand];
+  if (!ray) return;
+  getRigRay(rig, _v, _dir);
+  updateSightLine(ray, _v, _dir, 40);
+  const marker = rig.hand === 'left' ? debugViz.markerL : debugViz.markerR;
+  if (!marker) return;
+  raycaster.set(_v, _dir);
+  let bestD = 1e9, bestP = null;
+  for (const b of birds) {
+    if (!b.active || b.falling) continue;
+    const d = raycaster.ray.distanceToPoint(b.g.position);
+    if (d < bestD) { bestD = d; bestP = b; }
+  }
+  if (bestP && bestD < 3) {
+    raycaster.ray.closestPointToPoint(bestP.g.position, _v3);
+    marker.position.copy(_v3);
+  } else {
+    marker.position.copy(_v).addScaledVector(_dir, 15);
+  }
+  marker.visible = true;
+}
 
 // ============================== frame-time valve (Bible §2) ==============================
 // This game had no valve. EMA α 0.05, fed ONLY during active play, degrade
@@ -660,6 +1307,81 @@ const perfValve = {
 // Warm-up window (seconds) after start/resume during which the EMA is not
 // fed — load and resume hitches are not gameplay frame time.
 let perfWarmup = 0;
+
+// ============================== local performance capture (V2.0 / Standard §4) ==============================
+// Browser-side frame-time + valve-state capture, stored LOCALLY on the
+// device (localStorage) ONLY — key `marsh-shot-vr:perf-log`. No personal
+// data of any kind, no network calls, nothing transmitted. One summary per
+// play session (last 5 sessions kept; samples capped at 1 h in memory).
+// What is logged per session: date, duration, sample count, min/median/p95
+// frame-time EMA (ms), seconds spent in each valve level. This exists so
+// Danny's headset sessions produce a performance record automatically — no
+// hand-copied numbers. Only what the browser can measure (frame times +
+// valve state); no GPU-level claims. The last session's summary shows on
+// the menu (see showLastPerfSummary). All storage is guarded: a storage
+// failure must never break the game.
+const PERF_LOG_KEY = 'marsh-shot-vr:perf-log';
+const PERF_LOG_MAX_SESSIONS = 5;
+const perfSession = { active: false, startT: 0, samples: [], sampleT: 0, valveSec: [0, 0, 0] };
+function perfSessionStart() {
+  if (perfSession.active) return; // restarts continue the same sitting
+  perfSession.active = true;
+  perfSession.startT = performance.now();
+  perfSession.samples.length = 0;
+  perfSession.sampleT = 0;
+  perfSession.valveSec = [0, 0, 0];
+}
+function perfSessionTick(dt) {
+  if (!perfSession.active) return;
+  perfSession.valveSec[perfValve.level] = (perfSession.valveSec[perfValve.level] || 0) + dt;
+  perfSession.sampleT += dt;
+  if (perfSession.sampleT >= 1.0) {
+    perfSession.sampleT -= 1.0;
+    perfSession.samples.push({ ema: Math.round(perfValve.ema * 10) / 10, v: perfValve.level });
+    if (perfSession.samples.length > 3600) perfSession.samples.shift(); // cap: 1 h of samples
+  }
+}
+function perfSessionFlush() {
+  if (!perfSession.active) return;
+  perfSession.active = false;
+  try {
+    const ems = perfSession.samples.map(s => s.ema).sort((a, b) => a - b);
+    const n = ems.length;
+    const rec = {
+      date: new Date().toISOString(),
+      durSec: Math.round((performance.now() - perfSession.startT) / 1000),
+      samples: n,
+      emaMin: n ? ems[0] : 0,
+      emaMed: n ? ems[Math.floor(n / 2)] : 0,
+      emaP95: n ? ems[Math.min(n - 1, Math.floor(n * 0.95))] : 0,
+      valveSec: perfSession.valveSec.map(v => Math.round(v))
+    };
+    let log = [];
+    try { const raw = localStorage.getItem(PERF_LOG_KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) log = p; } } catch (e) { log = []; }
+    log.push(rec);
+    while (log.length > PERF_LOG_MAX_SESSIONS) log.shift();
+    localStorage.setItem(PERF_LOG_KEY, JSON.stringify(log));
+    showLastPerfSummary();
+  } catch (e) { /* local logging must never break the game */ }
+}
+function showLastPerfSummary() {
+  const el = document.getElementById('perfLast');
+  if (!el) return;
+  try {
+    const raw = localStorage.getItem(PERF_LOG_KEY);
+    const log = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(log) || !log.length) { el.textContent = 'Performance: no session logged yet.'; return; }
+    const r = log[log.length - 1];
+    const mins = Math.max(1, Math.round(r.durSec / 60));
+    const totalV = ((r.valveSec[0] || 0) + (r.valveSec[1] || 0) + (r.valveSec[2] || 0)) || 1;
+    const l0 = Math.round((r.valveSec[0] || 0) / totalV * 100);
+    const d = new Date(r.date);
+    const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    el.textContent = 'Last session (' + when + '): ' + mins + ' min · median ' + r.emaMed + ' ms · p95 ' + r.emaP95 + ' ms · valve L0 ' + l0 + '% of play.';
+  } catch (e) { el.textContent = 'Performance: last-session summary unavailable.'; }
+}
+showLastPerfSummary(); // menu shows the previous session before play starts
+window.addEventListener('pagehide', perfSessionFlush);
 
 // ============================== synthesized audio (no samples) ==============================
 // Spatial audio: quacks and barks route through HRTF panners at their world
@@ -801,6 +1523,34 @@ function quackSound(vol, pos) {
   }
   o.start(t); o.stop(t + 0.22);
 }
+// Distant goose honk: two descending notes — the call of the Canada geese.
+// Spatial like the quack; fired on goose spawns instead of the quack.
+function honkSound(vol, pos) {
+  if (!AC || !soundOn) return;
+  const t = AC.currentTime, v = vol || 0.16;
+  const notes = [[0, 620, 300], [0.16, 520, 260]];
+  for (const [at, f0, f1] of notes) {
+    const o = AC.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(f0, t + at);
+    o.frequency.exponentialRampToValueAtTime(f1, t + at + 0.14);
+    const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.9;
+    const g = AC.createGain();
+    g.gain.setValueAtTime(0.0001, t + at);
+    g.gain.exponentialRampToValueAtTime(v, t + at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + at + 0.16);
+    o.connect(f); f.connect(g);
+    if (pos) {
+      const p = AC.createPanner();
+      p.panningModel = 'HRTF'; p.distanceModel = 'inverse';
+      p.refDistance = 8; p.maxDistance = 120;
+      p.positionX.setValueAtTime(pos.x, t);
+      p.positionY.setValueAtTime(pos.y, t);
+      p.positionZ.setValueAtTime(pos.z, t);
+      g.connect(p); p.connect(AC.destination);
+    } else g.connect(AC.destination);
+    o.start(t + at); o.stop(t + at + 0.18);
+  }
+}
 function flutterSound() {
   if (!AC || !soundOn) return;
   const src = AC.createBufferSource(); src.buffer = noiseBuf;
@@ -896,6 +1646,52 @@ const pausePlane = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.56),
   new THREE.MeshBasicMaterial({ map: pauseTex, transparent: true, depthTest: false, toneMapped: false }));
 pausePlane.renderOrder = 1001; pausePlane.position.set(0, 0.15, -1.5); pausePlane.visible = false;
 camera.add(pausePlane);
+// Debug plane (?debug only): aim + asset + perf state in VR, bottom-left.
+// Created only when DEBUG_MODE — zero cost otherwise. Redrawn ≤2×/s.
+let debugPlane = null, debugCtx = null, debugTex = null;
+if (DEBUG_MODE) {
+  const dc = document.createElement('canvas'); dc.width = 640; dc.height = 192;
+  debugCtx = dc.getContext('2d');
+  debugTex = new THREE.CanvasTexture(dc);
+  debugPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.33),
+    new THREE.MeshBasicMaterial({ map: debugTex, transparent: true, depthTest: false, toneMapped: false }));
+  debugPlane.renderOrder = 1002; debugPlane.position.set(-0.42, -0.72, -1.5); debugPlane.visible = true;
+  camera.add(debugPlane);
+}
+function drawDebugPlane() {
+  if (!DEBUG_MODE || !debugCtx) return;
+  const c = debugCtx;
+  c.clearRect(0, 0, 640, 192);
+  c.fillStyle = 'rgba(2,8,24,0.78)'; c.fillRect(0, 0, 640, 192);
+  c.strokeStyle = '#ff5a2a'; c.lineWidth = 3; c.strokeRect(3, 3, 634, 186);
+  c.textAlign = 'left';
+  c.font = 'bold 22px monospace'; c.fillStyle = '#ffb08a';
+  const rigL = aimRigs.left, rigR = aimRigs.right;
+  const rigTxt = 'RIGS L:' + (rigL ? (rigL.aligned ? 'OK ' + rigL.rayGripDeg.toFixed(1) + 'deg' : 'no-align') : '--') +
+    ' R:' + (rigR ? (rigR.aligned ? 'OK ' + rigR.rayGripDeg.toFixed(1) + 'deg' : 'no-align') : '--');
+  c.fillText(rigTxt, 14, 34);
+  c.font = '20px monospace'; c.fillStyle = '#7df9ff';
+  let rayTxt = '';
+  for (const hand of ['left', 'right']) {
+    const rig = aimRigs[hand];
+    if (!rig) continue;
+    rig.ray.getWorldPosition(_v); rig.ray.getWorldQuaternion(_q);
+    _dir.set(0, 0, -1).applyQuaternion(_q);
+    rayTxt += (hand === 'left' ? 'L' : 'R') + ' o(' + _v.x.toFixed(2) + ',' + _v.y.toFixed(2) + ',' + _v.z.toFixed(2) +
+      ') d(' + _dir.x.toFixed(2) + ',' + _dir.y.toFixed(2) + ',' + _dir.z.toFixed(2) + ') ';
+  }
+  c.fillText(rayTxt || 'no rigs attached', 14, 64);
+  c.fillStyle = '#ffd319';
+  const shotTxt = lastShot
+    ? 'LAST SHOT ' + lastShot.hand + ': ' + (lastShot.hit ? 'HIT ' + lastShot.dist.toFixed(1) + 'm' : 'MISS')
+    : 'LAST SHOT: --';
+  c.fillText(shotTxt, 14, 94);
+  c.fillStyle = '#9fd8ff';
+  const a = assetStatus;
+  c.fillText('ASSETS duck:' + a.mallard + ' goose:' + a.goose + ' gun:' + a.shotgun + ' dog:' + a.dog, 14, 124);
+  c.fillText(perfValve.ema.toFixed(1) + 'ms · VALVE L' + perfValve.level + ' · shots ' + S.shots + ' hits ' + S.hits, 14, 154);
+  debugTex.needsUpdate = true;
+}
 function drawPausePlane() {
   pctx.clearRect(0, 0, 512, 288);
   pctx.fillStyle = 'rgba(2,8,24,0.85)'; pctx.fillRect(0, 0, 512, 288);
@@ -917,7 +1713,7 @@ function togglePause() {
   S.paused = !S.paused;
   pausePlane.visible = S.paused;
   if (S.paused) drawPausePlane();
-  else { perfWarmup = 2; prevTrig = true; } // resume: skip warm-up hitches; a held trigger must not fire a phantom shot
+  else { perfWarmup = 2; prevTrig = true; for (const h of ['left', 'right']) { const r = aimRigs[h]; if (r) r.prevTrig = true; } } // resume: skip warm-up hitches; a held trigger must not fire a phantom shot
   hudDirty = true;
 }
 const bannerEl = document.getElementById('banner');
@@ -941,10 +1737,19 @@ function updateHUD() {
   hctx.fillText('SCORE ' + S.score, 18, 78);
   hctx.fillStyle = '#7df9ff'; hctx.font = 'bold 26px Arial';
   hctx.fillText('ROUND ' + S.round + ' · BIRDS ' + Math.min(S.resolved, 10) + '/10 · STREAK ' + S.streak, 18, 138);
-  // Small third line: measured frame time + valve level + sound state. This is
-  // a measurement display, not a claim — Quest 2 numbers come from the headset.
-  hctx.fillStyle = '#9fd8ff'; hctx.font = 'bold 20px Arial';
-  hctx.fillText(perfValve.ema.toFixed(1) + 'ms · VALVE L' + perfValve.level + (soundOn ? '' : ' · SOUND OFF') + (S.paused ? ' · PAUSED' : ''), 18, 178);
+  // Third line: state flags always (SOUND OFF / PAUSED are play state, not
+  // debug info). The perf readout (EMA ms + valve level) shows ONLY in debug
+  // mode — it used to show by default, which put a "VALVE L1" debug overlay
+  // into normal play (coordinator finding, Nov 15). The local perf log
+  // (V2.0, localStorage) records the same numbers with no on-screen overlay.
+  const hudParts = [];
+  if (DEBUG_MODE) hudParts.push(perfValve.ema.toFixed(1) + 'ms · VALVE L' + perfValve.level);
+  if (!soundOn) hudParts.push('SOUND OFF');
+  if (S.paused) hudParts.push('PAUSED');
+  if (hudParts.length) {
+    hctx.fillStyle = '#9fd8ff'; hctx.font = 'bold 20px Arial';
+    hctx.fillText(hudParts.join(' · '), 18, 178);
+  }
   hudTex.needsUpdate = true;
 }
 // ============================== shooting ==============================
@@ -952,90 +1757,139 @@ const raycaster = new THREE.Raycaster();
 const mouseNDC = new THREE.Vector2(0, 0);
 const crossEl = document.getElementById('cross');
 const shotO = new THREE.Vector3(), shotD = new THREE.Vector3();
-let prevTrig = false;
-function shootFrom(origin, dir) {
+let prevTrig = false; // fallback-path trigger edge (rigs carry their own)
+let lastShot = null; // { hit, dist, hand } — shown on the debug plane (?debug)
+function shootFrom(origin, dir, hand) {
   // Copy first: origin/dir may alias the shared temp vectors used below.
   shotO.copy(origin); shotD.copy(dir);
   S.shots++; hudDirty = true;
   gunshotSound();
-  pulseHaptics('right', 0.7, 70); // firm kick on the firing hand, same frame as the sound
+  pulseHaptics(hand || 'right', 0.7, 70); // firm kick on the FIRING hand, same frame as the sound
+  // Muzzle flash + recoil on the firing hand's gun.
+  const rig = hand ? aimRigs[hand] : null;
+  if (rig) { rig.flashT = 0; rig.recoil = 1; }
   raycaster.set(shotO, shotD);
   raycaster.far = 200;
   let best = null, bestDist = 1e9;
   for (const b of birds) {
     if (!b.active || b.falling) continue;
-    _v.copy(b.g.position);
-    const dist = raycaster.ray.distanceToPoint(_v);
-    if (dist < b.hitR) {
-      const along = _v2.copy(b.g.position).sub(shotO).dot(shotD);
-      if (along > 0 && along < bestDist) { bestDist = along; best = b; }
+    // Closest point on the shot ray to the bird's centre, then the ellipsoid
+    // test in bird-local space. The old sphere test (r 1.0) was smaller than
+    // the bird's 2.5 m wingspan, so visible wingtip hits counted as misses —
+    // a Standard §5 "contact counts" violation. The ellipsoid covers the body
+    // + the full span (hitRx/hitRy/hitRz on the bird record).
+    raycaster.ray.closestPointToPoint(b.g.position, _v3);
+    const along = _v3.distanceTo(shotO);
+    if (along < 0.5) continue; // behind the shooter (closest point clamps to the origin)
+    _hitP.copy(_v3);
+    b.g.worldToLocal(_v3);
+    const ex = _v3.x / b.hitRx, ey = _v3.y / b.hitRy, ez = _v3.z / b.hitRz;
+    if (ex * ex + ey * ey + ez * ez <= 1 && along < bestDist) {
+      bestDist = along; best = b; _bestHit.copy(_hitP);
     }
   }
   if (best) {
-    _v.copy(best.g.position).addScaledVector(shotD, bestDist);
-    tracer(shotO, _v);
+    // TRACER FIX (round-1 bug): the hit point is the closest point on the
+    // ray to the bird — the old code added the along-distance to the bird's
+    // POSITION, so the tracer overshot the bird by the full range and every
+    // hit looked like a miss.
+    tracer(shotO, _bestHit);
     best.falling = true; best.fallT = 0;
     const distPts = Math.round(bestDist * 4), speedPts = Math.round(best.speed * 10);
     const streakPts = Math.min(S.streak, 5) * 10;
     const pts = 100 + distPts + speedPts + streakPts;
     S.score += pts; S.hits++; S.streak++; S.resolved++; hudDirty = true;
     burst(best.g.position, best.pal.body); // feathers tinted to the bird's plumage
-    pulseHaptics('right', 0.9, 110); // stronger confirm on a hit
+    pulseHaptics(hand || 'right', 0.9, 110); // stronger confirm on a hit
     chimeSound();
     showBanner('+' + pts + '  ·  STREAK ' + S.streak, 1.4);
-    dogFetch();
+    dogFetch(best.g.position);
+    lastShot = { hit: true, dist: bestDist, hand: hand || 'right' };
   } else {
     _v.copy(shotO).addScaledVector(shotD, 80);
     tracer(shotO, _v);
+    lastShot = { hit: false, dist: 0, hand: hand || 'right' };
   }
 }
-// In-VR controls (Rhythm Slicer button map): trigger shoots, B/Y (buttons[5])
-// toggles pause, A/X (buttons[4]) toggles sound, grip (buttons[1]) restarts
-// while paused. pollXR runs EVERY frame while presenting — pause/mute must
-// work while paused, so it cannot live inside the play-only branch. Shooting
-// is gated on play + not paused; a held trigger across a pause/resume is
-// consumed, never fired as a phantom shot.
+// In-VR controls (Rhythm Slicer button map): either trigger shoots from its
+// own hand, B/Y (buttons[5]) toggles pause, A/X (buttons[4]) toggles sound,
+// grip (buttons[1]) restarts while paused. pollXR runs EVERY frame while
+// presenting — pause/mute must work while paused, so it cannot live inside
+// the play-only branch. Shooting is gated on play + not paused; a held
+// trigger across a pause/resume is consumed, never fired as a phantom shot.
+// Aim comes from the handedness-attached rigs (see the aim-rigs section),
+// never from a controller index.
 let prevPauseBtn = false, prevMuteBtn = false, prevGripBtn = false;
-function pollXR() {
+function pollXR(dt) {
   if (!renderer.xr.isPresenting) return;
   const session = renderer.xr.getSession();
   if (!session) return;
-  let trig = false, pauseBtn = false, muteBtn = false, gripBtn = false;
-  // Controller index follows the input source's OWN index in the session:
-  // session order is not guaranteed left-then-right (Bible §3.8), so the
-  // live build's hardcoded getController(1) aimed from the wrong hand
-  // whenever the right controller enumerated first.
-  const sources = session.inputSources;
-  for (let i = 0; i < sources.length; i++) {
-    const src = sources[i];
+  let pauseBtn = false, muteBtn = false, gripBtn = false;
+  // Shared buttons (B/Y pause, A/X mute, grip restart): either hand.
+  for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp || !gp.buttons) continue;
     const b = gp.buttons;
     if (b[5] && b[5].pressed) pauseBtn = true;
     if (b[4] && b[4].pressed) muteBtn = true;
     if (b[1] && b[1].pressed) gripBtn = true;
-    if (src.handedness === 'right') {
-      const t = (b[0]) ? (b[0].value || 0) : 0;
-      if (t > 0.5) trig = true;
+  }
+  // Aim + trigger per attached rig.
+  let anyRig = false;
+  for (const hand of ['left', 'right']) {
+    const rig = aimRigs[hand];
+    if (!rig) continue;
+    anyRig = true;
+    alignGunToRay(rig);
+    const gp = rig.src.gamepad;
+    const trig = gp && gp.buttons[0] ? (gp.buttons[0].value || 0) > 0.5 : false;
+    getRigRay(rig, _v, _dir);
+    updateSightLine(sights[hand], _v, _dir, 30);
+    // Muzzle flash + recoil decay.
+    if (rig.flashT < 0.06) {
+      rig.flashT += dt;
+      const k = Math.max(0, 1 - rig.flashT / 0.06);
+      rig.flash.material.opacity = 0.9 * k;
+      rig.flash.visible = k > 0;
+    } else if (rig.flash.visible) rig.flash.visible = false;
+    if (rig.recoil > 0.001) {
+      rig.recoil = Math.max(0, rig.recoil - dt * 8);
+      rig.gun.position.z = rig.recoil * 0.04;
+    } else if (rig.gun.position.z !== 0) rig.gun.position.z = 0;
+    // Debug diagnostic: bright ray + hit-point marker (off by default).
+    if (DEBUG_MODE) updateAimDebug(rig);
+    if (trig && !rig.prevTrig && S.mode === 'play' && !S.paused) {
+      getRigMuzzle(rig, _v2, _dir); // shot starts at the muzzle, along the ray
+      shootFrom(_v2, _dir, hand);
+    }
+    rig.prevTrig = trig;
+  }
+  // Fallback: if no rig attached (should not happen — the 'connected' event
+  // is the documented three.js pattern), aim from the right input source by
+  // index so a session is never left without any way to shoot. The debug
+  // plane flags this state as NO RIG.
+  if (!anyRig) {
+    const sources = session.inputSources;
+    for (let i = 0; i < sources.length; i++) {
+      const src = sources[i];
+      if (src.handedness !== 'right') continue;
+      const gp = src.gamepad;
+      const trig = gp && gp.buttons[0] ? (gp.buttons[0].value || 0) > 0.5 : false;
       const ctrl = renderer.xr.getController(i);
       if (ctrl) {
         ctrl.updateMatrixWorld();
         ctrl.getWorldPosition(_v); ctrl.getWorldQuaternion(_q);
         _dir.set(0, 0, -1).applyQuaternion(_q);
-        sight.visible = true;
-        const pos = sight.geometry.attributes.position;
-        pos.setXYZ(0, _v.x, _v.y, _v.z);
-        pos.setXYZ(1, _v.x + _dir.x * 30, _v.y + _dir.y * 30, _v.z + _dir.z * 30);
-        pos.needsUpdate = true;
-        if (trig && !prevTrig && S.mode === 'play' && !S.paused) shootFrom(_v, _dir);
+        updateSightLine(sights.right, _v, _dir, 30);
+        if (trig && !prevTrig && S.mode === 'play' && !S.paused) shootFrom(_v, _dir, 'right');
       }
+      prevTrig = trig;
     }
   }
   if (pauseBtn && !prevPauseBtn) togglePause();
   if (muteBtn && !prevMuteBtn) setSound(!soundOn);
   if (gripBtn && !prevGripBtn && S.paused) { startGame(); }
   prevPauseBtn = pauseBtn; prevMuteBtn = muteBtn; prevGripBtn = gripBtn;
-  prevTrig = trig;
 }
 window.addEventListener('pointermove', (e) => {
   mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
@@ -1055,6 +1909,182 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'm' || e.key === 'M') setSound(!soundOn);
   else if ((e.key === 'r' || e.key === 'R') && S.paused) startGame();
 });
+// ============================== licensed asset loading (ROUND 2 — PHASE 3) ==============================
+// GLTF models from the asset register (~/workspace/games/assets/marsh-shot/).
+// Two base paths are tried: '../assets/marsh-shot/' (this prototype's
+// location in the repo) and 'assets/marsh-shot/' (the deployed layout, where
+// the game page sits at the repo root). Every load is async and
+// failure-tolerant: the procedural fallback stays in place and the failure
+// is recorded in assetStatus (shown on the debug plane).
+const ASSET_BASES = ['../assets/marsh-shot/', 'assets/marsh-shot/'];
+const assetStatus = { mallard: 'loading', goose: 'loading', shotgun: 'loading', dog: 'loading' };
+const gltfLoader = new GLTFLoader();
+function loadGltf(file) {
+  return new Promise((resolve, reject) => {
+    const tryBase = (i) => {
+      if (i >= ASSET_BASES.length) { reject(new Error('all base paths failed for ' + file)); return; }
+      gltfLoader.load(ASSET_BASES[i] + file, resolve, undefined, () => tryBase(i + 1));
+    };
+    tryBase(0);
+  });
+}
+// Model orientation helpers: the licensed models arrive in their own
+// authoring orientation (standing ducks, a dog facing an unknown axis, a
+// shotgun along an unknown axis). Each helper measures the loaded scene's
+// bounding box and returns a wrapper group with the model oriented, scaled,
+// and centred for its role. No hardcoded axis assumptions — the front is
+// found by scanning the vertices (the head end is the half with the higher
+// top; the muzzle end of the gun is the thinner half).
+const _bbox = new THREE.Box3(), _bsize = new THREE.Vector3(), _bcenter = new THREE.Vector3();
+const _scanV = new THREE.Vector3();
+function modelFrontSign(root, axis) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const mid = (box.min[axis] + box.max[axis]) / 2;
+  let topPos = -1e9, topNeg = -1e9;
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      _scanV.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      if (_scanV[axis] >= mid) topPos = Math.max(topPos, _scanV.y);
+      else topNeg = Math.max(topNeg, _scanV.y);
+    }
+  });
+  return topPos >= topNeg ? 1 : -1;
+}
+function orientFlightModel(root, targetLength, pitch) {
+  // Temporarily parent to the scene at identity so world == model space.
+  root.visible = false;
+  scene.add(root);
+  root.updateMatrixWorld(true);
+  _bbox.setFromObject(root);
+  _bbox.getSize(_bsize);
+  const axis = _bsize.x >= _bsize.z ? 'x' : 'z';
+  const front = modelFrontSign(root, axis);
+  const s = targetLength / Math.max(_bsize[axis], 0.001);
+  // Yaw so the front faces +X, then pitch about Z into flight attitude.
+  let yaw = 0;
+  if (axis === 'z') yaw = front > 0 ? Math.PI / 2 : -Math.PI / 2;
+  else if (front < 0) yaw = Math.PI;
+  const wrap = new THREE.Group();
+  const yawG = new THREE.Group();
+  yawG.rotation.y = yaw;
+  wrap.add(yawG);
+  scene.remove(root);
+  yawG.add(root);
+  root.rotation.set(0, 0, pitch);
+  root.scale.setScalar(s);
+  // Centre the pitched model on the wrapper origin (the shift is applied in
+  // yaw-group space, so it is rotated back through the yaw).
+  wrap.updateMatrixWorld(true);
+  _bbox.setFromObject(wrap);
+  _bbox.getCenter(_bcenter);
+  root.position.copy(_bcenter).applyQuaternion(yawG.quaternion.clone().invert()).multiplyScalar(-1);
+  root.visible = true;
+  return wrap;
+}
+function orientGroundModel(root, targetHeight) {
+  root.visible = false;
+  scene.add(root);
+  root.updateMatrixWorld(true);
+  _bbox.setFromObject(root);
+  _bbox.getSize(_bsize);
+  const axis = _bsize.x >= _bsize.z ? 'x' : 'z';
+  const front = modelFrontSign(root, axis);
+  const s = targetHeight / Math.max(_bsize.y, 0.001);
+  // Yaw so the front faces +Z (toward the player).
+  let yaw = 0;
+  if (axis === 'x') yaw = front > 0 ? -Math.PI / 2 : Math.PI / 2;
+  else if (front < 0) yaw = Math.PI;
+  const wrap = new THREE.Group();
+  const yawG = new THREE.Group();
+  yawG.rotation.y = yaw;
+  wrap.add(yawG);
+  scene.remove(root);
+  yawG.add(root);
+  root.scale.setScalar(s);
+  // Centre horizontally, feet on y = 0.
+  wrap.updateMatrixWorld(true);
+  _bbox.setFromObject(wrap);
+  _bbox.getCenter(_bcenter);
+  const shift = new THREE.Vector3(-_bcenter.x, -_bbox.min.y, -_bcenter.z);
+  shift.applyQuaternion(yawG.quaternion.clone().invert());
+  root.position.copy(shift);
+  root.visible = true;
+  return wrap;
+}
+function orientGunModel(root, targetLength) {
+  root.visible = false;
+  scene.add(root);
+  root.updateMatrixWorld(true);
+  _bbox.setFromObject(root);
+  _bbox.getSize(_bsize);
+  const axis = _bsize.x >= _bsize.z ? 'x' : 'z';
+  const len = _bsize[axis];
+  const s = targetLength / Math.max(len, 0.001);
+  // Which end is the muzzle? Split along the long axis; the half with the
+  // SMALLER vertical extent is the barrel end (the buttstock is tall).
+  const mid = (_bbox.min[axis] + _bbox.max[axis]) / 2;
+  let topPos = -1e9, botPos = 1e9, topNeg = -1e9, botNeg = 1e9;
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      _scanV.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      if (_scanV[axis] >= mid) { topPos = Math.max(topPos, _scanV.y); botPos = Math.min(botPos, _scanV.y); }
+      else { topNeg = Math.max(topNeg, _scanV.y); botNeg = Math.min(botNeg, _scanV.y); }
+    }
+  });
+  const muzzleAtPos = (topPos - botPos) <= (topNeg - botNeg);
+  // Yaw so the muzzle faces -Z and the stock faces +Z.
+  let yaw = 0;
+  if (axis === 'x') yaw = muzzleAtPos ? Math.PI / 2 : -Math.PI / 2;
+  else yaw = muzzleAtPos ? Math.PI : 0;
+  const wrap = new THREE.Group();
+  const yawG = new THREE.Group();
+  yawG.rotation.y = yaw;
+  wrap.add(yawG);
+  scene.remove(root);
+  yawG.add(root);
+  root.scale.setScalar(s);
+  wrap.updateMatrixWorld(true);
+  _bbox.setFromObject(wrap);
+  _bbox.getCenter(_bcenter);
+  // Grip point: ~35% of the length from the stock (+Z) end, at the vertical
+  // centre — that is where the hand holds the gun. Shift it onto the origin.
+  const gripLocal = new THREE.Vector3(0, _bcenter.y, _bbox.max.z - _bsize.z * 0.35);
+  const shift = gripLocal.clone().multiplyScalar(-1);
+  shift.applyQuaternion(yawG.quaternion.clone().invert());
+  root.position.copy(shift);
+  root.visible = true;
+  // Muzzle in gun-local coords: the front end, 6 cm above the grip line
+  // (same bead height as the procedural gun).
+  wrap.updateMatrixWorld(true);
+  _bbox.setFromObject(wrap);
+  const muzzle = new THREE.Vector3(0, 0.06, _bbox.min.z);
+  return { group: wrap, muzzle };
+}
+// Kick off the loads (async, at boot — the menu is usable immediately; the
+// models swap in when they arrive; a failure leaves the procedural fallback).
+loadGltf(BIRD_MODEL_CFG.mallard.file).then((g) => {
+  assetStatus.mallard = 'ok';
+  registerBirdModel('mallard', orientFlightModel(g.scene, BIRD_MODEL_CFG.mallard.length, BIRD_MODEL_CFG.mallard.pitch));
+}).catch((e) => { assetStatus.mallard = 'failed'; console.warn('[marsh-shot] mallard load failed:', e); });
+loadGltf(BIRD_MODEL_CFG.goose.file).then((g) => {
+  assetStatus.goose = 'ok';
+  registerBirdModel('goose', orientFlightModel(g.scene, BIRD_MODEL_CFG.goose.length, BIRD_MODEL_CFG.goose.pitch));
+}).catch((e) => { assetStatus.goose = 'failed'; console.warn('[marsh-shot] goose load failed:', e); });
+loadGltf('shotgun-pump.glb').then((g) => {
+  assetStatus.shotgun = 'ok';
+  const o = orientGunModel(g.scene, 1.0);
+  registerGunModel(o.group, o.muzzle);
+}).catch((e) => { assetStatus.shotgun = 'failed'; console.warn('[marsh-shot] shotgun load failed:', e); });
+loadGltf('dog-shiba.glb').then((g) => {
+  assetStatus.dog = 'ok';
+  registerDogModel(orientGroundModel(g.scene, 0.78), g.animations || []);
+}).catch((e) => { assetStatus.dog = 'failed'; console.warn('[marsh-shot] dog load failed:', e); });
+
 // ============================== rounds + main loop ==============================
 function startGame() {
   S.mode = 'play'; S.paused = false; pausePlane.visible = false;
@@ -1062,11 +2092,14 @@ function startGame() {
   S.hits = 0; S.shots = 0; S.streak = 0; S.spawnT = 0.6;
   for (const b of birds) { b.active = false; b.g.visible = false; }
   for (const p of puffs) { p.t = 99; p.group.visible = false; }
-  dogState.mode = 'idle'; dogState.t = 0;
-  dog.userData.carried.visible = false; dog.position.y = 0;
-  dog.userData.head.rotation.set(0, 0, 0);
+  resetDog(); // mode, position, carried bird, mixer clip
   perfValve.reset(); perfWarmup = 2;
-  hudDirty = true; hudMesh.visible = true;
+  perfSessionStart(); // a new play session begins (restarts continue it)
+  hudDirty = true;
+  // ONE HUD (Round 2 comparison fix): the 3D HUD plane is the VR HUD — it shows
+  // only while presenting. The DOM #hud is the desktop HUD. Showing both at once
+  // duplicated the score display on desktop (Nov 15 comparison, i32).
+  hudMesh.visible = renderer.xr.isPresenting;
   showBanner('ROUND 1 — 10 BIRDS', 2.2);
 }
 // Golden-hour drift: the sun slowly sinks and warms over a ~10-minute cycle
@@ -1094,8 +2127,9 @@ function tick() {
     c.position.x += c.userData.drift * dt;
     if (c.position.x > 260) c.position.x = -260; // wrap: clouds used to drift off and never return
   }
+  updateAmbientBirds(dt, elapsed);
   // Buttons + aim every frame while presenting (pause/mute must work paused).
-  pollXR();
+  pollXR(dt);
   // Ambient life runs even while paused — the marsh stays alive, only the
   // hunt freezes. (Clouds, water, reeds, light, and the listener.)
   updateGoldenHour(elapsed);
@@ -1124,6 +2158,8 @@ function tick() {
     }
     // Valve EMA is fed ONLY during active play, after the warm-up window.
     if (perfWarmup > 0) perfWarmup -= dt; else perfValve.update(dt);
+    // Local perf capture: 1 sample/s + time-in-valve-level, same branch.
+    perfSessionTick(dt);
     // Distant chirps + the wind bed's slow swell — ambient audio, play only.
     chirpT -= dt;
     if (chirpT <= 0) { chirpSound(); chirpT = rand(6, 14); }
@@ -1133,7 +2169,9 @@ function tick() {
   updateTracers(dt);
   // Perf line refreshes at most 2×/s (no per-frame canvas redraw).
   hudPerfT -= dt;
-  if (hudPerfT <= 0) { hudDirty = true; hudPerfT = 0.5; }
+  if (hudPerfT <= 0) { hudDirty = true; hudPerfT = 0.5; if (DEBUG_MODE) drawDebugPlane(); }
+  // ONE HUD: keep the 3D HUD plane VR-only if the player enters/exits VR mid-game.
+  if (S.mode === 'play') hudMesh.visible = renderer.xr.isPresenting;
   updateHUD();
   renderer.render(scene, camera);
 }
@@ -1181,14 +2219,14 @@ vrBtn.addEventListener('click', async () => {
     renderer.xr.setReferenceSpaceType('local-floor');
     await renderer.xr.setSession(session);
     hidePanel();
-    session.addEventListener('end', () => { sight.visible = false; if (S.paused) { S.paused = false; pausePlane.visible = false; } showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+    session.addEventListener('end', () => { perfSessionFlush(); hideAimVisuals(); if (S.paused) { S.paused = false; pausePlane.visible = false; } showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
       renderer.xr.setReferenceSpaceType('local');
       await renderer.xr.setSession(session);
       hidePanel();
-      session.addEventListener('end', () => { sight.visible = false; if (S.paused) { S.paused = false; pausePlane.visible = false; } showPanel(); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { perfSessionFlush(); hideAimVisuals(); if (S.paused) { S.paused = false; pausePlane.visible = false; } showPanel(); vrBtn.disabled = false; });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;

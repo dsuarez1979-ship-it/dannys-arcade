@@ -2,20 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <title>RAD VR — Sunset Highway Racer</title>
 <style>
+  *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#160a2e;
     font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
   canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (plain
+     align-items:center would clip the top). The ENTER VR button sits above
+     the detail paragraphs in the DOM so it is visible on load. */
   #panel {
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
     z-index:10; text-align:center; color:#fff;
   }
-  #panel .box { max-width:560px; padding:24px 20px; }
+  #panel .box { width:100%; max-width:560px; margin:auto; min-width:0; }
   #panel h1 {
-    font-size:64px; letter-spacing:6px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    font-size:clamp(36px, 9vw, 64px); letter-spacing:clamp(2px, 1vw, 6px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
     background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(255,113,206,.25);
@@ -24,9 +33,10 @@
   #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#ffeef8; }
   #panel p.small { font-size:13px; color:#e8c9e2; }
   #vrBtn {
-    margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    margin-top:20px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
     padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+    min-height:56px; width:min(100%, 340px);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
@@ -58,6 +68,20 @@
     padding:9px 16px; margin:0 4px;
   }
   .todOpt.sel { background:linear-gradient(92deg,#27e8ff,#2bff88); color:#06121f; border-color:transparent; }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+    #todRow { margin:8px 0 0; }
+  }
+  @media (max-width:520px) {
+    #hudL1 { font-size:17px; } #hudL2 { font-size:12px; } #hudL3 { font-size:11px; }
+  }
 </style>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -70,6 +94,8 @@
     <h1>RAD VR</h1>
     <div class="sub">Sunset Highway Racer</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
     <p><b>Thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> = gas &nbsp;·&nbsp; <b>Left trigger</b> = brake</p>
     <p class="small">Two-way highway: cross the median to face oncoming traffic — wrong-way near misses score double and build a bonus.</p>
     <p class="small">No headset handy? Desktop preview works too — arrow keys / WASD drive, M mutes.</p>
@@ -82,8 +108,6 @@
       <button class="todOpt" data-tod="night">🌙 NIGHT</button>
     </div>
     <p class="small">In game: press <b>A</b> on the right controller (or <b>T</b> on desktop) to cycle Day → Sunset → Night.</p>
-    <button id="vrBtn">ENTER VR</button>
-    <div id="status"></div>
   </div>
 </div>
 

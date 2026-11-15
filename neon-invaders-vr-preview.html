@@ -2,20 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <title>NEON INVADERS VR — Danny's Arcade</title>
 <style>
+  *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#040110;
     font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
   canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (plain
+     align-items:center would clip the top). The ENTER VR button sits above
+     the detail paragraphs in the DOM so it is visible on load. */
   #panel {
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
     z-index:10; text-align:center; color:#fff;
   }
-  #panel .box { max-width:580px; padding:24px 20px; }
+  #panel .box { width:100%; max-width:580px; margin:auto; min-width:0; }
   #panel h1 {
-    font-size:58px; letter-spacing:5px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    font-size:clamp(28px, 8vw, 58px); letter-spacing:clamp(2px, 1vw, 5px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
     background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(39,232,255,.25);
@@ -27,9 +36,10 @@
   #panel .backlink a { color:#7d72a8; text-decoration:none; }
   #panel .backlink a:hover { color:#bdb2e8; }
   #vrBtn {
-    margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    margin-top:20px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
     padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+    min-height:56px; width:min(100%, 340px);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
@@ -40,12 +50,25 @@
     background:rgba(8,10,26,.78); border:1px solid #27e8ff; border-radius:8px;
     padding:8px 12px;
     color:#7df9ff; font-size:15px; font-weight:800; letter-spacing:1px;
-    text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
+    text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap; max-width:calc(100vw - 24px);
   }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
     background:rgba(10,16,38,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
     padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+  }
+  @media (max-width:520px) {
+    #hud { font-size:12px; }
   }
 </style>
 <script type="importmap">
@@ -59,13 +82,15 @@
     <h1>NEON INVADERS VR</h1>
     <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 1 weapon at a time, Iron Man hand cannons</div>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
     <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
     <p class="small">In VR: <b>A / X</b> pauses &nbsp;·&nbsp; <b>B / Y</b> mutes &nbsp;·&nbsp; while paused, <b>grip</b> restarts the run. Kills, pickups, and hits buzz the controllers.</p>
     <p class="small">Invaders surround you from every angle in deep space. Blast them all — if a flyer reaches you, or a bomb finds you, you lose a ship… and get another. Forever. There is no game over.</p>
     <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Spartan Laser, Fire Rate, Shield Layers, Cannon Power, Move Speed. One weapon at a time — a new weapon replaces the one you have. Upgrades stack forever, no caps. Flyers lunge at you about every 2 seconds, and every wave gets harder. Asteroids drift around you and shooting stars cross the sky — pure scenery.</p>
     <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes, P pauses, R restarts.</p>
-    <button id="vrBtn">ENTER VR</button>
-    <div id="status"></div>
+    <p class="small" id="perfLast" style="color:#9fd8ff">Performance: no session logged yet.</p>
+    <p class="small">Session performance (frame times + degraded state) is logged locally on this device only — nothing is sent anywhere.</p>
     <p class="backlink"><a href="../">← Danny's Arcade</a></p>
   </div>
 </div>
@@ -1850,6 +1875,7 @@ function startGame() {
   if (started) return;
   started = true;
   mode = 'play';
+  perfSessionStart(); // a new play session begins (restarts continue it)
   score = 0; wave = 1; shipsLost = 0; tier = 0; surgeWave = false;
   W.spread = W.twin = W.rail = W.seeker = W.spartan = 0;
   equipped.length = 0;
@@ -1926,6 +1952,88 @@ function playerHit() {
 // uncapped throughout.
 let avgFrameMs = 16, degraded = false, frameNo = 0;
 let elapsed = 0;
+
+// ============================== local performance capture (V2.0 / Standard §4) ==============================
+// Browser-side frame-time + valve-state capture, stored LOCALLY on the
+// device (localStorage) ONLY — key `neon-invaders-vr:perf-log`. No personal
+// data of any kind, no network calls, nothing transmitted. One summary per
+// play session (last 5 sessions kept; samples capped at 1 h in memory).
+// What is logged per session: date, duration, sample count, min/median/p95
+// frame-time EMA (ms), seconds spent degraded vs not. Neon has NO leveled
+// valve — its adaptive safety valve is a single boolean (`degraded`,
+// >20ms degrade / <16ms recover, see tick) — so this logs the real binary
+// state instead of inventing levels: `degSec` (seconds degraded) and
+// `playSec` (seconds of sampled active play). This exists so Danny's
+// headset sessions produce a performance record automatically — no
+// hand-copied numbers. Only what the browser can measure (frame times +
+// valve state); no GPU-level claims. The last session's summary shows on
+// the menu (see showLastPerfSummary). All storage is guarded: a storage
+// failure must never break the game. Same pattern as Marsh Shot / Longshot.
+const PERF_LOG_KEY = 'neon-invaders-vr:perf-log';
+const PERF_LOG_MAX_SESSIONS = 5;
+const perfSession = { active: false, startT: 0, samples: [], sampleT: 0, degSec: 0, playSec: 0 };
+function perfSessionStart() {
+  if (perfSession.active) return; // restarts continue the same sitting
+  perfSession.active = true;
+  perfSession.startT = performance.now();
+  perfSession.samples.length = 0;
+  perfSession.sampleT = 0;
+  perfSession.degSec = 0;
+  perfSession.playSec = 0;
+}
+function perfSessionTick(dt) {
+  if (!perfSession.active) return;
+  perfSession.playSec += dt;
+  if (degraded) perfSession.degSec += dt;
+  perfSession.sampleT += dt;
+  if (perfSession.sampleT >= 1.0) {
+    perfSession.sampleT -= 1.0;
+    perfSession.samples.push({ ema: Math.round(avgFrameMs * 10) / 10, d: degraded ? 1 : 0 });
+    if (perfSession.samples.length > 3600) perfSession.samples.shift(); // cap: 1 h of samples
+  }
+}
+function perfSessionFlush() {
+  if (!perfSession.active) return;
+  perfSession.active = false;
+  try {
+    const ems = perfSession.samples.map(s => s.ema).sort((a, b) => a - b);
+    const n = ems.length;
+    const rec = {
+      date: new Date().toISOString(),
+      durSec: Math.round((performance.now() - perfSession.startT) / 1000),
+      samples: n,
+      emaMin: n ? ems[0] : 0,
+      emaMed: n ? ems[Math.floor(n / 2)] : 0,
+      emaP95: n ? ems[Math.min(n - 1, Math.floor(n * 0.95))] : 0,
+      degSec: Math.round(perfSession.degSec),
+      playSec: Math.round(perfSession.playSec)
+    };
+    let log = [];
+    try { const raw = localStorage.getItem(PERF_LOG_KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) log = p; } } catch (e) { log = []; }
+    log.push(rec);
+    while (log.length > PERF_LOG_MAX_SESSIONS) log.shift();
+    localStorage.setItem(PERF_LOG_KEY, JSON.stringify(log));
+    showLastPerfSummary();
+  } catch (e) { /* local logging must never break the game */ }
+}
+function showLastPerfSummary() {
+  const el = document.getElementById('perfLast');
+  if (!el) return;
+  try {
+    const raw = localStorage.getItem(PERF_LOG_KEY);
+    const log = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(log) || !log.length) { el.textContent = 'Performance: no session logged yet.'; return; }
+    const r = log[log.length - 1];
+    const mins = Math.max(1, Math.round(r.durSec / 60));
+    const totalP = (r.playSec || 0) || 1;
+    const degPct = Math.round((r.degSec || 0) / totalP * 100);
+    const d = new Date(r.date);
+    const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    el.textContent = 'Last session (' + when + '): ' + mins + ' min · median ' + r.emaMed + ' ms · p95 ' + r.emaP95 + ' ms · degraded ' + degPct + '% of play.';
+  } catch (e) { el.textContent = 'Performance: last-session summary unavailable.'; }
+}
+showLastPerfSummary(); // menu shows the previous session before play starts
+window.addEventListener('pagehide', perfSessionFlush);
 // Combat pulse (cinematic upgrade, Bible §3.5): kills, waves, and tier-ups
 // briefly lift the whole scene — key light, starfield, grid, nebulas — then
 // it decays at 1.8/s. Costs a few float writes per frame, no new lights.
@@ -2327,7 +2435,7 @@ vrBtn.addEventListener('click', async () => {
     await renderer.xr.setSession(session);
     xrPixelDown();
     hidePanel();
-    session.addEventListener('end', () => { xrPixelUp(); if (mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume (or press P on desktop).'); vrBtn.disabled = false; });
+    session.addEventListener('end', () => { perfSessionFlush(); xrPixelUp(); if (mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume (or press P on desktop).'); vrBtn.disabled = false; });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
@@ -2335,7 +2443,7 @@ vrBtn.addEventListener('click', async () => {
       await renderer.xr.setSession(session);
       xrPixelDown();
       hidePanel();
-      session.addEventListener('end', () => { xrPixelUp(); if (mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume (or press P on desktop).'); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { perfSessionFlush(); xrPixelUp(); if (mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume (or press P on desktop).'); vrBtn.disabled = false; });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
@@ -2368,6 +2476,7 @@ function tick() {
     degraded = false;
     try { renderer.xr.setFoveation(0.0); } catch (e) { /* foveation unavailable */ }
   }
+  if (mode === 'play' && !paused) perfSessionTick(dt); // perf log samples active play only
   const presenting = renderer.xr.isPresenting;
 
   // ONE scoreboard, one visible form at a time: the camera-attached VR cell

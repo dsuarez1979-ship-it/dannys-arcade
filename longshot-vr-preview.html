@@ -2,20 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <title>LONGSHOT VR — Original Mountain Sniper Range</title>
 <style>
+  *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#1a0e08;
     font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
   canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (the previous
+     align-items:center clipped the top once content overflowed, even though
+     overflow-y:auto was set). The ENTER VR button sits above the detail
+     paragraphs in the DOM so it is visible on load. */
   #panel {
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background:radial-gradient(900px 600px at 50% 25%, #3d1e0a 0%, #1a0e08 55%, #0a0503 100%);
-    z-index:10; text-align:center; color:#fff; overflow-y:auto;
+    z-index:10; text-align:center; color:#fff;
   }
-  #panel .box { max-width:680px; padding:24px 20px; }
+  #panel .box { width:100%; max-width:680px; margin:auto; min-width:0; }
   #panel h1 {
-    font-size:58px; letter-spacing:8px; margin:0 0 4px 0; font-weight:900; font-style:italic;
+    font-size:clamp(34px, 9vw, 58px); letter-spacing:clamp(2px, 1vw, 8px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
     background:linear-gradient(92deg,#ffd319 10%,#ff7e47 55%,#27e8ff 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(255,126,71,.35);
@@ -31,17 +41,19 @@
   #panel .wpnBtn.sel { background:rgba(255,126,71,.25); border-color:#ffd319; box-shadow:0 0 18px rgba(255,211,25,.4); }
   #panel .wpnBtn b { display:block; font-size:15px; color:#ffd319; letter-spacing:1px; }
   #vrBtn {
-    margin-top:16px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    margin-top:16px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#1a0e08; background:linear-gradient(92deg,#ffd319,#ff7e47); border:none; border-radius:12px;
     padding:16px 42px; box-shadow:0 6px 30px rgba(255,126,71,.45);
+    min-height:56px; width:min(100%, 340px);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
   #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  #perfSummary { margin-top:8px; font-size:13px; color:#d8b898; min-height:18px; display:none; overflow-wrap:break-word; }
   #hud {
     position:fixed; left:12px; top:52px; z-index:5;
     color:#7df9ff; font-size:14px; font-weight:800; letter-spacing:1px; line-height:1.5;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:pre;
-    background:rgba(8,4,2,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px;
+    background:rgba(8,4,2,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px; max-width:calc(100vw - 24px);
   }
   #hud b { color:#ffd319; }
   #hud .wind { color:#2bff88; }
@@ -49,13 +61,13 @@
     position:fixed; right:12px; bottom:12px; z-index:5;
     color:#7df9ff; font-size:12px; font-weight:700; letter-spacing:1px;
     text-shadow:0 2px 8px #000; pointer-events:none; display:none;
-    background:rgba(8,4,2,.72); border:1px solid #27e8ff; border-radius:8px; padding:6px 10px;
+    background:rgba(8,4,2,.72); border:1px solid #27e8ff; border-radius:8px; padding:6px 10px; max-width:calc(100vw - 24px);
   }
   #banner {
     position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
     color:#ffd319; font-size:28px; font-weight:900; letter-spacing:2px; text-align:center;
     text-shadow:0 2px 12px #000, 0 0 24px rgba(255,211,25,.5); pointer-events:none; display:none;
-    background:rgba(10,6,2,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px;
+    background:rgba(10,6,2,.6); border:1px solid rgba(255,211,25,.5); border-radius:12px; padding:10px 22px; max-width:calc(100vw - 32px);
   }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
@@ -67,9 +79,25 @@
     text-decoration:none; background:rgba(20,10,4,.72); border:1px solid #27e8ff;
     border-radius:8px; padding:8px 12px;
   }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+    #perfSummary { margin-top:4px; font-size:12px; }
+    #panel .wpnRow { margin:8px 0; }
+  }
+  @media (max-width:520px) {
+    #hud { font-size:12px; }
+    #banner { font-size:20px; }
+  }
 </style>
 <script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
 </script>
 </head>
 <body>
@@ -79,13 +107,15 @@
     <h1>LONGSHOT</h1>
     <div class="sub">An original VR mountain sniper range — endless targets, no fail state, ever</div>
     <p>You hold a fixed firing position on a golden-hour mountain range. Steel plates at <b>100 / 300 / 600 yards</b>, sliding movers, pop-ups behind the berms, and drifting balloons — farther targets score more, and the wind pushes long shots sideways, so read the flags and compensate.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+    <div id="perfSummary"></div>
     <p><b>Pick your rifle</b> (or cycle in-game with <b>B</b>):</p>
     <div class="wpnRow" id="wpnRow"></div>
     <p><b>VR:</b> aim with the <b>right controller</b> &nbsp;·&nbsp; <b>Right trigger</b> fires &nbsp;·&nbsp; <b>Hold squeeze or A</b> = scope (aim snaps to scope center) &nbsp;·&nbsp; guns are <b>always loaded — no reloading, ever</b> &nbsp;·&nbsp; <b>B</b> cycles rifles &nbsp;·&nbsp; <b>Right stick click</b> pauses &nbsp;·&nbsp; <b>Left stick click</b> mutes</p>
     <p><b>Desktop:</b> mouse aims &nbsp;·&nbsp; click fires &nbsp;·&nbsp; hold right-click or Shift = scope &nbsp;·&nbsp; always loaded, no reloading &nbsp;·&nbsp; 1–4 switch rifles &nbsp;·&nbsp; M mutes &nbsp;·&nbsp; P pauses &nbsp;·&nbsp; R resets score (when paused)</p>
     <p class="small">Targets respawn endlessly and your score only ever climbs. There is no fail screen and no end — shoot as long as you like.</p>
-    <button id="vrBtn">ENTER VR</button>
-    <div id="status"></div>
+    <p class="small">Session performance (frame times + quality level only) is logged locally on this device. Nothing leaves the device.</p>
   </div>
 </div>
 
@@ -110,8 +140,31 @@ import * as THREE from 'three';
 // drifting golden-hour light), hit feedback (plate swing, flash, sparks,
 // dust), spatial audio + wind bed, haptics, in-VR pause + mute, gentle
 // no-fail progression. Live file untouched; this is the prototype copy.
+// ROUND 2 REBUILD (Nov 15, 2026 — prototype): owner headset verdict was
+// "aiming completely off" + "still cartoonish". AIMING FIRST: the rifle
+// viewmodel is now parented to the right controller's target-ray space
+// (barrel ON the shot ray by construction — the Round 1 rifle was
+// head-attached while the bullet came from the hand), one shared
+// computeShot() resolves every shot/dot/laser/debug read, the aim dot
+// marks the true undrifted point of aim at constant angular size, the
+// laser runs full-length, and ?debug=aim shows ray + true hit point.
+// GRAPHICS SECOND: licensed PBR textures (Poly Haven CC0), detailed
+// merged-parts rifle, sloped berms, instanced rocks/treeline/grass,
+// brushed-steel plates, star muzzle flash + flash light + smoke,
+// directional sparks, bolt sound. HUD duplication fixed (3D cell VR-only,
+// perf readout behind ?debug=perf). V2.0: local-only performance capture
+// (localStorage key longshot-vr:perf-log). No licensed sniper-rifle GLB
+// could be obtained free — recorded gap in the asset register.
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
+// Debug toggles (URL params, ALL OFF by default — normal play shows no
+// debug visuals): ?debug=aim shows the interaction-ray diagnostic (ray +
+// true hit point); ?debug=perf shows the frame-time readout. Combine:
+// ?debug=aim,perf. The perf readout used to be always-on; the Round 1
+// captures showed it doubling the HUD on desktop, so it is now gated.
+const debugParams = new URLSearchParams(location.search).get('debug') || '';
+const aimDebug = debugParams.includes('aim');
+const perfDebug = debugParams.includes('perf');
 
 // ============================== renderer / scene ==============================
 // CINEMATIC UPGRADE (Nov 15): antialias OFF + boot-time pixel-ratio cap.
@@ -197,6 +250,118 @@ function xrLayerSize() {
   return 'n/a';
 }
 
+// --- Automatic performance capture (Standard v1.4 §4 / V2.0) ---
+// Browser-side frame-time + valve-state record, stored LOCALLY on the
+// device (localStorage) ONLY — never transmitted, no network calls, no
+// personal data of any kind. During active play the frame-time EMA +
+// valve level are sampled ~1/s; on save, a per-session SUMMARY is kept
+// (active-play duration, min/median/p95 frame time, seconds in each valve
+// level, peak valve level). Only the last 5 session summaries are kept,
+// so storage cannot grow unboundedly (a few KB total). Raw samples live
+// in memory only, for the current session, and are never persisted. What
+// the browser can measure is frame times + valve state — no GPU-level
+// claims are made here.
+const PERF_LOG_KEY = 'longshot-vr:perf-log';
+const PERF_LOG_MAX_SESSIONS = 5;
+const perfLog = {
+  active: false, startPerf: 0, startedAtMs: 0, playSec: 0,
+  samples: [], valveSec: [0, 0, 0], peakLevel: 0,
+  sampleTimer: 0, saveTimer: 0,
+  begin() {
+    this.active = true;
+    this.startPerf = performance.now();
+    this.startedAtMs = Date.now();
+    this.playSec = 0;
+    this.samples = [];
+    this.valveSec = [0, 0, 0];
+    this.peakLevel = 0;
+    this.sampleTimer = 0; this.saveTimer = 0;
+  },
+  // Called once per frame during ACTIVE play only (never menu/pause/
+  // warm-up) — the same window the valve itself is fed in.
+  tick(dt) {
+    if (!this.active) return;
+    this.playSec += dt;
+    this.valveSec[perfValve.level] += dt;
+    if (perfValve.level > this.peakLevel) this.peakLevel = perfValve.level;
+    this.sampleTimer += dt;
+    if (this.sampleTimer >= 1.0) {
+      this.sampleTimer = 0;
+      this.samples.push(Math.round(perfValve.ema * 10) / 10);
+    }
+    this.saveTimer += dt;
+    if (this.saveTimer >= 5.0) { this.saveTimer = 0; this.save(false); }
+  },
+  summary(inProgress) {
+    const ema = this.samples.slice().sort((a, b) => a - b);
+    const n = ema.length;
+    return {
+      v: 1,
+      startedAt: new Date(this.startedAtMs).toISOString(),
+      durationSec: Math.round(this.playSec),
+      samples: n,
+      minMs: n ? ema[0] : 0,
+      medianMs: n ? ema[Math.floor(n / 2)] : 0,
+      p95Ms: n ? ema[Math.min(n - 1, Math.floor(n * 0.95))] : 0,
+      valveSec: this.valveSec.map(v => Math.round(v * 10) / 10),
+      peakLevel: this.peakLevel,
+      inProgress: !!inProgress
+    };
+  },
+  read() {
+    try {
+      const raw = localStorage.getItem(PERF_LOG_KEY);
+      if (!raw) return { version: 1, sessions: [] };
+      const data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.sessions)) return { version: 1, sessions: [] };
+      return data;
+    } catch (e) { return { version: 1, sessions: [] }; }
+  },
+  save(final) {
+    if (!this.active) return;
+    try {
+      const data = this.read();
+      const s = this.summary(!final);
+      // The current session is always the LAST entry: replace it while
+      // in progress (upsert by start time), so a crash or a closed tab
+      // still leaves the latest data behind.
+      const last = data.sessions[data.sessions.length - 1];
+      if (last && last.startedAt === s.startedAt) data.sessions[data.sessions.length - 1] = s;
+      else data.sessions.push(s);
+      while (data.sessions.length > PERF_LOG_MAX_SESSIONS) data.sessions.shift();
+      localStorage.setItem(PERF_LOG_KEY, JSON.stringify(data));
+      if (final) this.active = false;
+    } catch (e) { /* storage unavailable — the game plays on without a log */ }
+  }
+};
+// Last-session summary on the menu, so Danny sees the record without
+// copying numbers by hand. Rendered at boot from the local log, and again
+// whenever the menu is shown after a session.
+function renderLastPerfSummary() {
+  const el = document.getElementById('perfSummary');
+  if (!el) return;
+  const data = perfLog.read();
+  const s = data.sessions[data.sessions.length - 1];
+  if (!s || !s.samples) { el.style.display = 'none'; el.textContent = ''; return; }
+  const mins = Math.floor(s.durationSec / 60), secs = s.durationSec % 60;
+  const total = (s.valveSec[0] + s.valveSec[1] + s.valveSec[2]) || 1;
+  const pct = i => Math.round(s.valveSec[i] / total * 100);
+  el.textContent = 'Last session: ' + mins + 'm ' + String(secs).padStart(2, '0') + 's · frame time (EMA) median ' +
+    s.medianMs.toFixed(1) + ' ms · p95 ' + s.p95Ms.toFixed(1) + ' ms · min ' + s.minMs.toFixed(1) +
+    ' ms · quality L0 ' + pct(0) + '% / L1 ' + pct(1) + '% / L2 ' + pct(2) + '%' +
+    (s.inProgress ? ' (session still open)' : '');
+  el.style.display = 'block';
+}
+renderLastPerfSummary();
+// Save the in-progress summary when the page is hidden; finalize only
+// when the page is actually going away (a hidden tab may come back and
+// the session continues — VR re-entry after a session end is the same
+// play session, so the VR session-end handlers save in-progress too).
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) perfLog.save(false);
+});
+window.addEventListener('beforeunload', () => { perfLog.save(true); });
+
 // --- Controller haptics (Quest 2 Touch; no-op on desktop / without actuators) ---
 // Same pattern as the Rhythm Slicer prototype. NOTE: this is what keeps the
 // `clamp` helper live — it was dead code in the live build.
@@ -258,6 +423,113 @@ function updateGoldenHour(dt) {
   if (sunGlow) sunGlow.material.opacity = 1 - 0.15 * ph;
 }
 
+// --- Geometry merge helper (detail without draw calls) ---
+// Merges transformed primitives into ONE geometry per material. All
+// three.js primitives carry position/normal/uv + an index, so a straight
+// concat with index offsets is exact. Hand-written (no addons import) and
+// covered by the Node harness (aiming-tests). The rifle (~20 parts → 4
+// meshes) and the pine canopies (2 cones → 1 geometry) use it.
+function mergeParts(parts) {
+  let vCount = 0, iCount = 0;
+  for (const p of parts) {
+    p.geo.applyMatrix4(p.matrix);
+    vCount += p.geo.attributes.position.count;
+    iCount += p.geo.index.count;
+  }
+  const pos = new Float32Array(vCount * 3), nor = new Float32Array(vCount * 3), uv = new Float32Array(vCount * 2);
+  const idx = new Uint32Array(iCount);
+  let vo = 0, io = 0;
+  for (const p of parts) {
+    const g = p.geo;
+    pos.set(g.attributes.position.array, vo * 3);
+    nor.set(g.attributes.normal.array, vo * 3);
+    uv.set(g.attributes.uv.array, vo * 2);
+    const gi = g.index.array;
+    for (let k = 0; k < gi.length; k++) idx[io + k] = gi[k] + vo;
+    io += gi.length; vo += g.attributes.position.count;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}
+function part(geo, x, y, z, rx = 0, ry = 0, rz = 0) {
+  const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, ry, rz));
+  m.setPosition(x, y, z);
+  return { geo, matrix: m };
+}
+
+// --- Licensed PBR textures (Poly Haven, CC0 — see the asset register) ---
+// Loaded asynchronously AFTER the procedural materials exist, so the game
+// plays identically if a file is missing (e.g. not yet deployed): each
+// loader fills a slot and calls applyPbrTextures(), which upgrades only
+// the materials whose textures have arrived. Paths are relative to the
+// DEPLOYED page (flat: longshot-vr-preview.html at the site root, with
+// assets/ beside it); a '../' retry covers running the prototype from
+// its subdir during development.
+const TEX_BASE = 'assets/longshot/textures/';
+const texLoader = new THREE.TextureLoader();
+const pbrTex = {
+  groundDiff: null, groundNor: null, groundRough: null,
+  rockDiff: null, rockNor: null, rockArm: null,
+  woodDiff: null, woodNor: null, woodRough: null
+};
+let rifleWoodApplied = false;
+function loadPbrTexture(file, srgb, slot, repeat) {
+  const apply = (tex) => {
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    if (repeat) tex.repeat.set(repeat[0], repeat[1]);
+    pbrTex[slot] = tex;
+    applyPbrTextures();
+  };
+  texLoader.load(TEX_BASE + file, apply, undefined, () => {
+    texLoader.load('../' + TEX_BASE + file, apply, undefined, () => {
+      console.warn('[longshot] PBR texture missing, procedural fallback kept: ' + file);
+    });
+  });
+}
+// Upgrades materials with whatever PBR textures have arrived so far.
+// Called on every successful texture load; safe to call repeatedly. Only
+// ever runs from async texture callbacks (after module evaluation), so
+// the typeof guards never meet a temporal-dead-zone const.
+function applyPbrTextures() {
+  if (typeof groundMat !== 'undefined' && groundMat) {
+    if (pbrTex.groundDiff) groundMat.map = pbrTex.groundDiff;
+    if (pbrTex.groundNor) groundMat.normalMap = pbrTex.groundNor;
+    if (pbrTex.groundRough) { groundMat.roughnessMap = pbrTex.groundRough; groundMat.roughness = 1.0; }
+    groundMat.needsUpdate = true;
+  }
+  if (typeof benchMat !== 'undefined' && benchMat) {
+    if (pbrTex.woodDiff) { benchMat.map = pbrTex.woodDiff; benchMat.color.set(0xffffff); }
+    if (pbrTex.woodNor) benchMat.normalMap = pbrTex.woodNor;
+    if (pbrTex.woodRough) { benchMat.roughnessMap = pbrTex.woodRough; benchMat.roughness = 1.0; }
+    benchMat.needsUpdate = true;
+  }
+  if (typeof rockMat !== 'undefined' && rockMat) {
+    if (pbrTex.rockDiff) rockMat.map = pbrTex.rockDiff;
+    if (pbrTex.rockNor) rockMat.normalMap = pbrTex.rockNor;
+    if (pbrTex.rockArm) { rockMat.roughnessMap = pbrTex.rockArm; rockMat.metalnessMap = pbrTex.rockArm; rockMat.metalness = 1.0; }
+    rockMat.needsUpdate = true;
+  }
+  // The rifle reads the wood slots in buildRifle (its materials are
+  // rebuilt on every weapon switch). Once the full wood set has arrived,
+  // rebuild the current rifle once so the stock picks the textures up
+  // even if the player never switches weapons.
+  if (typeof rifleWood !== 'undefined' && rifleWood) {
+    if (pbrTex.woodDiff) rifleWood.map = pbrTex.woodDiff;
+    if (pbrTex.woodNor) rifleWood.normalMap = pbrTex.woodNor;
+    if (pbrTex.woodRough) rifleWood.roughnessMap = pbrTex.woodRough;
+  }
+  if (!rifleWoodApplied && pbrTex.woodDiff && pbrTex.woodNor && pbrTex.woodRough &&
+      typeof buildRifle !== 'undefined' && typeof WEAPONS !== 'undefined') {
+    rifleWoodApplied = true;
+    buildRifle(WEAPONS[wpnIdx]);
+  }
+}
+
 // ============================== range environment ==============================
 // Golden-hour sky dome (canvas gradient + baked-in clouds, unlit, backside).
 // Clouds are painted into the texture: soft puffs with zero per-frame cost.
@@ -270,10 +542,14 @@ function skyTexture() {
   grad.addColorStop(0.82, '#ffb066'); grad.addColorStop(0.94, '#e8905a');
   grad.addColorStop(1, '#3a2410');
   g.fillStyle = grad; g.fillRect(0, 0, 512, 512);
+  // Two cloud layers: high wispy cirrus + low warm-lit cumulus bands.
   const puffs = [
     [60, 150, 90, 16, 0.20], [180, 120, 120, 18, 0.16], [320, 165, 100, 14, 0.18],
     [430, 120, 80, 15, 0.14], [250, 200, 130, 16, 0.15], [90, 210, 70, 12, 0.12],
-    [380, 215, 90, 13, 0.12], [150, 90, 60, 10, 0.10], [470, 180, 60, 11, 0.10]
+    [380, 215, 90, 13, 0.12], [150, 90, 60, 10, 0.10], [470, 180, 60, 11, 0.10],
+    [40, 250, 110, 10, 0.22], [200, 255, 140, 9, 0.20], [360, 250, 120, 10, 0.22],
+    [490, 255, 90, 8, 0.18], [120, 70, 70, 6, 0.08], [300, 60, 90, 6, 0.07],
+    [430, 75, 60, 5, 0.07], [220, 280, 150, 8, 0.16]
   ];
   puffs.forEach(p => {
     const rg = g.createRadialGradient(p[0], p[1], 2, p[0], p[1], p[2]);
@@ -351,9 +627,10 @@ function gravelTexture() {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 2); return t;
 }
+const groundMat = new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 });
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(600, 600),
-  new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 })
+  groundMat
 );
 ground.rotation.x = -Math.PI / 2; ground.position.y = -1.6;
 scene.add(ground);
@@ -514,6 +791,34 @@ function dirtTexture() {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 1); return t;
 }
+// Sloped dirt berm (Round 2): a trapezoid-prism mound, not a flat box —
+// the range's backstops read as piled earth. Smooth normals (dirt has no
+// sharp edges); UVs are a simple planar mapping — the dirt texture is
+// noise, so exact UVs don't matter. Winding verified outward per face.
+function bermGeometry(width, height, depthBase, depthTop) {
+  const hw = width / 2, hb = depthBase / 2, ht = depthTop / 2;
+  const v = [
+    [-hw, 0, hb], [hw, 0, hb], [hw, 0, -hb], [-hw, 0, -hb],
+    [-hw, height, ht], [hw, height, ht], [hw, height, -ht], [-hw, height, -ht]
+  ];
+  const pos = [], uv = [], idx = [];
+  v.forEach(p => { pos.push(p[0], p[1], p[2]); uv.push((p[0] + hw) / 8, (p[1] * 2 + p[2]) / 8); });
+  const quad = (a, b, c, d) => { idx.push(a, b, c, a, c, d); };
+  quad(0, 1, 5, 4); // front slope (faces the firing line, +Z)
+  quad(2, 3, 7, 6); // back slope
+  quad(4, 5, 6, 7); // top
+  quad(3, 2, 1, 0); // bottom (never seen, keeps the solid closed)
+  quad(3, 0, 4, 7); // left end
+  quad(1, 2, 6, 5); // right end
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+const bermGeo = bermGeometry(90, 3, 4.5, 2);
+
 const bermMat = new THREE.MeshStandardMaterial({ map: dirtTexture(), roughness: 1 });
 const bermGrassMat = new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 });
 function markerTexture(text, color) {
@@ -534,10 +839,10 @@ const LANES = [
 // InstancedMesh below.
 const bermPostXforms = [];
 LANES.forEach(L => {
-  const berm = new THREE.Mesh(new THREE.BoxGeometry(90, 3, 4), bermMat);
-  berm.position.set(0, -0.1, L.z - 6); scene.add(berm);
-  const bermTop = new THREE.Mesh(new THREE.BoxGeometry(90, 0.35, 4.4), bermGrassMat);
-  bermTop.position.set(0, 1.55, L.z - 6); scene.add(bermTop);
+  const berm = new THREE.Mesh(bermGeo, bermMat);
+  berm.position.set(0, -1.6, L.z - 6); scene.add(berm);
+  const bermTop = new THREE.Mesh(new THREE.BoxGeometry(90, 0.35, 2.4), bermGrassMat);
+  bermTop.position.set(0, 1.5, L.z - 6); scene.add(bermTop);
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.5, metalness: 0.7 });
   const frame = new THREE.Mesh(new THREE.BoxGeometry(9.6, 5.1, 0.2), frameMat);
   frame.position.set(34, 3.5, L.z - 4.2); scene.add(frame);
@@ -591,6 +896,143 @@ LANES.forEach(L => {
   scrub.instanceMatrix.needsUpdate = true;
   scene.add(scrub);
 }
+
+// Scattered rocks (Round 2): low-poly jittered icosahedra wearing the
+// photoscanned boulder PBR set (Poly Haven CC0). The scanned MESH was
+// rejected (66k tris — not Quest 2-appropriate); the scanned TEXTURES on
+// ~80-tri rocks give the real-rock read at a fraction of the cost.
+// One InstancedMesh, 1 draw call.
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x8a7f70, roughness: 1.0, metalness: 0.0 }); // metalness 0 until the ARM map arrives (a metalness-1 rock with no envmap renders black)
+{
+  const rockGeo = new THREE.IcosahedronGeometry(1, 1);
+  const rp = rockGeo.attributes.position;
+  const weld = new Map(); // non-indexed soup: weld shared corners so the jitter doesn't crack the mesh
+  for (let i = 0; i < rp.count; i++) {
+    const key = rp.getX(i).toFixed(3) + ',' + rp.getY(i).toFixed(3) + ',' + rp.getZ(i).toFixed(3);
+    let off = weld.get(key);
+    if (!off) { off = [rand(-0.18, 0.18), rand(-0.18, 0.18), rand(-0.18, 0.18)]; weld.set(key, off); }
+    rp.setXYZ(i, rp.getX(i) + off[0], rp.getY(i) + off[1], rp.getZ(i) + off[2]);
+  }
+  rockGeo.computeVertexNormals();
+  const spots = [];
+  for (let i = 0; i < 26; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    spots.push([side * rand(24, 56), -1.35, rand(-185, -12), rand(0.4, 1.2)]);
+  }
+  LANES.forEach(L => {
+    for (let i = 0; i < 3; i++) spots.push([rand(-40, 40), -1.3, L.z - 6 + rand(-3, 3), rand(0.3, 0.7)]);
+  });
+  // Two hero boulders near the firing line (the player can walk up to these).
+  spots.push([-4.5, -1.1, -7, 1.9], [5.2, -1.15, -9.5, 1.5]);
+  const rocks = new THREE.InstancedMesh(rockGeo, rockMat, spots.length);
+  spots.forEach((s, i) => {
+    _dummy.position.set(s[0], s[1], s[2]);
+    _dummy.rotation.set(rand(0, 0.4), rand(0, Math.PI * 2), rand(0, 0.4));
+    _dummy.scale.set(s[3], s[3] * rand(0.6, 0.85), s[3]);
+    _dummy.updateMatrix();
+    rocks.setMatrixAt(i, _dummy.matrix);
+  });
+  rocks.instanceMatrix.needsUpdate = true;
+  scene.add(rocks);
+}
+
+// Treeline (Round 2): instanced pines along the ridge base + flanks — the
+// forested mountain slopes from the reference bar, at the distance where
+// silhouette matters more than detail. Trunks + merged two-cone canopies,
+// 2 draw calls, per-instance green variation. (A licensed pine GLB was
+// not obtainable — Kenney's direct archive URL returns 403; the
+// donation-flow page needs a browser session. Recorded in the register.)
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
+const canopyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
+{
+  const trunkGeo = new THREE.CylinderGeometry(0.12, 0.2, 2.2, 6);
+  trunkGeo.translate(0, 1.1, 0);
+  const canopyGeo = mergeParts([
+    part(new THREE.ConeGeometry(1.7, 3.4, 7), 0, 3.4, 0),
+    part(new THREE.ConeGeometry(1.15, 2.6, 7), 0, 5.2, 0)
+  ]);
+  const treeSpots = [];
+  for (let i = 0; i < 34; i++) treeSpots.push([rand(-380, 380), -1.6, rand(-360, -290), rand(3.5, 7)]);
+  for (let i = 0; i < 14; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    treeSpots.push([side * rand(65, 130), -1.6, rand(-260, -60), rand(3, 6)]);
+  }
+  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeSpots.length);
+  const canopies = new THREE.InstancedMesh(canopyGeo, canopyMat, treeSpots.length);
+  const _tc = new THREE.Color();
+  treeSpots.forEach((s, i) => {
+    _dummy.position.set(s[0], s[1], s[2]);
+    _dummy.rotation.set(0, rand(0, Math.PI * 2), 0);
+    _dummy.scale.setScalar(s[3]);
+    _dummy.updateMatrix();
+    trunks.setMatrixAt(i, _dummy.matrix);
+    canopies.setMatrixAt(i, _dummy.matrix);
+    _tc.setHSL(0.32 + rand(-0.03, 0.03), rand(0.25, 0.4), rand(0.16, 0.24));
+    canopies.setColorAt(i, _tc);
+  });
+  trunks.instanceMatrix.needsUpdate = true;
+  canopies.instanceMatrix.needsUpdate = true;
+  if (canopies.instanceColor) canopies.instanceColor.needsUpdate = true;
+  scene.add(trunks); scene.add(canopies);
+}
+
+// Grass tufts (Round 2): instanced crossed-plane tufts with a painted
+// blade texture near the firing line — foreground ground detail where the
+// player looks down. 1 draw call.
+{
+  const bladeCanvas = document.createElement('canvas'); bladeCanvas.width = bladeCanvas.height = 128;
+  const bg = bladeCanvas.getContext('2d');
+  bg.clearRect(0, 0, 128, 128);
+  const bladeTones = ['#6b7a2a', '#7a8a35', '#5a6a22', '#8a9a40', '#4a5a1e'];
+  for (let i = 0; i < 26; i++) {
+    const x0 = rand(8, 120), lean = rand(-18, 18), h = rand(50, 118), w = rand(3, 7);
+    bg.fillStyle = bladeTones[Math.floor(rand(0, bladeTones.length))];
+    bg.beginPath();
+    bg.moveTo(x0 - w / 2, 128); bg.lineTo(x0 + lean, 128 - h); bg.lineTo(x0 + w / 2, 128);
+    bg.closePath(); bg.fill();
+  }
+  const bladeTex = new THREE.CanvasTexture(bladeCanvas);
+  bladeTex.colorSpace = THREE.SRGBColorSpace;
+  const tuftMat = new THREE.MeshStandardMaterial({ map: bladeTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 1 });
+  const tp1 = new THREE.PlaneGeometry(0.6, 0.6); tp1.translate(0, 0.3, 0);
+  const tp2 = new THREE.PlaneGeometry(0.6, 0.6); tp2.translate(0, 0.3, 0);
+  const tp3 = new THREE.PlaneGeometry(0.6, 0.6); tp3.translate(0, 0.3, 0);
+  const tuftGeo = mergeParts([
+    part(tp1, 0, 0, 0),
+    part(tp2, 0, 0, 0, 0, Math.PI / 3, 0),
+    part(tp3, 0, 0, 0, 0, -Math.PI / 3, 0)
+  ]);
+  const tuftSpots = [];
+  let tries = 0;
+  while (tuftSpots.length < 60 && tries < 300) {
+    tries++;
+    const x = rand(-9, 9), z = rand(-26, 2);
+    if (Math.abs(x) < 5.5 && z > -4.5 && z < 1.5) continue; // keep the gravel strip clear
+    tuftSpots.push([x, -1.6, z, rand(0.6, 1.3)]);
+  }
+  for (let i = 0; i < 24; i++) tuftSpots.push([rand(-30, 30), -1.6, rand(-60, -26), rand(0.7, 1.4)]);
+  const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, tuftSpots.length);
+  tuftSpots.forEach((s, i) => {
+    _dummy.position.set(s[0], s[1], s[2]);
+    _dummy.rotation.set(0, rand(0, Math.PI), 0);
+    _dummy.scale.setScalar(s[3]);
+    _dummy.updateMatrix();
+    tufts.setMatrixAt(i, _dummy.matrix);
+  });
+  tufts.instanceMatrix.needsUpdate = true;
+  scene.add(tufts);
+}
+
+// PBR texture loads (async; procedural fallbacks stay until each arrives).
+loadPbrTexture('dry_ground_01_diff_1k.jpg', true, 'groundDiff', [12, 12]);
+loadPbrTexture('dry_ground_01_nor_gl_1k.jpg', false, 'groundNor', [12, 12]);
+loadPbrTexture('dry_ground_01_rough_1k.jpg', false, 'groundRough', [12, 12]);
+loadPbrTexture('boulder_01_diff_1k.jpg', true, 'rockDiff', null);
+loadPbrTexture('boulder_01_nor_gl_1k.jpg', false, 'rockNor', null);
+loadPbrTexture('boulder_01_arm_1k.jpg', false, 'rockArm', null);
+loadPbrTexture('dark_wooden_planks_diff_1k.jpg', true, 'woodDiff', null);
+loadPbrTexture('dark_wooden_planks_nor_gl_1k.jpg', false, 'woodNor', null);
+loadPbrTexture('dark_wooden_planks_rough_1k.jpg', false, 'woodRough', null);
 
 // Distance haze: soft warm translucent bands standing at each berm line.
 // Aerial perspective in layers — the eye reads three distinct depths
@@ -705,31 +1147,55 @@ function grainTexture() {
 const grainTex = grainTexture();
 const rifleGroup = new THREE.Group();
 let muzzleObj = null;
+// PBR wood slots, filled async by the texture loaders (buildRifle reads
+// them on every weapon switch, so a late-arriving texture still applies).
+const rifleWood = { map: null, normalMap: null, roughnessMap: null };
 function buildRifle(w) {
   while (rifleGroup.children.length) rifleGroup.remove(rifleGroup.children[0]);
-  const metal = new THREE.MeshStandardMaterial({ color: w.metal, roughness: 0.45, metalness: 0.6, bumpMap: grainTex, bumpScale: 0.0015 });
-  const stock = new THREE.MeshStandardMaterial({ color: w.stock, roughness: 0.8, bumpMap: grainTex, bumpScale: 0.004 });
+  const metal = new THREE.MeshStandardMaterial({ color: w.metal, roughness: 0.35, metalness: 0.85, bumpMap: grainTex, bumpScale: 0.0015 });
+  const stock = new THREE.MeshStandardMaterial({
+    color: w.stock, roughness: 1.0, metalness: 0.0,
+    map: rifleWood.map, normalMap: rifleWood.normalMap, roughnessMap: rifleWood.roughnessMap,
+    bumpMap: rifleWood.map ? null : grainTex, bumpScale: 0.004
+  });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x1a2f45, roughness: 0.08, metalness: 0.9 });
   const s = w.scale;
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022 * s, 0.026 * s, w.barrel, 10), metal);
-  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.02, -0.55 - w.barrel / 2 + 0.35); rifleGroup.add(barrel);
+  const bellR = (0.038 + 0.002 * w.zoom) * s; // bigger zoom = bigger objective bell
+  const metalParts = [
+    part(new THREE.CylinderGeometry(0.026 * s, 0.022 * s, w.barrel, 10), 0, 0.02, -0.55 - w.barrel / 2 + 0.35, Math.PI / 2), // barrel (tapers toward the muzzle — the original had the taper reversed)
+    part(new THREE.TorusGeometry(0.024 * s, 0.006 * s, 6, 12), 0, 0.02, -0.55 - w.barrel + 0.35), // muzzle crown
+    part(new THREE.BoxGeometry(0.09 * s, 0.11 * s, 0.42 * s), 0, 0, -0.28), // receiver
+    part(new THREE.BoxGeometry(0.02 * s, 0.05 * s, 0.14 * s), 0.05 * s, 0.02, -0.28), // ejection port (right side)
+    part(new THREE.CylinderGeometry(0.011 * s, 0.011 * s, 0.09 * s, 8), 0.075 * s, 0.035, -0.16, 0, 0, -0.9), // bolt handle
+    part(new THREE.SphereGeometry(0.02 * s, 10, 8), 0.105 * s, 0.06, -0.16), // bolt knob
+    part(new THREE.TorusGeometry(0.05 * s, 0.008 * s, 6, 12, Math.PI), 0, -0.075, -0.08, 0, Math.PI / 2, Math.PI), // trigger guard
+    part(new THREE.BoxGeometry(0.012 * s, 0.05 * s, 0.02 * s), 0, -0.085, -0.08, 0.2), // trigger
+    part(new THREE.CylinderGeometry(0.032 * s, 0.032 * s, 0.24 * s, 12), 0, 0.1, -0.3, Math.PI / 2), // scope tube
+    part(new THREE.CylinderGeometry(0.032 * s, bellR, 0.08 * s, 12), 0, 0.1, -0.46, Math.PI / 2), // scope bell (wide end FORWARD — the original had it reversed)
+    part(new THREE.CylinderGeometry(0.015 * s, 0.015 * s, 0.03 * s, 8), 0, 0.145, -0.3), // top turret
+    part(new THREE.CylinderGeometry(0.015 * s, 0.015 * s, 0.03 * s, 8), 0.045 * s, 0.1, -0.3, 0, 0, Math.PI / 2), // side turret
+    part(new THREE.BoxGeometry(0.03 * s, 0.03 * s, 0.02 * s), 0, 0.07, -0.24), // scope mount (rear)
+    part(new THREE.BoxGeometry(0.03 * s, 0.03 * s, 0.02 * s), 0, 0.07, -0.36), // scope mount (front)
+    part(new THREE.BoxGeometry(0.06 * s, 0.16 * s, 0.12 * s), 0, -0.11, -0.22, 0.15), // magazine
+    part(new THREE.BoxGeometry(0.07 * s, 0.02 * s, 0.13 * s), 0, -0.19, -0.22, 0.15) // mag base plate
+  ];
   if (w.name === 'THUNDER .50') {
-    const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, 0.16, 10), metal);
-    brake.rotation.x = Math.PI / 2; brake.position.set(0, 0.02, -0.55 - w.barrel + 0.35 - 0.06); rifleGroup.add(brake);
+    metalParts.push(part(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, 0.16, 10), 0, 0.02, -0.55 - w.barrel + 0.35 - 0.06, Math.PI / 2));
   }
-  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09 * s, 0.11 * s, 0.42 * s), metal);
-  receiver.position.set(0, 0, -0.28); rifleGroup.add(receiver);
-  const stockMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.14 * s, 0.5 * s), stock);
-  stockMesh.position.set(0, -0.03, 0.05); stockMesh.rotation.x = 0.06; rifleGroup.add(stockMesh);
-  const butt = new THREE.Mesh(new THREE.BoxGeometry(0.11 * s, 0.22 * s, 0.08 * s), stock);
-  butt.position.set(0, -0.06, 0.32); rifleGroup.add(butt);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07 * s, 0.16 * s, 0.09 * s), stock);
-  grip.position.set(0, -0.1, -0.02); grip.rotation.x = 0.35; rifleGroup.add(grip);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06 * s, 0.16 * s, 0.12 * s), metal);
-  mag.position.set(0, -0.11, -0.22); mag.rotation.x = 0.15; rifleGroup.add(mag);
-  const scopeTube = new THREE.Mesh(new THREE.CylinderGeometry(0.032 * s, 0.032 * s, 0.24 * s, 12), metal);
-  scopeTube.rotation.x = Math.PI / 2; scopeTube.position.set(0, 0.1, -0.3); rifleGroup.add(scopeTube);
-  const scopeBell = new THREE.Mesh(new THREE.CylinderGeometry(0.045 * s, 0.032 * s, 0.08 * s, 12), metal);
-  scopeBell.rotation.x = Math.PI / 2; scopeBell.position.set(0, 0.1, -0.46); rifleGroup.add(scopeBell);
+  const stockParts = [
+    part(new THREE.BoxGeometry(0.1 * s, 0.14 * s, 0.5 * s), 0, -0.03, 0.05, 0.06), // stock
+    part(new THREE.BoxGeometry(0.11 * s, 0.22 * s, 0.08 * s), 0, -0.06, 0.32), // butt
+    part(new THREE.BoxGeometry(0.09 * s, 0.05 * s, 0.2 * s), 0, 0.05, 0.1), // cheek riser
+    part(new THREE.BoxGeometry(0.07 * s, 0.16 * s, 0.09 * s), 0, -0.1, -0.02, 0.35) // grip
+  ];
+  const glassParts = [
+    part(new THREE.CircleGeometry(bellR * 0.82, 16), 0, 0.1, -0.505, 0, Math.PI, 0), // objective lens
+    part(new THREE.CircleGeometry(0.026 * s, 16), 0, 0.1, -0.178) // ocular lens
+  ];
+  // ~20 parts merged by material → 4 meshes (was 9–10 meshes for 10 parts).
+  rifleGroup.add(new THREE.Mesh(mergeParts(metalParts), metal));
+  rifleGroup.add(new THREE.Mesh(mergeParts(stockParts), stock));
+  rifleGroup.add(new THREE.Mesh(mergeParts(glassParts), glass));
   const accent = new THREE.Mesh(new THREE.BoxGeometry(0.095 * s, 0.012, 0.3 * s),
     new THREE.MeshBasicMaterial({ color: 0x27e8ff, fog: false }));
   accent.position.set(0, 0.058, -0.28); rifleGroup.add(accent);
@@ -738,22 +1204,101 @@ function buildRifle(w) {
   rifleGroup.add(muzzleObj);
 }
 buildRifle(WEAPONS[0]);
-rifleGroup.position.set(0.28, -0.26, -0.55);
-rifleGroup.rotation.y = 0.06;
-camera.add(rifleGroup);
+// --- Rifle parenting: the Round 2 aiming fix ---
+// ROOT CAUSE (owner verdict "aiming completely off"): the Round 1 rifle
+// viewmodel was CAMERA-attached — it pointed where the HEAD pointed —
+// while the shot ray came from the RIGHT CONTROLLER's target-ray pose.
+// The player aimed with the rifle they saw; the bullet went where the
+// hand pointed. The laser + 30 m aim dot were supposed to bridge the gap,
+// but the rifle is the dominant visual cue, and the dot sat at a fixed
+// 30 m plane (parallax error vs the real 60/120/190 m targets).
+// THE FIX: in VR the rifle is parented to the right controller's
+// TARGET-RAY-space object (renderer.xr.getController). That object's -Z
+// axis IS the shot ray by definition, and the rifle is built with its
+// barrel on -Z — so the barrel line and the shot ray agree EXACTLY, by
+// construction, on any headset: no magic offset, no per-headset
+// calibration. The local offset (0, -0.02, 0) puts the barrel centerline
+// (rifle-local y +0.02) exactly on the ray. On desktop (no controller)
+// the rifle stays camera-attached as before. Controllers are attached by
+// HANDEDNESS from the 'connected' event, never by index.
+const RIFLE_CAM_POS = new THREE.Vector3(0.28, -0.26, -0.55);
+const RIFLE_CAM_ROT = new THREE.Euler(0, 0.06, 0);
+const RIFLE_CTRL_POS = new THREE.Vector3(0, -0.02, 0);
+const RIFLE_CTRL_ROT = new THREE.Euler(0, 0, 0);
+let rifleParentKind = 'camera'; // 'camera' | 'controller'
+let rightCtrlObj = null;
+let kickT = 0; // recoil timer — declared HERE (not the firing section) because setRifleParent runs at module evaluation and must not hit a temporal-dead-zone const
+function setRifleParent(kind, ctrlObj) {
+  if (kind === 'controller' && ctrlObj) {
+    ctrlObj.add(rifleGroup);
+    rifleGroup.position.copy(RIFLE_CTRL_POS);
+    rifleGroup.rotation.copy(RIFLE_CTRL_ROT);
+    rifleParentKind = 'controller';
+  } else {
+    camera.add(rifleGroup);
+    rifleGroup.position.copy(RIFLE_CAM_POS);
+    rifleGroup.rotation.copy(RIFLE_CAM_ROT);
+    rifleParentKind = 'camera';
+  }
+  kickT = 0; // a reparent cancels any in-flight kick offset
+}
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  scene.add(c); // the rifle is parented to the right one — it must be in the scene to render
+  c.addEventListener('connected', (e) => {
+    if (e.data && e.data.handedness === 'right') {
+      rightCtrlObj = c;
+      setRifleParent('controller', c);
+    }
+  });
+  c.addEventListener('disconnected', (e) => {
+    if (e.data && e.data.handedness === 'right' && rightCtrlObj === c) {
+      rightCtrlObj = null;
+      setRifleParent('camera');
+    }
+  });
+}
+setRifleParent('camera');
 
 // Muzzle flash: one additive sprite, scene-level (NOT a rifle child —
 // buildRifle wipes the rifle group's children on every weapon switch).
 // Positioned at the muzzle world position on each shot, visible ~50 ms
 // with a random rotation/scale. 1 draw call, only while firing. Gameplay
 // feedback — the valve never sheds it.
+// Star-shaped muzzle flash (Round 2): a hot core with radial spikes,
+// not a soft round glow — a rifle flash has structure.
+function flashTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const core = g.createRadialGradient(64, 64, 2, 64, 64, 30);
+  core.addColorStop(0, 'rgba(255,250,230,1)');
+  core.addColorStop(0.5, 'rgba(255,210,120,0.9)');
+  core.addColorStop(1, 'rgba(255,140,40,0)');
+  g.fillStyle = core; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(255,200,100,0.85)';
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + rand(-0.15, 0.15);
+    const len = rand(34, 58);
+    g.save(); g.translate(64, 64); g.rotate(a);
+    g.beginPath(); g.moveTo(0, -4); g.lineTo(len, 0); g.lineTo(0, 4); g.closePath(); g.fill();
+    g.restore();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
 const muzzleFlash = new THREE.Sprite(new THREE.SpriteMaterial({
-  map: glowTexture('rgba(255,240,180,1)', 'rgba(255,120,20,0)'),
+  map: flashTexture(),
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false
 }));
 muzzleFlash.scale.set(0.5, 0.5, 1);
 muzzleFlash.visible = false;
 scene.add(muzzleFlash);
+// Muzzle-flash light (Round 2): one brief PointLight at the muzzle — the
+// 3rd light in the scene (still within the 2–3 budget). Intensity spikes
+// on each shot and decays in ~70 ms; it lights the rifle and bench for
+// the flash frame. Zero cost at rest (intensity 0).
+const muzzleLight = new THREE.PointLight(0xffc266, 0, 8, 2);
+scene.add(muzzleLight);
 let muzzleFlashT = 0;
 const _flashPos = new THREE.Vector3();
 function showMuzzleFlash(power) {
@@ -880,6 +1425,7 @@ perfMesh.visible = false;
 camera.add(perfMesh);
 const perfHudEl = document.getElementById('perfHud');
 function updatePerfReadout() {
+  if (!perfDebug) return; // the perf readout is a debug overlay (?debug=perf)
   const text = perfValve.ema.toFixed(1) + ' ms · VALVE L' + perfValve.level +
     ' · FB ' + xrLayerSize() + (S.paused ? ' · PAUSED' : '');
   perfCtx.clearRect(0, 0, 512, 64);
@@ -1027,6 +1573,15 @@ function sfxShot(w) {
     es.connect(ef); ef.connect(eg); eg.connect(masterGain); es.start(t0 + delay);
   });
 }
+// Bolt-action click-clack when the bolt cycle completes (bolt rifles
+// only) — the shooter hears the next round chamber. Two short metallic
+// clicks, quiet enough to sit under the range ambience.
+function sfxBolt() {
+  if (!actx || muted) return;
+  blip(1900, 1200, 0.03, 'square', 0.06);
+  setTimeout(() => blip(1500, 900, 0.04, 'square', 0.07), 90);
+}
+
 // Spatial impacts: the steel ping / balloon pop play through an HRTF
 // panner positioned at the target, so a 600-yard hit sounds 600 yards away.
 // Volume falls with distance (100 yd full, 600 yd ~half). One panner per
@@ -1145,7 +1700,42 @@ drawScopeFace(); // first paint — wind + WEAPONS both exist from here on
 // it flashes, loses HP, and when HP hits zero it drops (plates / pop-ups),
 // slides off (movers) or pops (balloons) — then respawns after a delay.
 // Nothing here ever ends the game: the range just keeps serving targets.
-const steelMat = new THREE.MeshStandardMaterial({ color: 0x9aa4ad, roughness: 0.35, metalness: 0.8 });
+// Brushed-steel plate face (Round 2): radial brush arcs, scuffs from
+// past hits, a worn painted center circle, darkened rim. One canvas,
+// two textures (sRGB color + linear roughness) — the painted center is
+// rougher than the bare steel, as it should be.
+function steelPlateCanvas() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#a8b2ba'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 420; i++) {
+    const r = rand(6, 128), a0 = rand(0, Math.PI * 2), span = rand(0.2, 1.2);
+    g.strokeStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.07)' : 'rgba(20,26,32,0.08)';
+    g.lineWidth = rand(0.5, 1.5);
+    g.beginPath(); g.arc(128, 128, r, a0, a0 + span); g.stroke();
+  }
+  for (let i = 0; i < 46; i++) {
+    g.strokeStyle = 'rgba(40,46,52,' + rand(0.1, 0.3) + ')';
+    g.lineWidth = rand(0.5, 2);
+    const x = rand(10, 246), y = rand(10, 246), a = rand(0, Math.PI * 2), l = rand(4, 18);
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+  }
+  g.fillStyle = 'rgba(240,240,235,0.92)';
+  g.beginPath(); g.arc(128, 128, 40, 0, Math.PI * 2); g.fill();
+  for (let i = 0; i < 260; i++) {
+    const a = rand(0, Math.PI * 2), r = rand(0, 40);
+    g.fillStyle = 'rgba(168,178,186,' + rand(0.3, 0.8) + ')';
+    g.fillRect(128 + Math.cos(a) * r, 128 + Math.sin(a) * r, rand(1, 3), rand(1, 3));
+  }
+  const rim = g.createRadialGradient(128, 128, 100, 128, 128, 128);
+  rim.addColorStop(0, 'rgba(0,0,0,0)'); rim.addColorStop(1, 'rgba(20,24,28,0.35)');
+  g.fillStyle = rim; g.fillRect(0, 0, 256, 256);
+  return c;
+}
+const plateCanvas = steelPlateCanvas();
+const plateTex = new THREE.CanvasTexture(plateCanvas); plateTex.colorSpace = THREE.SRGBColorSpace;
+const plateRoughTex = new THREE.CanvasTexture(plateCanvas); // linear: roughness data
+const steelMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: plateTex, roughnessMap: plateRoughTex, roughness: 1.0, metalness: 0.85 });
 const steelDark = new THREE.MeshStandardMaterial({ color: 0x5a636b, roughness: 0.5, metalness: 0.7 });
 function neonRing(radius, color) {
   const ring = new THREE.Mesh(
@@ -1284,8 +1874,8 @@ function onTargetDown(t) {
 const tracerPool = [];
 for (let i = 0; i < 4; i++) {
   const line = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.02, 0.02, 1, 6),
-    new THREE.MeshBasicMaterial({ color: 0xffd319, transparent: true, opacity: 0.9, fog: false })
+    new THREE.CylinderGeometry(0.028, 0.028, 1, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffe97a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
   );
   line.visible = false; scene.add(line); tracerPool.push({ line, t: 0 });
 }
@@ -1333,17 +1923,27 @@ let sparkIdx = 0, dustIdx = 0;
     dustPool.push({ s, life: 0, maxLife: 0.8 });
   }
 }
-function spawnSparks(pos, base) {
+function spawnSparks(pos, base, dir) {
   const n = Math.max(2, Math.round(base * perfValve.particleScale));
   for (let k = 0; k < n; k++) {
     const p = sparkPool[sparkIdx]; sparkIdx = (sparkIdx + 1) % sparkPool.length;
     p.s.position.copy(pos);
-    p.vel.set(rand(-1, 1), rand(0.2, 1.4), rand(-1, 1)).normalize().multiplyScalar(rand(3, 6));
+    if (dir) {
+      // A real steel hit sprays back toward the shooter: bias the burst
+      // opposite the shot direction, with spread and an upward kick.
+      p.vel.set(
+        -dir.x * rand(2, 4) + rand(-1.5, 1.5),
+        -dir.y * rand(2, 4) + rand(0.5, 2.5),
+        -dir.z * rand(2, 4) + rand(-1.5, 1.5));
+    } else {
+      p.vel.set(rand(-1, 1), rand(0.2, 1.4), rand(-1, 1)).normalize().multiplyScalar(rand(3, 6));
+    }
     p.life = 0.35;
     p.s.scale.set(0.5, 0.5, 1);
     p.s.visible = true;
   }
 }
+
 function spawnDust(pos, base) {
   const n = Math.max(1, Math.round(base * perfValve.particleScale));
   for (let k = 0; k < n; k++) {
@@ -1370,11 +1970,73 @@ function updateHitFx(dt) {
     if (p.life <= 0) { p.s.visible = false; continue; }
     const age = 1 - p.life / p.maxLife;
     p.s.position.y += dt * 0.35;
+    p.s.position.x += wind.dir * wind.mph * 0.08 * dt; // dust/smoke drifts with the wind
     // Grow, then shrink away in the last fifth of life (shared material
     // means no per-sprite opacity — scale is the fade).
     const sc = age < 0.8 ? 0.4 + age * 1.25 : 1.4 * (1 - age) * 5;
     p.s.scale.set(Math.max(0.01, sc), Math.max(0.01, sc), 1);
   }
+}
+
+// --- ?debug=aim diagnostic (Round 2) ---
+// Temporary developer diagnostic, OFF by default: shows the interaction
+// ray (cyan line), the undrifted point of aim (yellow ring), the drifted
+// point of impact (magenta ring — where the bullet actually lands), and
+// the rifle barrel axis (green line from the muzzle). When the aiming fix
+// is right, the green barrel line lies exactly on the cyan ray. Created
+// ONLY when ?debug=aim is present — zero cost in normal play.
+const _dotCam = new THREE.Vector3();
+let dbgRay = null, dbgAimMark = null, dbgHitMark = null, dbgBarrel = null;
+const _dbgA = new THREE.Vector3(), _dbgB = new THREE.Vector3(), _dbgQ = new THREE.Quaternion();
+if (aimDebug) {
+  const rayGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  dbgRay = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.9, depthTest: false }));
+  dbgRay.renderOrder = 995; dbgRay.frustumCulled = false; scene.add(dbgRay);
+  const barrelGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  dbgBarrel = new THREE.Line(barrelGeo, new THREE.LineBasicMaterial({ color: 0x2bff88, transparent: true, opacity: 0.9, depthTest: false }));
+  dbgBarrel.renderOrder = 996; dbgBarrel.frustumCulled = false; scene.add(dbgBarrel);
+  dbgAimMark = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.03, 6, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffd319, depthTest: false, transparent: true, opacity: 0.95 }));
+  dbgAimMark.renderOrder = 997; scene.add(dbgAimMark);
+  dbgHitMark = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.04, 6, 24),
+    new THREE.MeshBasicMaterial({ color: 0xff3df0, depthTest: false, transparent: true, opacity: 0.95 }));
+  dbgHitMark.renderOrder = 997; scene.add(dbgHitMark);
+}
+function updateAimDebug(o, d, shot) {
+  if (!aimDebug) return;
+  // Ray line: 250 m along the interaction ray.
+  let attr = dbgRay.geometry.attributes.position;
+  attr.setXYZ(0, o.x, o.y, o.z);
+  attr.setXYZ(1, o.x + d.x * 250, o.y + d.y * 250, o.z + d.z * 250);
+  attr.needsUpdate = true;
+  dbgRay.visible = true;
+  // Barrel axis: 3 m from the muzzle along the rifle's local -Z. When the
+  // fix is right this overlaps the cyan ray exactly.
+  muzzleObj.getWorldPosition(_dbgA);
+  muzzleObj.getWorldQuaternion(_dbgQ);
+  _dbgB.set(0, 0, -1).applyQuaternion(_dbgQ);
+  attr = dbgBarrel.geometry.attributes.position;
+  attr.setXYZ(0, _dbgA.x, _dbgA.y, _dbgA.z);
+  attr.setXYZ(1, _dbgA.x + _dbgB.x * 3, _dbgA.y + _dbgB.y * 3, _dbgA.z + _dbgB.z * 3);
+  attr.needsUpdate = true;
+  dbgBarrel.visible = true;
+  // Undrifted point of aim (yellow) + drifted point of impact (magenta).
+  camera.getWorldPosition(_dbgA);
+  dbgAimMark.position.copy(shot.aimPoint);
+  dbgAimMark.lookAt(_dbgA);
+  dbgAimMark.scale.setScalar(clamp(shot.dist * 0.005 / 0.25, 1, 20));
+  dbgAimMark.visible = true;
+  if (shot.hit) {
+    dbgHitMark.position.copy(shot.hitPoint);
+    dbgHitMark.lookAt(_dbgA);
+    dbgHitMark.scale.setScalar(clamp(shot.dist * 0.005 / 0.35, 1, 20));
+    dbgHitMark.visible = true;
+  } else dbgHitMark.visible = false;
+}
+function hideAimDebug() {
+  if (!aimDebug) return;
+  dbgRay.visible = false; dbgBarrel.visible = false;
+  dbgAimMark.visible = false; dbgHitMark.visible = false;
 }
 
 // ============================== input ==============================
@@ -1499,7 +2161,7 @@ function resetScore() {
 
 // ============================== firing ==============================
 const _hit = new THREE.Vector3(), _to = new THREE.Vector3(), _from = new THREE.Vector3();
-let kickT = 0, kickAmt = 0, prevCycle = false;
+let kickAmt = 0, prevCycle = false, kickActive = false; // kickT lives in the rifle section (setRifleParent runs at module evaluation)
 function windDriftAt(distYd) {
   // Crosswind pushes the shot sideways; the effect grows with the square
   // of distance. Kept clearly inside the 600-yd plate (radius 3.2) even at
@@ -1523,14 +2185,79 @@ function selectWeapon(i) {
   document.querySelectorAll('.wpnBtn').forEach((b, j) => b.classList.toggle('sel', j === wpnIdx));
 }
 const _bestPoint = new THREE.Vector3();
+// Shared shot resolution — the SINGLE source of truth for where a shot
+// goes (Round 2 aiming fix). tryFire, the aim dot, the laser, and the
+// ?debug=aim diagnostic all call this, so the visual aim and the actual
+// hit can never disagree again. Returns the shared _shot object:
+//   target   — the live target the (drifted) bullet hits, or null
+//   hit      — whether the bullet hits a target
+//   aimPoint — the UNDRIFTED ray point: where the barrel points. The wind
+//              mechanic is preserved — the player reads the flags and
+//              holds off from this point; the dot never auto-solves wind.
+//   hitPoint — the drifted point of impact (where the bullet lands)
+//   dist     — distance to the aim point (target plane / ground / far)
+// The hit test is unchanged from Round 1: the ray is crossed with each
+// live target's plane, wind drift is applied at that plane, and the
+// nearest disc the drifted point falls inside wins. Only the structure
+// changed (one function, shared) — not the physics.
+const _shot = {
+  target: null, hit: false, dist: Infinity,
+  aimPoint: new THREE.Vector3(), hitPoint: new THREE.Vector3()
+};
+function computeShot(o, d) {
+  _shot.target = null; _shot.hit = false; _shot.dist = Infinity;
+  let bestT = null, bestDist = 1e9, nearPlaneT = Infinity;
+  for (const t of targets) {
+    if (t.state !== 'live') continue;
+    const tz = t.group.position.z;
+    if (d.z >= -0.001) continue;
+    const tt = (tz - o.z) / d.z;
+    if (tt <= 0) continue;
+    if (tt < nearPlaneT) nearPlaneT = tt;
+    _hit.set(o.x + d.x * tt, o.y + d.y * tt, tz);
+    _hit.x += windDriftAt(laneYdForZ(tz));
+    const dx = _hit.x - t.group.position.x, dy = _hit.y - t.group.position.y;
+    if (dx * dx + dy * dy <= t.r * t.r && tt < bestDist) {
+      bestDist = tt; bestT = t; _bestPoint.copy(_hit);
+    }
+  }
+  if (bestT) {
+    _shot.target = bestT; _shot.hit = true; _shot.dist = bestDist;
+    _shot.hitPoint.copy(_bestPoint);
+    const tz = bestT.group.position.z;
+    const tt = (tz - o.z) / d.z;
+    _shot.aimPoint.set(o.x + d.x * tt, o.y + d.y * tt, tz);
+  } else if (nearPlaneT < Infinity) {
+    _shot.dist = nearPlaneT;
+    _shot.aimPoint.set(o.x + d.x * nearPlaneT, o.y + d.y * nearPlaneT, o.z + d.z * nearPlaneT);
+    _shot.hitPoint.copy(_shot.aimPoint);
+  } else if (d.y < -0.001) {
+    const tg = (-1.6 - o.y) / d.y;
+    if (tg > 0 && tg < 400) {
+      _shot.dist = tg;
+      _shot.aimPoint.set(o.x + d.x * tg, -1.6, o.z + d.z * tg);
+      _shot.hitPoint.copy(_shot.aimPoint);
+    } else {
+      _shot.dist = 200;
+      _shot.aimPoint.set(o.x + d.x * 200, o.y + d.y * 200, o.z + d.z * 200);
+      _shot.hitPoint.copy(_shot.aimPoint);
+    }
+  } else {
+    _shot.dist = 200;
+    _shot.aimPoint.set(o.x + d.x * 200, o.y + d.y * 200, o.z + d.z * 200);
+    _shot.hitPoint.copy(_shot.aimPoint);
+  }
+  return _shot;
+}
+
 function tryFire(xrOpt) {
   if (S.mode !== 'play' || S.paused) return;
   const w = WEAPONS[wpnIdx];
   if (boltT > 0 || fireT > 0) return;
   // Aim ray: scoped = straight down the scope (camera forward); unscoped
   // VR = right-controller ray; desktop = mouse ray through the camera.
-  // xrOpt is the tick's cached pollXR() result — the live code polled up to
-  // 3× per frame (tick + tryFire + aim dot), each cloning vectors.
+  // xrOpt is the tick's cached pollXR() result — the live code polled up
+  // to 3× per frame (tick + tryFire + aim dot), each cloning vectors.
   let o, d;
   if (scoped) {
     camera.getWorldPosition(_rayO);
@@ -1551,34 +2278,28 @@ function tryFire(xrOpt) {
   // with the rifle (Scout 0.65/90 ms → Thunder 0.9/120 ms).
   pulseHaptics('right', 0.4 + 0.5 * w.crack, 60 + 60 * w.crack);
   showMuzzleFlash(w.crack);
+  muzzleLight.intensity = 6 + 10 * w.crack; // brief light on the rifle/bench
   boltT = w.bolt; fireT = w.rate;
   kickT = 0.12; kickAmt = w.kick;
-  muzzleObj.getWorldPosition(_from);
-  // Find the nearest live target the ray crosses, with wind drift applied
-  // at the target's plane (farther = more drift).
-  let bestT = null, bestDist = 1e9;
-  for (const t of targets) {
-    if (t.state !== 'live') continue;
-    const tz = t.group.position.z;
-    if (d.z >= -0.001) continue;
-    const tt = (tz - o.z) / d.z;
-    if (tt <= 0) continue;
-    _hit.set(o.x + d.x * tt, o.y + d.y * tt, tz);
-    _hit.x += windDriftAt(laneYdForZ(tz));
-    const dx = _hit.x - t.group.position.x, dy = _hit.y - t.group.position.y;
-    if (dx * dx + dy * dy <= t.r * t.r && tt < bestDist) {
-      bestDist = tt; bestT = t; _bestPoint.copy(_hit);
-    }
-  }
-  if (bestT) {
-    _to.copy(_bestPoint);
+  // One shared resolution: the dot, the laser, and this shot all read the
+  // same computeShot result, so what the player aimed at is what the shot
+  // tests. Tracer origin: the muzzle while the rifle is visible; the
+  // camera when scoped (the rifle is hidden and the muzzle sits at the
+  // controller, off the scope's line — a tracer from there would slant).
+  const shot = computeShot(o, d);
+  if (scoped) _from.copy(o).addScaledVector(d, 0.5);
+  else muzzleObj.getWorldPosition(_from);
+  if (shot.hit) {
+    const bestT = shot.target;
+    _to.copy(shot.hitPoint);
     bestT.hp -= w.dmg;
     // Flash the ring brighter on a hit by briefly scaling the group.
     bestT.group.scale.setScalar(1.06);
     setTimeout(() => bestT.group.scale.setScalar(1), 120);
     // Hit feedback: steel plates swing, flash, and throw sparks at the
-    // exact hit point. Balloons skip swing/flash — they pop.
-    spawnSparks(_bestPoint, 6);
+    // exact hit point. Balloons skip swing/flash — they pop. Sparks fly
+    // back toward the shooter, as a real steel hit sprays.
+    spawnSparks(shot.hitPoint, 6, d);
     if (bestT.kind !== 'balloon') {
       bestT.swingAmp = 0.22 + 0.08 * w.dmg; bestT.swingT = 0;
       bestT.body.material = flashMat; bestT.flashT = 0.09;
@@ -1600,6 +2321,16 @@ function tryFire(xrOpt) {
     }
   }
   fireTracer(_from, _to);
+  // Smoke curls from the muzzle after the shot (one dust puff, wind-drifted).
+  muzzleObj.getWorldPosition(_dustPos);
+  spawnDust(_dustPos, 1);
+  if (aimDebug) {
+    console.log('[aim-debug] fire o=(' + o.x.toFixed(2) + ',' + o.y.toFixed(2) + ',' + o.z.toFixed(2) +
+      ') d=(' + d.x.toFixed(3) + ',' + d.y.toFixed(3) + ',' + d.z.toFixed(3) + ')' +
+      (shot.hit ? ' HIT ' + shot.target.kind + ' dist=' + shot.dist.toFixed(1) + 'm' : ' MISS') +
+      ' aim=(' + shot.aimPoint.x.toFixed(2) + ',' + shot.aimPoint.y.toFixed(2) + ',' + shot.aimPoint.z.toFixed(1) +
+      ') impact=(' + shot.hitPoint.x.toFixed(2) + ',' + shot.hitPoint.y.toFixed(2) + ',' + shot.hitPoint.z.toFixed(1) + ')');
+  }
 }
 
 // ============================== start screen ==============================
@@ -1620,7 +2351,7 @@ const hud = document.getElementById('hud');
 let xrSupported = false;
 function setStatus(msg) { statusEl.textContent = msg; }
 function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
-function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; renderLastPerfSummary(); }
 if (navigator.xr && navigator.xr.isSessionSupported) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     xrSupported = ok;
@@ -1637,8 +2368,8 @@ function beginGame() {
   if (S.mode === 'play') return;
   S.mode = 'play'; S.score = 0; S.hits = 0; S.paused = false; milestoneIdx = 0;
   hudDirty = true;
-  perfMesh.visible = true;
-  perfHudEl.style.display = 'block';
+  perfHudEl.style.display = perfDebug ? 'block' : 'none'; // perf overlay only with ?debug=perf; the 3D perf mesh is owned by tick
+  perfLog.begin(); // start the local performance record for this session
   perfValve.reset();
   perfWarmup = 0.75;
   updatePerfReadout();
@@ -1655,7 +2386,7 @@ vrBtn.addEventListener('click', async () => {
     perfValve.reset(); perfWarmup = 0.75; // fresh valve state per VR session
     startAudio(); // resume the audio context inside the VR session if needed
     hidePanel();
-    session.addEventListener('end', () => { showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; if (S.mode === 'play' && !S.paused) togglePause(); });
+    session.addEventListener('end', () => { perfLog.save(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; if (S.mode === 'play' && !S.paused) togglePause(); });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
@@ -1664,7 +2395,7 @@ vrBtn.addEventListener('click', async () => {
       perfValve.reset(); perfWarmup = 0.75; // fresh valve state per VR session
       startAudio(); // resume the audio context inside the VR session if needed
       hidePanel();
-      session.addEventListener('end', () => { showPanel(); vrBtn.disabled = false; if (S.mode === 'play' && !S.paused) togglePause(); });
+      session.addEventListener('end', () => { perfLog.save(false); showPanel(); vrBtn.disabled = false; if (S.mode === 'play' && !S.paused) togglePause(); });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
@@ -1701,17 +2432,23 @@ function tick() {
       // valve feed, and golden-hour drift all stay frozen.
       perfTimer += dt;
       if (perfTimer >= 0.5) { perfTimer = 0; updatePerfReadout(); updateWindBedGain(); }
+      // ONE HUD (Round 2 fix): the 3D cell exists ONLY in VR.
+      hudMesh.visible = renderer.xr.isPresenting && !scoped;
+      perfMesh.visible = perfDebug && renderer.xr.isPresenting;
       renderer.render(scene, camera);
       return;
     }
     // Frame-time valve: fed ONLY during active play, after the warm-up
     // window. Menu/pause/load hitches never move the valve.
     if (perfWarmup > 0) perfWarmup -= dt;
-    else perfValve.update(dt);
+    else { perfValve.update(dt); perfLog.tick(dt); } // the perf log samples the same active-play window the valve is fed in
     // Golden-hour light drift (frozen while paused — see above).
     updateGoldenHour(dt);
     // Timers (bolt cycle + semi-auto rate only — there is no reload).
-    if (boltT > 0) boltT -= dt;
+    if (boltT > 0) {
+      boltT -= dt;
+      if (boltT <= 0 && WEAPONS[wpnIdx].bolt > 0) sfxBolt(); // bolt cycle done — hear the next round chamber
+    }
     if (fireT > 0) fireT -= dt;
     // Wind rolls on its own schedule; flags follow it.
     wind.nextT -= dt;
@@ -1781,6 +2518,11 @@ function tick() {
       muzzleFlashT -= dt;
       if (muzzleFlashT <= 0) muzzleFlash.visible = false;
     }
+    if (muzzleLight.intensity > 0) {
+      muzzleLight.intensity = Math.max(0, muzzleLight.intensity - dt * 220);
+      muzzleObj.getWorldPosition(_flashPos);
+      muzzleLight.position.copy(_flashPos);
+    }
     // VR input: fire on trigger hold, scope hold, cycle (cached poll).
     scopeHeld = xr.scope || scopeMouse;
     if (xr.fire) tryFire(xr);
@@ -1794,50 +2536,77 @@ function tick() {
       scoped = wantScoped;
       scopeMesh.visible = scoped;
       rifleGroup.visible = !scoped;
-      hudMesh.visible = !scoped;
       const w = WEAPONS[wpnIdx];
       camera.fov = scoped ? 70 / w.zoom : 70;
       camera.updateProjectionMatrix();
-      aimDot.visible = !scoped;
     }
-    // Aim dot + VR laser follow the live aim ray (unscoped only). The laser
-    // shows the true shot line from the hand in VR. Uses the cached poll —
-    // no second pollXR() call.
-    if (!scoped) {
-      let o, d, vrAim = false;
-      if (renderer.xr.isPresenting) {
-        if (xr.aim) { o = xr.aim.o; d = xr.aim.d; vrAim = true; }
-      }
-      if (!o) {
-        camera.getWorldPosition(_rayO);
-        _rayD.set(mouseNDC.x, mouseNDC.y, -1).unproject(camera).sub(_rayO).normalize();
-        o = _rayO; d = _rayD;
-      }
-      const tt = (o.z < -1) ? 0 : (-30 - o.z) / (d.z || -0.001);
-      if (tt > 0) {
-        aimDot.position.set(o.x + d.x * tt, o.y + d.y * tt, -30);
-        aimDot.lookAt(camera.position);
+    // ONE HUD (Round 2 fix for the duplicated HUD in the Round 1 captures):
+    // the 3D HUD cell exists ONLY in VR — the DOM #hud is the desktop HUD.
+    // The perf readout is a debug overlay: only with ?debug=perf.
+    hudMesh.visible = renderer.xr.isPresenting && !scoped;
+    perfMesh.visible = perfDebug && renderer.xr.isPresenting;
+    // Current aim ray (scoped = camera forward; VR = right-controller ray;
+    // desktop = mouse ray). ONE computation serves the aim dot, the laser,
+    // and the ?debug=aim diagnostic — all resolved through computeShot,
+    // the SAME function tryFire uses, so the visual aim and the actual hit
+    // can never disagree again (Round 2 aiming fix).
+    let aimO = null, aimD = null, aimVr = false;
+    if (scoped) {
+      camera.getWorldPosition(_rayO);
+      camera.getWorldDirection(_rayD);
+      aimO = _rayO; aimD = _rayD;
+    } else if (renderer.xr.isPresenting && xr.aim) {
+      aimO = xr.aim.o; aimD = xr.aim.d; aimVr = true;
+    }
+    if (!aimO) {
+      camera.getWorldPosition(_rayO);
+      _rayD.set(mouseNDC.x, mouseNDC.y, -1).unproject(camera).sub(_rayO).normalize();
+      aimO = _rayO; aimD = _rayD;
+    }
+    if (aimD.z < -0.001) {
+      const shot = computeShot(aimO, aimD);
+      if (!scoped) {
+        // The dot marks the UNDRIFTED point of aim (where the barrel
+        // points) — the player still reads the flags and compensates for
+        // wind; the wind mechanic is preserved, not auto-solved. The dot
+        // scales with distance so it subtends a constant ~0.6° — readable
+        // at 600 yards without covering the plate. The laser runs the full
+        // length to the dot (the old 30 m laser never reached a target).
+        aimDot.position.copy(shot.aimPoint);
+        camera.getWorldPosition(_dotCam);
+        aimDot.lookAt(_dotCam);
+        aimDot.scale.setScalar(clamp(shot.dist * 0.005 / 0.06, 1, 20));
         aimDot.visible = true;
-        if (vrAim) {
+        if (aimVr) {
           laser.visible = true;
-          _mid.addVectors(o, aimDot.position).multiplyScalar(0.5);
+          _mid.addVectors(aimO, aimDot.position).multiplyScalar(0.5);
           laser.position.copy(_mid);
-          laser.scale.set(1, o.distanceTo(aimDot.position), 1);
-          laser.quaternion.setFromUnitVectors(_up, _laserD.copy(aimDot.position).sub(o).normalize());
+          laser.scale.set(1, aimO.distanceTo(aimDot.position), 1);
+          laser.quaternion.setFromUnitVectors(_up, _laserD.copy(aimDot.position).sub(aimO).normalize());
         } else laser.visible = false;
       } else { aimDot.visible = false; laser.visible = false; }
-    } else laser.visible = false;
+      if (aimDebug) updateAimDebug(aimO, aimD, shot);
+    } else {
+      aimDot.visible = false; laser.visible = false;
+      if (aimDebug) hideAimDebug();
+    }
     // Recoil kick on the rifle viewmodel. Kicking camera.rotation does
     // nothing in VR — the headset pose overwrites the camera rotation every
     // frame — so the kick lives on the rifle, where it reads in both modes.
+    // The kick is an OFFSET from the rifle's current base transform, so it
+    // works identically camera-attached (desktop) or controller-attached
+    // (VR): straight back along the barrel with a slight muzzle rise.
     if (kickT > 0) {
       kickT -= dt;
       const k = kickT / 0.12;
-      rifleGroup.position.set(0.28, -0.26 + kickAmt * 2 * k, -0.55 + kickAmt * 6 * k);
+      const base = rifleParentKind === 'controller' ? RIFLE_CTRL_POS : RIFLE_CAM_POS;
+      rifleGroup.position.set(base.x, base.y + kickAmt * 2 * k, base.z + kickAmt * 6 * k);
       rifleGroup.rotation.x = -kickAmt * 2 * k;
-    } else if (rifleGroup.position.y !== -0.26) {
-      rifleGroup.position.set(0.28, -0.26, -0.55);
-      rifleGroup.rotation.x = 0;
+      kickActive = true;
+    } else if (kickActive) {
+      rifleGroup.position.copy(rifleParentKind === 'controller' ? RIFLE_CTRL_POS : RIFLE_CAM_POS);
+      rifleGroup.rotation.copy(rifleParentKind === 'controller' ? RIFLE_CTRL_ROT : RIFLE_CAM_ROT);
+      kickActive = false;
     }
     // Sparse bird chirps + 0.5 s cadence: perf readout + wind-bed gain.
     maybeChirp(dt);

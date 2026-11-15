@@ -2,25 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>MARSH SHOT VR — Danny's Arcade</title>
 <style>
+  *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; overflow: hidden; background: #0a0618; height: 100%; font-family: Arial, sans-serif; }
   #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  .panel { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(5, 2, 18, 0.82); color: #fff; text-align: center; z-index: 10; padding: 20px; }
-  .panel h1 { font-size: 44px; margin: 0 0 6px; color: #ffd319; text-shadow: 0 0 18px #ff2fd6, 0 0 42px #27e8ff; letter-spacing: 2px; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (the previous
+     justify-content:center clipped the top once content overflowed). The
+     ENTER VR button sits above the detail paragraphs in the DOM so it is
+     visible on load. */
+  .panel { position: fixed; inset: 0; height: 100vh; height: 100dvh; display: flex; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; background: rgba(5, 2, 18, 0.82); color: #fff; text-align: center; z-index: 10; padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .panel .box { margin: auto; width: 100%; max-width: 600px; min-width: 0; }
+  .panel h1 { font-size: clamp(28px, 8vw, 44px); margin: 0 0 6px; color: #ffd319; text-shadow: 0 0 18px #ff2fd6, 0 0 42px #27e8ff; letter-spacing: 2px; overflow-wrap: break-word; }
   .panel p { max-width: 560px; line-height: 1.5; color: #cfe8ff; margin: 8px 0; font-size: 17px; }
   .panel .sub { color: #9fd8ff; font-size: 15px; }
-  .btn { margin-top: 16px; padding: 16px 34px; font-size: 22px; font-weight: bold; border: 0; border-radius: 12px; background: #ffd319; color: #1a0b2e; cursor: pointer; box-shadow: 0 0 24px #ff2fd6; }
+  .btn { margin-top: 16px; padding: 16px 34px; font-size: clamp(18px, 3.4vw, 22px); font-weight: bold; border: 0; border-radius: 12px; background: #ffd319; color: #1a0b2e; cursor: pointer; box-shadow: 0 0 24px #ff2fd6; }
+  #vrBtn { min-height: 56px; width: min(100%, 340px); }
   .btn:disabled { opacity: 0.5; }
   .backlink { margin-top: 18px; font-size: 16px; }
   .backlink a { color: #27e8ff; }
   #status { margin-top: 12px; color: #ffd319; font-size: 15px; min-height: 20px; }
-  #hud { position: fixed; top: 10px; left: 10px; z-index: 5; background: rgba(2, 8, 24, 0.72); border: 2px solid #27e8ff; box-shadow: 0 0 14px rgba(255, 47, 214, 0.45); border-radius: 8px; padding: 8px 12px; color: #7df9ff; font-weight: bold; font-size: 16px; line-height: 1.45; white-space: nowrap; pointer-events: none; }
+  #hud { position: fixed; top: 10px; left: 10px; z-index: 5; background: rgba(2, 8, 24, 0.88); border: 2px solid #27e8ff; box-shadow: 0 0 14px rgba(255, 47, 214, 0.45); border-radius: 8px; padding: 8px 12px; color: #d8fbff; font-weight: bold; font-size: 16px; line-height: 1.45; white-space: nowrap; pointer-events: none; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9); max-width: calc(100vw - 24px); }
   #hud b { color: #ffd319; }
-  #banner { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); z-index: 6; display: none; background: rgba(2, 8, 24, 0.8); border: 3px solid #ffd319; box-shadow: 0 0 24px #27e8ff; color: #ffd319; font-weight: bold; font-size: 30px; padding: 12px 26px; border-radius: 12px; pointer-events: none; text-align: center; }
+  #banner { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); z-index: 6; display: none; background: rgba(2, 8, 24, 0.8); border: 3px solid #ffd319; box-shadow: 0 0 24px #27e8ff; color: #ffd319; font-weight: bold; font-size: clamp(20px, 5vw, 30px); padding: 12px 26px; border-radius: 12px; pointer-events: none; text-align: center; max-width: calc(100vw - 32px); }
   #cross { position: fixed; z-index: 4; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 3px solid #27e8ff; border-radius: 50%; box-shadow: 0 0 12px #ff2fd6; pointer-events: none; display: none; }
   #cross::after { content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; background: #ffd319; border-radius: 50%; }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height: 560px) {
+    .panel h1 { font-size: 30px; }
+    .panel p { font-size: 14px; margin: 5px 0; }
+    .panel .sub { font-size: 13px; }
+    .btn { margin-top: 10px; padding: 12px 28px; }
+    #vrBtn { min-height: 48px; }
+    #status { margin-top: 8px; }
+  }
+  @media (max-width: 520px) {
+    #hud { font-size: 13px; padding: 6px 9px; }
+  }
 </style>
 </head>
 <body>
@@ -29,16 +51,18 @@
 <div id="banner"></div>
 <div id="cross"></div>
 <div class="panel" id="panel">
+  <div class="box">
   <h1>MARSH SHOT VR</h1>
   <p>A bright day over the marsh. Wild birds cross the sky — take your shot.</p>
+  <button class="btn" id="vrBtn">ENTER VR</button>
+  <div id="status"></div>
   <p class="sub"><b>VR:</b> aim with your right controller, pull the trigger to shoot.<br>
   <b>Desktop:</b> move the mouse to aim, click to shoot.<br>
   Farther and faster birds are worth more points. Rounds of 10 birds — every round gets faster.<br>
   No lives, no fail state — play as long as you like, rounds keep coming.</p>
-  <button class="btn" id="vrBtn">ENTER VR</button>
   <button class="btn" id="soundBtn" style="padding:10px 20px;font-size:16px">SOUND: ON</button>
-  <div id="status"></div>
-  <p class="backlink"><a href="./">← Danny's Arcade</a></p>
+  <p class="backlink"><a href="../">← Danny's Arcade</a></p>
+  </div>
 </div>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }

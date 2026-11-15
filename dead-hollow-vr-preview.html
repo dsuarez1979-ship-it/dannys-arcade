@@ -2,19 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>DEAD HOLLOW VR — Danny's Arcade</title>
 <style>
+  *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; overflow: hidden; background: #05070d; height: 100%; }
   canvas { display: block; }
   #hud {
     position: fixed; top: 12px; left: 12px; z-index: 5; pointer-events: none;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: rgba(5, 8, 15, 0.62); border: 1px solid rgba(255, 60, 60, 0.45); border-radius: 10px;
-    padding: 10px 12px; color: #f5f2ff; min-width: 190px;
+    background: rgba(5, 8, 15, 0.86); border: 1px solid rgba(255, 60, 60, 0.75); border-radius: 10px;
+    padding: 10px 12px; color: #f5f2ff; min-width: 190px; max-width: calc(100vw - 24px);
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
   }
   #hud .row { display: flex; justify-content: space-between; gap: 14px; font-size: 15px; line-height: 1.5; }
-  #hud .label { color: #c9c0ee; }
+  #hud .label { color: #ddd6ff; }
   #hud .val { font-weight: 700; }
   #hpbar { height: 10px; background: rgba(255,255,255,0.14); border-radius: 6px; overflow: hidden; margin-top: 6px; }
   #hpfill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff3d3d, #ff7e47); transition: width .2s; }
@@ -35,20 +37,27 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: rgba(245,242,255,0.75);
     font-size: 13px; text-align: center; text-shadow: 0 1px 3px #000; max-width: 94vw; line-height: 1.4;
   }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .card margin:auto centers it
+     when short and keeps the top reachable when tall (plain
+     align-items:center would clip the top). The launch buttons sit above the
+     detail paragraphs in the DOM so they are visible on load. */
   #menu {
-    position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+    position: fixed; inset: 0; height: 100vh; height: 100dvh; z-index: 10; display: flex;
+    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     background: radial-gradient(900px 600px at 50% 20%, rgba(80, 10, 10, 0.55), rgba(3, 4, 10, 0.92));
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f5f2ff; text-align: center;
-    padding: 20px;
+    padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
-  #menu .card { max-width: 560px; }
-  #menu h1 { font-size: clamp(40px, 9vw, 68px); letter-spacing: 3px; margin: 0 0 4px; color: #ff4a3d; text-shadow: 0 0 30px rgba(255, 40, 40, 0.5); }
+  #menu .card { width: 100%; max-width: 560px; margin: auto; min-width: 0; }
+  #menu h1 { font-size: clamp(34px, 9vw, 68px); letter-spacing: 3px; margin: 0 0 4px; color: #ff4a3d; text-shadow: 0 0 30px rgba(255, 40, 40, 0.5); overflow-wrap: break-word; }
   #menu h2 { font-size: clamp(15px, 3vw, 20px); font-weight: 600; color: #c9c0ee; margin: 0 0 16px; }
   #menu p { color: #d8d2f0; line-height: 1.55; font-size: 15px; }
   #menu .ctl { color: #9d8fd0; font-size: 13.5px; line-height: 1.7; margin: 14px 0 20px; }
   #menu button {
-    font-size: 18px; font-weight: 800; letter-spacing: 1px; padding: 14px 26px; margin: 6px;
+    font-size: clamp(16px, 3vw, 18px); font-weight: 800; letter-spacing: 1px; padding: 14px 26px; margin: 6px;
     border: none; border-radius: 12px; cursor: pointer; color: #0b0618; background: #ff4a3d;
+    min-height: 52px; max-width: 100%;
   }
   #menu button.secondary { background: #e8e2ff; }
   #menu button:active { transform: scale(0.97); }
@@ -64,9 +73,18 @@
     padding: 10px 18px; border-radius: 10px; border: none; background: #ff4a3d; color: #0b0618; cursor: pointer;
   }
   #vrstatus { font-size: 13px; color: #ffe6a0; min-height: 18px; margin: 10px 0 0; }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so the
+     launch buttons stay visible without scrolling. */
+  @media (max-height: 560px) {
+    #menu h1 { font-size: 32px; }
+    #menu h2 { margin-bottom: 8px; }
+    #menu p { font-size: 14px; }
+    #menu .ctl { margin: 8px 0 12px; }
+    #menu button { padding: 11px 20px; min-height: 46px; }
+  }
 </style>
 <script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
 </script>
 </head>
 <body>
@@ -80,7 +98,7 @@
   <div class="row"><span class="label">KILLS</span><span class="val" id="killtext">0</span></div>
   <div class="row"><span class="label">WAVE</span><span class="val" id="wavetext">—</span></div>
   <div class="row"><span class="label">LEFT</span><span class="val" id="wavelefttext">—</span></div>
-  <div class="row"><span class="label">PERF</span><span class="val" id="perftext">—</span></div>
+  <div class="row" id="perfr"><span class="label">PERF</span><span class="val" id="perftext">—</span></div>
 </div>
 <div id="dot"></div>
 <div id="banner"></div>
@@ -92,16 +110,21 @@
     <h1>DEAD HOLLOW</h1>
     <h2>Hollow Creek is overrun. Find weapons. Survive the night.</h2>
     <p>Hollow Creek, population 812. Three days after the outbreak, you're the one still moving. Roam Main Street, go inside the shops, and don't let them corner you. The town is big now — follow the tall glowing beams to the weapons.</p>
-    <p style="font-size:13.5px;color:#ffe6a0"><b>WEAPONS — follow the glowing beams:</b><br>SHOTGUN — Hank's Hardware, back room &nbsp;·&nbsp; RIFLE — Sheriff's Office, back room &nbsp;·&nbsp; SNIPER — Fire Station, back room<br>AXE — Hank's Hardware, just inside the front &nbsp;·&nbsp; MACHETE — Hank's Hardware, front aisle &nbsp;·&nbsp; KNIFE — Hollow Creek Diner, kitchen area &nbsp;·&nbsp; KATANA — Public Library, main room<br>New: Hollow Woods, a walkable forest in the north-west — look for the HOLLOW WOODS trail sign.</p>
-    <div class="ctl" id="ctltext"></div>
     <button id="vrBtn">ENTER VR</button>
     <button id="startBtn" class="secondary">PLAY ON THIS SCREEN</button>
     <p id="vrstatus"></p>
+    <p style="font-size:13.5px;color:#ffe6a0"><b>WEAPONS — follow the glowing beams:</b><br>SHOTGUN — Hank's Hardware, back room &nbsp;·&nbsp; RIFLE — Sheriff's Office, back room &nbsp;·&nbsp; SNIPER — Fire Station, back room<br>AXE — Hank's Hardware, just inside the front &nbsp;·&nbsp; MACHETE — Hank's Hardware, front aisle &nbsp;·&nbsp; KNIFE — Hollow Creek Diner, kitchen area &nbsp;·&nbsp; KATANA — Public Library, main room<br>New: Hollow Woods, a walkable forest in the north-west — look for the HOLLOW WOODS trail sign.</p>
+    <div class="ctl" id="ctltext"></div>
     <p style="font-size:12.5px;color:#8d82b8">No game over — if they overwhelm you, you black out and wake up back in the square, keeping your weapons.</p>
+    <p id="perflogline" style="font-size:12.5px;color:#9d8fd0">No performance sessions logged yet.</p>
+    <p style="font-size:11.5px;color:#8d82b8">Performance note: frame times + quality level are logged locally on this device only (localStorage) to help tune Quest 2 performance. Nothing is sent anywhere; no personal data is collected.</p>
+    <p style="font-size:11px;color:#6d6290">3D models: Poly Pizza contributors — Quaternius, Kay Lousberg, J-Toastie, dook, CreativeTrio, Poly by Google (CC BY 3.0). Textures: Poly Haven (CC0).</p>
   </div>
 </div>
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
 
 // ============ helpers ============
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -173,6 +196,85 @@ const perfValve = {
   },
 };
 let perfWarmup = 0; // seconds after session start / resume during which the EMA is not fed
+
+// ============ V2.0 performance capture (local-only, Standard v1.4 §4) ======
+// Samples the frame-time EMA + valve level ~1/s during active play and
+// stores a per-session summary in localStorage under PERFLOG_KEY. LOCAL
+// ONLY — never transmitted, no network calls, no personal data of any kind.
+// Bounded: the last 5 sessions, at most ~1200 samples each (older samples
+// are thinned on long sessions). Only what the browser can actually measure
+// — frame times + valve state, never GPU-level claims. The menu shows the
+// last session's summary (refreshPerfLogLine), so Danny's headset sessions
+// produce a performance record automatically, with no hand-copying.
+const PERFLOG_KEY = 'dead-hollow-vr:perf-log';
+const PERFLOG_MAX_SESSIONS = 5;
+const PERFLOG_MAX_SAMPLES = 1200;
+function loadPerfLog() {
+  try {
+    const raw = localStorage.getItem(PERFLOG_KEY);
+    if (!raw) return { v: 1, sessions: [] };
+    const d = JSON.parse(raw);
+    return d && Array.isArray(d.sessions) ? d : { v: 1, sessions: [] };
+  } catch (e) { return { v: 1, sessions: [] }; }
+}
+function savePerfLog(log) {
+  try {
+    while (log.sessions.length > PERFLOG_MAX_SESSIONS) log.sessions.shift();
+    localStorage.setItem(PERFLOG_KEY, JSON.stringify(log));
+  } catch (e) { /* storage unavailable or full — logging is best-effort */ }
+}
+let perfSession = null; // { start, vr, samples: [[ema, level], ...], interval }
+let perfSampleT = 0;
+function startPerfSession() {
+  perfSession = { start: Date.now(), vr: false, samples: [], interval: 1 };
+  perfSampleT = 0;
+}
+function samplePerf(dt) {
+  if (!perfSession) return;
+  if (renderer.xr.isPresenting) perfSession.vr = true;
+  perfSampleT += dt;
+  if (perfSampleT < perfSession.interval) return;
+  perfSampleT = 0;
+  perfSession.samples.push([Math.round(perfValve.ema * 10) / 10, perfValve.level]);
+  if (perfSession.samples.length > PERFLOG_MAX_SAMPLES) {
+    perfSession.samples = perfSession.samples.filter((_, i) => i % 2 === 0); // thin to every 2nd sample
+    perfSession.interval *= 2;
+  }
+}
+function finalizePerfSession() {
+  if (!perfSession) return;
+  const s = perfSession; perfSession = null;
+  if (s.samples.length < 5) return; // too short to be useful
+  const emas = s.samples.map((p) => p[0]).sort((a, b) => a - b);
+  const med = emas[Math.floor(emas.length / 2)];
+  const p95 = emas[Math.min(emas.length - 1, Math.floor(emas.length * 0.95))];
+  const levels = [0, 0, 0];
+  for (const p of s.samples) levels[p[1]] = (levels[p[1]] || 0) + 1;
+  const log = loadPerfLog();
+  log.sessions.push({
+    date: new Date(s.start).toISOString(),
+    vr: s.vr,
+    durS: Math.round((Date.now() - s.start) / 1000),
+    samples: s.samples.length,
+    minMs: emas[0], medMs: med, p95Ms: p95,
+    levelS: levels.map((n) => n * s.interval),
+  });
+  savePerfLog(log);
+  refreshPerfLogLine();
+}
+function refreshPerfLogLine() {
+  const el = document.getElementById('perflogline');
+  if (!el) return;
+  const log = loadPerfLog();
+  const last = log.sessions[log.sessions.length - 1];
+  if (!last) { el.textContent = 'No performance sessions logged yet.'; return; }
+  const total = last.levelS.reduce((a, b) => a + b, 0) || 1;
+  const mm = Math.floor(last.durS / 60), ss = String(last.durS % 60).padStart(2, '0');
+  el.textContent = 'Last session (' + (last.vr ? 'VR' : 'desktop') + ', ' + mm + ':' + ss + '): ' +
+    last.medMs.toFixed(1) + ' ms median · p95 ' + last.p95Ms.toFixed(1) + ' ms · ' +
+    'L0 ' + Math.round(last.levelS[0] / total * 100) + '% · L1 ' + Math.round((last.levelS[1] || 0) / total * 100) + '% · L2 ' + Math.round((last.levelS[2] || 0) / total * 100) + '%';
+}
+refreshPerfLogLine();
 // The XR layer's ACTUAL framebuffer size — the resolution the headset really
 // renders at. Returns 'n/a' when no XR layer exists (desktop / not presenting).
 function xrLayerSize() {
@@ -193,12 +295,192 @@ scene.add(new THREE.HemisphereLight(0x2a3550, 0x0a0806, 0.65)); // 0.55 -> 0.65 
 const moon = new THREE.DirectionalLight(0x8fa8d8, 0.5); // moonlight a touch stronger for readable silhouettes
 moon.position.set(-30, 50, -20);
 scene.add(moon);
-const flash = new THREE.SpotLight(0xffe8b8, 30, 26, 0.55, 0.5, 1.2);
+// Round 2 flashlight rebuild (before/after comparison defect: the old
+// 0.55 rad / penumbra 0.5 cone threw an 8.6 m pool on the flat hardware-
+// store wall that read as a solid grey-brown slab). A real flashlight now:
+// a narrower cone (0.38 rad -> ~5.6 m pool at the 7 m spawn wall) with a
+// soft 0.7 penumbra, so the pool is a hotspot with a gradient falloff, not
+// a floodlit panel. No new real light (the game keeps its 3); the pool now
+// falls on photo-textured walls (see upgradePhotoTextures), so it reads as
+// light on a surface. Intensity 26 (slightly down: the tighter cone
+// concentrates the same power). Distance/decay unchanged (zombies at range
+// must stay visible).
+const flash = new THREE.SpotLight(0xffe8b8, 26, 26, 0.38, 0.7, 1.2);
 flash.position.set(0, 0, 0);
 scene.add(flash);
 const flashTarget = new THREE.Object3D();
 scene.add(flashTarget);
 flash.target = flashTarget;
+
+// ============ Round 2: licensed 3D models + photo textures ============
+// Professional assets (Standard v1.4 §3): CC BY 3.0 glTF models from Poly
+// Pizza + CC0 PBR textures from Poly Haven, in assets/dead-hollow/ (paths
+// are deployment-relative: the preview file sits at the repo root). EVERY
+// asset load is failure-safe: on any error the procedural original stays in
+// place, so the game can never break because an asset is missing.
+const ASSET_BASE = 'assets/dead-hollow/';
+const gltfLoader = new GLTFLoader();
+const _gltfCache = new Map();
+function loadGltf(file) {
+  // Never rejects: resolves to the loaded glTF, or null on any failure.
+  if (!_gltfCache.has(file)) {
+    _gltfCache.set(file, gltfLoader.loadAsync(ASSET_BASE + file).catch(() => null));
+  }
+  return _gltfCache.get(file);
+}
+const texLoader = new THREE.TextureLoader();
+function upgradeMap(photoUrl, material, rx, ry, onApplied) {
+  // Swaps a canvas texture for a photo texture once it loads. On failure the
+  // canvas texture simply stays — the material is never left textureless.
+  texLoader.load(photoUrl, (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(rx, ry);
+    tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    material.map = tex;
+    if (onApplied) onApplied(material);
+    material.needsUpdate = true;
+  }, undefined, () => { /* keep the canvas texture */ });
+}
+
+// Night environment map (visual-reference bar: realistic paint / glass /
+// metal / wet asphalt need something to reflect). A tiny PMREM scene: dark
+// sky, one cool moon disc, two warm lamp discs low on the horizon. Baked
+// once at boot; per-material envMapIntensity keeps the night dark (default
+// 0.22, set by applyEnvDefaults at the end of setup; special materials flag
+// userData.envSet and keep their own value).
+try {
+  const envScene = new THREE.Scene();
+  envScene.background = new THREE.Color(0x04060c);
+  const envDisc = (color, x, y, z, r) => {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(r, 24), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); envScene.add(m);
+  };
+  envDisc(0x8fa8d8, -30, 50, -20, 9);   // moon
+  envDisc(0xffc46b, 20, 3, -40, 7);     // warm town glow, east
+  envDisc(0xff9a50, -45, 2, 30, 6);     // warm town glow, west
+  envDisc(0x2a3a5a, 0, -10, 60, 30);    // faint cool horizon bounce
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+  pmrem.dispose();
+} catch (e) { /* no environment map — materials render unlit as before */ }
+function applyEnvDefaults() {
+  scene.traverse((o) => {
+    const m = o.material;
+    if (!m || !m.isMeshStandardMaterial || m.userData.envSet) return;
+    m.envMapIntensity = 0.22;
+  });
+}
+
+// --- car fitting: scale to target length, front (+Z * frontSign) to +X,
+// centered on X/Z, base on the ground. Orientation per model was verified
+// offline against headlight / wheel geometry (see build notes).
+function fitCarModel(model, targetLen, frontSign) {
+  const g = new THREE.Group();
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3(); box.getSize(size);
+  model.scale.setScalar(targetLen / Math.max(size.x, size.z));
+  model.rotation.y = frontSign > 0 ? Math.PI / 2 : -Math.PI / 2;
+  g.add(model);
+  const box2 = new THREE.Box3().setFromObject(g);
+  const c = new THREE.Vector3(); box2.getCenter(c);
+  model.position.x -= c.x; model.position.z -= c.z;
+  model.position.y -= box2.min.y;
+  return g;
+}
+function tuneCarMaterials(model, paintColor, textured) {
+  // Per-car material clones (one Map per car): body paint toward the town
+  // palette, glass dark + reflective, lights dimly emissive (abandoned cars
+  // don't shine), rust left alone. Textured models (atlas) get a flat
+  // darkening instead of a palette tint so windows/wheels stay true.
+  const clones = new Map();
+  const white = new THREE.Color(0xffffff);
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const out = mats.map((m) => {
+      if (!m || !m.isMeshStandardMaterial) return m;
+      if (!clones.has(m)) {
+        const c = m.clone();
+        const nm = (m.name || '').toLowerCase();
+        c.userData.envSet = true;
+        if (/glass|window|windshield/.test(nm)) {
+          c.roughness = 0.08; c.metalness = 0.9; c.envMapIntensity = 1.5;
+          if (!m.map) c.color.multiplyScalar(0.6);
+        } else if (/headlight/.test(nm)) {
+          c.emissive = new THREE.Color(0xffe6a0); c.emissiveIntensity = 0.35;
+          c.envMapIntensity = 0.6;
+        } else if (/taillight|brakelight/.test(nm)) {
+          c.emissive = new THREE.Color(0xff2211); c.emissiveIntensity = 0.3;
+          c.envMapIntensity = 0.6;
+        } else if (/rust/.test(nm)) {
+          c.roughness = 0.9; c.metalness = 0.2; c.envMapIntensity = 0.3;
+        } else if (/tire/.test(nm) || /wheel/i.test(o.name || '')) {
+          c.roughness = 1; c.metalness = 0; c.envMapIntensity = 0.15;
+        } else if (textured) {
+          c.color.multiplyScalar(0.6); // night grime on the atlas
+          c.roughness = 0.5; c.metalness = 0.35; c.envMapIntensity = 0.7;
+        } else {
+          c.color.lerp(new THREE.Color(paintColor), 0.8);
+          c.roughness = 0.38; c.metalness = 0.5; c.envMapIntensity = 0.9;
+        }
+        clones.set(m, c);
+      }
+      return clones.get(m);
+    });
+    o.material = Array.isArray(o.material) ? out : out[0];
+  });
+}
+
+// --- weapon fitting: scale to target length, orient the barrel/blade along
+// +Z (the mount's aim axis), grip point at the mount origin. Rotation +
+// grip per weapon were verified offline against node geometry (see build
+// notes). Returns { model, muzzleZ } — muzzleZ places the flash sprite.
+const WEAPON_GLTF = {
+  pistol:  { file: 'weapon-pistol.glb',  len: 0.24, rot: [0, Math.PI / 2, 0], order: 'XYZ', grip: [0.10, -0.35, 0] },
+  shotgun: { file: 'weapon-shotgun.glb', len: 0.95, rot: [0, -Math.PI / 2, 0], order: 'XYZ', grip: [-0.30, -0.20, 0] },
+  rifle:   { file: 'weapon-rifle.glb',   len: 1.05, rot: [0, Math.PI, Math.PI / 2], order: 'ZYX', grip: [0.15, 0, 0.30] },
+  sniper:  { file: 'weapon-sniper.glb',  len: 1.15, rot: [0, -Math.PI / 2, 0], order: 'XYZ', grip: [-1.10, -0.10, 0] },
+  katana:  { file: 'weapon-katana.glb',  len: 0.95, rot: [Math.PI / 2, 0, 0], order: 'XYZ', grip: [0, 1.00, 0.10] },
+  axe:     { file: 'weapon-axe.glb',     len: 0.75, rot: [Math.PI / 2, 0, Math.PI / 2], order: 'ZYX', grip: [0, -0.50, 0] },
+  machete: { file: 'weapon-machete.glb', len: 0.62, rot: [0, Math.PI, Math.PI / 2], order: 'ZYX', grip: [0, 0, 0] },
+  knife:   { file: 'weapon-knife.glb',   len: 0.40, rot: [Math.PI / 2, 0, 0], order: 'XYZ', grip: [0, -0.20, 0] },
+};
+function fitWeaponModel(model, cfg) {
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const s = cfg.len / Math.max(size.x, size.y, size.z);
+  model.scale.setScalar(s);
+  model.rotation.order = cfg.order;
+  model.rotation.set(cfg.rot[0], cfg.rot[1], cfg.rot[2]);
+  const grip = new THREE.Vector3(cfg.grip[0], cfg.grip[1], cfg.grip[2]).multiplyScalar(s);
+  grip.applyEuler(model.rotation);
+  model.position.copy(grip).negate();
+  model.traverse((o) => {
+    if (o.isMesh && o.material && o.material.isMeshStandardMaterial) {
+      o.material.userData.envSet = true;
+      o.material.envMapIntensity = 0.7; // steel + wood read against the night env
+    }
+  });
+  const box2 = new THREE.Box3().setFromObject(model);
+  return { model, muzzleZ: box2.max.z };
+}
+const weaponModels = {}; // name -> loaded glTF scene (template), or null
+
+// --- zombie fitting: scale to 1.9 m tall, centered, feet on the ground.
+// The model faces +Z (verified from toe/head joints), matching the
+// procedural zombie convention — no rotation offset needed.
+function fitZombieModel(model) {
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3(); box.getSize(size);
+  model.scale.setScalar(1.9 / size.y);
+  const box2 = new THREE.Box3().setFromObject(model);
+  const c = new THREE.Vector3(); box2.getCenter(c);
+  model.position.x -= c.x; model.position.z -= c.z;
+  model.position.y -= box2.min.y;
+  return model;
+}
+let zombieGltf = null; // loaded glTF (scene + clips), or null
 
 // ============ sky: stars + moon sprite ============
 function glowTexture(inner, outer) {
@@ -367,9 +649,131 @@ const doorMat = new THREE.MeshStandardMaterial({ map: doorTex, roughness: 0.9 })
 const roofMat = new THREE.MeshStandardMaterial({ map: shingleTex, roughness: 1 });
 const porchGlowTex = glowTexture('rgba(255,190,90,0.9)', 'rgba(255,150,40,0)');
 const porchBulbMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.6 });
-const carGlassMat = new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.15, metalness: 0.5 });
+const carGlassMat = new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.12, metalness: 0.6 });
+carGlassMat.userData.envSet = true; carGlassMat.envMapIntensity = 1.2;
 const headlightMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffe6a0, emissiveIntensity: 0.8 });
+headlightMat.userData.envSet = true; headlightMat.envMapIntensity = 0.6;
 const taillightMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2211, emissiveIntensity: 0.6 });
+taillightMat.userData.envSet = true; taillightMat.envMapIntensity = 0.6;
+
+// ---- Round 2 surface detail: cracked / boarded windows, awnings, wear ----
+// All light-neutral where a material color multiplies through (skin, shirt).
+const winCrackedTex = mkTex(128, 160, (g, w, h) => {
+  drawWinFrame(g, w, h, '#0d1622');
+  g.strokeStyle = 'rgba(220,230,240,0.75)'; g.lineWidth = 1.5;
+  const cx = w / 2 + rand(-14, 14), cy = h / 2 + rand(-18, 18); // impact point
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + rand(-0.3, 0.3), r = rand(30, 62);
+    g.beginPath(); g.moveTo(cx, cy);
+    g.lineTo(cx + Math.cos(a) * r * 0.5 + rand(-6, 6), cy + Math.sin(a) * r * 0.5 + rand(-6, 6));
+    g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); g.stroke();
+  }
+  g.strokeStyle = 'rgba(220,230,240,0.4)';
+  g.beginPath(); g.arc(cx, cy, 12, 0, 7); g.stroke();
+}, 1, 1);
+const winCrackedMat = new THREE.MeshStandardMaterial({ map: winCrackedTex, roughness: 0.3, metalness: 0.1 });
+const plankTex = mkTex(128, 160, (g, w, h) => {
+  g.fillStyle = '#4a3826'; g.fillRect(0, 0, w, h);
+  for (let x = 0; x < w; x += 32) {
+    const v = 64 + Math.floor(Math.random() * 26);
+    g.fillStyle = `rgb(${v + 14},${v - 6},${v - 26})`;
+    g.fillRect(x + 2, 0, 28, h);
+    g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x, 0, 2, h);
+    g.fillStyle = '#1c1c20'; g.beginPath(); g.arc(x + 16, 14, 2.5, 0, 7); g.arc(x + 16, h - 14, 2.5, 0, 7); g.fill();
+  }
+  speckle(g, w, h, 200, ['#2e2012'], 0.4, 2);
+}, 1, 1);
+const boardMat = new THREE.MeshStandardMaterial({ map: plankTex, roughness: 1 });
+const awningTex = mkTex(256, 128, (g, w, h) => {
+  for (let x = 0; x < w; x += 32) {
+    g.fillStyle = (x / 32) % 2 ? '#7a2a22' : '#c8bca8';
+    g.fillRect(x, 0, 32, h);
+  }
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, h - 14, w, 14);
+  speckle(g, w, h, 300, ['#3a2a20'], 0.3, 2);
+}, 1, 1);
+const awningMat = new THREE.MeshStandardMaterial({ map: awningTex, roughness: 0.9, side: THREE.DoubleSide });
+const grimeMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 1, transparent: true, opacity: 0.45 });
+const weedTex = mkTex(128, 128, (g, w, h) => {
+  g.clearRect(0, 0, w, h);
+  for (let i = 0; i < 26; i++) {
+    const x = 8 + Math.random() * (w - 16), bh = 40 + Math.random() * 80, lean = rand(-18, 18);
+    g.strokeStyle = ['#1e3320', '#16261a', '#2a4023'][i % 3];
+    g.lineWidth = 3 + Math.random() * 2;
+    g.beginPath(); g.moveTo(x, h); g.quadraticCurveTo(x + lean * 0.4, h - bh * 0.6, x + lean, h - bh); g.stroke();
+  }
+}, 1, 1);
+const weedMat = new THREE.MeshStandardMaterial({ map: weedTex, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 1 });
+const skinTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#cfcfc8'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 2200, ['#b8c0b0', '#a8b89e', '#9aa88e', '#c8c8bd'], 0.5, 3);
+  g.strokeStyle = 'rgba(90,110,90,0.5)'; g.lineWidth = 1.5; // veins
+  for (let i = 0; i < 12; i++) {
+    g.beginPath(); let x = Math.random() * w, y = Math.random() * h; g.moveTo(x, y);
+    for (let j = 0; j < 4; j++) { x += (Math.random() - 0.5) * 60; y += (Math.random() - 0.5) * 40; g.lineTo(x, y); }
+    g.stroke();
+  }
+  for (let i = 0; i < 8; i++) { // wounds / blotches
+    g.fillStyle = 'rgba(120,40,30,0.35)';
+    g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, 6 + Math.random() * 14, 4 + Math.random() * 10, Math.random() * 3, 0, 7); g.fill();
+  }
+}, 1, 1);
+const shirtTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#c4c4c4'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 1600, ['#a8a8a8', '#909090', '#b8b0a0'], 0.5, 3);
+  for (let i = 0; i < 10; i++) { // dirt + blood stains
+    g.fillStyle = i % 3 ? 'rgba(60,50,35,0.4)' : 'rgba(110,20,15,0.45)';
+    g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, 8 + Math.random() * 22, 6 + Math.random() * 16, Math.random() * 3, 0, 7); g.fill();
+  }
+  g.strokeStyle = 'rgba(20,20,20,0.7)'; g.lineWidth = 2; // tears
+  for (let i = 0; i < 5; i++) {
+    const x = Math.random() * w, y = Math.random() * h;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + rand(-24, 24), y + rand(-8, 8)); g.stroke();
+  }
+}, 1, 1);
+const headTex = mkTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#cfcfc8'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 1400, ['#b8c0b0', '#a8b89e', '#c8c8bd'], 0.45, 3);
+  g.fillStyle = '#17130e'; g.fillRect(0, 0, w, 62); // hair cap (top of canvas = top of the sphere)
+  for (let x = 0; x < w; x += 6) { g.fillRect(x, 58 + Math.random() * 10, 4, 8 + Math.random() * 12); }
+  g.fillStyle = 'rgba(40,30,20,0.35)'; g.fillRect(0, 150, w, 26); // brow shading
+}, 1, 1);
+const barkTex = mkTex(128, 256, (g, w, h) => {
+  g.fillStyle = '#241a12'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 26; i++) {
+    g.strokeStyle = Math.random() < 0.5 ? 'rgba(12,8,5,0.8)' : 'rgba(70,52,34,0.7)';
+    g.lineWidth = 2 + Math.random() * 4;
+    const x = Math.random() * w;
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x + rand(-14, 14), h); g.stroke();
+  }
+}, 1, 1);
+const leafTex = mkTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#c8c8c8'; g.fillRect(0, 0, w, h); // light base: the leaf color multiplies through
+  speckle(g, w, h, 1800, ['#a8b8a0', '#98a890', '#d8d8d0', '#889888'], 0.6, 3);
+}, 2, 2);
+const dashTex = mkTex(128, 16, (g, w, h) => {
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = 'rgba(190,160,60,0.55)';
+  g.fillRect(0, 3, 32, 10); // 25% of the tile: at repeat (37,1) over 440 m, a 3 m dash + 9 m gap
+}, 1, 1);
+const dashMat = new THREE.MeshStandardMaterial({ map: dashTex, transparent: true, roughness: 1, depthWrite: false });
+const skidTex = mkTex(256, 64, (g, w, h) => {
+  g.clearRect(0, 0, w, h);
+  const gr = g.createLinearGradient(0, 0, w, 0);
+  gr.addColorStop(0, 'rgba(5,5,8,0)'); gr.addColorStop(0.25, 'rgba(5,5,8,0.75)'); gr.addColorStop(0.8, 'rgba(5,5,8,0.6)'); gr.addColorStop(1, 'rgba(5,5,8,0)');
+  g.fillStyle = gr;
+  g.beginPath(); g.ellipse(w / 2, h / 2, w / 2, h / 2 - 4, 0, 0, 7); g.fill();
+}, 1, 1);
+const skidMat = new THREE.MeshStandardMaterial({ map: skidTex, transparent: true, opacity: 0.6, roughness: 1, depthWrite: false });
+const puddleMat = new THREE.MeshStandardMaterial({ color: 0x0a0e14, roughness: 0.05, metalness: 0.85 });
+puddleMat.userData.envSet = true; puddleMat.envMapIntensity = 1.5;
+const manholeMat = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.5, metalness: 0.6 });
+const dirtPathMat = new THREE.MeshStandardMaterial({ color: 0x3a2e20, roughness: 1 });
+const dockMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 1 });
+const _awnGeo = new THREE.PlaneGeometry(3.4, 1.1);
+const _weedGeo = new THREE.PlaneGeometry(0.9, 0.7);
+const _puddleGeo = new THREE.CircleGeometry(1, 14);
+const _skidGeo = new THREE.PlaneGeometry(2.4, 0.6);
 
 // ============ shared-material + shared-geometry caches ============
 // Identical material parameters return ONE material instead of a new program
@@ -541,11 +945,12 @@ const _bulbGeo = new THREE.SphereGeometry(0.07, 8, 6);
 const _ipoolGeo = new THREE.CircleGeometry(3.6, 20);
 const _instGroups = new Map();
 const _instDummy = new THREE.Object3D();
-function _instPush(key, geo, mat, x, y, z, sx, sy, sz, rotY) {
+_instDummy.rotation.order = 'YXZ'; // flat-then-spin: rotX lays a plane flat, rotY spins it in plan view
+function _instPush(key, geo, mat, x, y, z, sx, sy, sz, rotY, rotX) {
   let g = _instGroups.get(key);
   if (!g) { g = { geo, mat, mats: [] }; _instGroups.set(key, g); }
   _instDummy.position.set(x, y, z);
-  _instDummy.rotation.set(0, rotY || 0, 0);
+  _instDummy.rotation.set(rotX || 0, rotY || 0, 0);
   _instDummy.scale.set(sx === undefined ? 1 : sx, sy === undefined ? 1 : sy, sz === undefined ? 1 : sz);
   _instDummy.updateMatrix();
   g.mats.push(_instDummy.matrix.clone());
@@ -653,6 +1058,9 @@ function buildBuilding(b) {
   scene.add(sign);
   // windows: framed canvas-texture planes (lit = warm glow), front + both side walls
   function addWin(x, y, z, rotY) {
+    const r = Math.random();
+    if (r < 0.15) { _instPush('winBoard', _winGeo, boardMat, x, y, z, 1, 1, 1, rotY); return; } // boarded-up
+    if (r < 0.25) { _instPush('winCrack', _winGeo, winCrackedMat, x, y, z, 1, 1, 1, rotY); return; } // cracked
     const lit = Math.random() < 0.4;
     _instPush(lit ? 'winLit' : 'winDark', _winGeo, lit ? winLitMat : winDarkMat, x, y, z, 1, 1, 1, rotY);
   }
@@ -671,6 +1079,17 @@ function buildBuilding(b) {
   instBox(0x2a2018, doorW + 0.36, 0.25, WALL_T + 0.2, cx, 2.95, frontZ);
   for (const px of [dL - 0.62, dR + 0.62]) {
     _instPush('doorPanel', _panelGeo, doorMat, px, 1.3, frontZ + dir * 0.19, 1, 1, 1, 0);
+  }
+  // Round 2 detailing (all instanced): gutters, wall-base grime, wall-mounted
+  // AC units + striped awnings on shops.
+  instBox(0x1a1c20, 0.12, WALL_H, 0.12, b.x0 + 0.2, WALL_H / 2, frontZ);
+  instBox(0x1a1c20, 0.12, WALL_H, 0.12, b.x1 - 0.2, WALL_H / 2, frontZ);
+  const glW = dL - b.x0, grW = b.x1 - dR; // grime strips flank the doorway
+  if (glW > 0.5) _instPush('grime', _unitBoxGeo, grimeMat, (b.x0 + dL) / 2, 0.25, frontZ + dir * 0.18, glW, 0.5, 0.06, 0);
+  if (grW > 0.5) _instPush('grime', _unitBoxGeo, grimeMat, (dR + b.x1) / 2, 0.25, frontZ + dir * 0.18, grW, 0.5, 0.06, 0);
+  if (b.kind !== 'house' && b.kind !== 'church') {
+    instBox(0x3a3d42, 0.9, 0.6, 0.3, dL - 2.2, 2.6, frontZ + dir * 0.25);
+    _instPush('awning', _awnGeo, awningMat, cx, 3.05, frontZ + dir * 0.9, 1, 1, 1, b.side === 'S' ? Math.PI : 0, -0.5);
   }
   // porch light by the door (emissive bulb + warm glow sprite)
   _instPush('porchBulb', _bulbGeo, porchBulbMat, dR + 1.6, 2.5, frontZ + dir * 0.28, 1, 1, 1, 0);
@@ -712,6 +1131,9 @@ function buildBuilding(b) {
     iglow.scale.set(4.5, 3.2, 1); iglow.position.set(cx, 2.0, fz(5));
     scene.add(iglow);
     valveGlows.push(iglow);
+    // Round 2: a ceiling bulb inside — reuses the porchBulb instanced group
+    // (0 new draw calls) so the lamplit room has a visible light source.
+    _instPush('porchBulb', _bulbGeo, porchBulbMat, cx, 3.0, fz(5), 1, 1, 1, 0);
     // Stays an individual mesh (not instanced): it is transparent, and
     // instancing would sort all 7 pools as one object at the origin.
     // Geometry + material are shared instead.
@@ -785,7 +1207,8 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
   reedMesh.instanceMatrix.needsUpdate = true;
   scene.add(reedMesh);
   // small wooden dock reaching in from the west shore (walkable corridor z -27..-23)
-  for (let i = 0; i < 6; i++) addBox(1.6, 0.12, 2.6, 75 + i * 1.7, 0.12, -25, 0x5a4632);
+  const dockGeo = new THREE.BoxGeometry(1.6, 0.12, 2.6);
+  for (let i = 0; i < 6; i++) { const dk = new THREE.Mesh(dockGeo, dockMat); dk.position.set(75 + i * 1.7, 0.12, -25); scene.add(dk); }
   addBox(0.18, 0.9, 0.18, 84, 0.45, -26.2, 0x3a2e22);
   addBox(0.18, 0.9, 0.18, 84, 0.45, -23.8, 0x3a2e22);
 }
@@ -920,10 +1343,10 @@ for (const cx2 of [-128, 180]) {
   // (leaf centres ~4.2 m) so it never blocks view or movement.
   flatTex(80, 55, -175, -77, 0.03, grassTex);
   const fTrunkGeo = new THREE.CylinderGeometry(0.18, 0.3, 3.6, 8);
-  const fTrunkMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
+  const fTrunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, map: barkTex }); // map carries the bark color
   const fLeafGeo = new THREE.SphereGeometry(2.0, 12, 10);
-  const fLeafMat = new THREE.MeshStandardMaterial({ color: 0x16261a, roughness: 1 });
-  const fLeafMat2 = new THREE.MeshStandardMaterial({ color: 0x1e3320, roughness: 1 });
+  const fLeafMat = new THREE.MeshStandardMaterial({ color: 0x16261a, roughness: 1, map: leafTex });
+  const fLeafMat2 = new THREE.MeshStandardMaterial({ color: 0x1e3320, roughness: 1, map: leafTex });
   const fBushGeo = new THREE.SphereGeometry(0.7, 10, 8);
   const fBushMat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
   // Instanced forest: ~75 trees, 3 draw calls (trunks + 2 leaf materials)
@@ -933,8 +1356,9 @@ for (const cx2 of [-128, 180]) {
     for (let gz = -102; gz <= -53; gz += 8) {
       const tx = gx + rand(-1.8, 1.8), tz = gz + rand(-2, 2);
       if (Math.abs(tx + 175) < 5 && Math.abs(tz + 77) < 5) continue; // keep the main clearing open
-      trunkXf.push([tx, tz]);
-      ((gx + gz) % 2 ? leaf1Xf : leaf2Xf).push([tx, tz]);
+      const s = rand(0.85, 1.25); // Round 2: per-tree scale variation (colliders stay 0.3 m)
+      trunkXf.push([tx, tz, s]);
+      ((gx + gz) % 2 ? leaf1Xf : leaf2Xf).push([tx, tz, s]);
       colliders.push({ x0: tx - 0.3, x1: tx + 0.3, z0: tz - 0.3, z1: tz + 0.3, h: 3.6 });
     }
   }
@@ -942,20 +1366,33 @@ for (const cx2 of [-128, 180]) {
     const d = new THREE.Object3D();
     const trunkMesh = new THREE.InstancedMesh(fTrunkGeo, fTrunkMat, trunkXf.length);
     trunkMesh.frustumCulled = false;
-    trunkXf.forEach(([tx, tz], i) => { d.position.set(tx, 1.8, tz); d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); d.updateMatrix(); trunkMesh.setMatrixAt(i, d.matrix); });
+    trunkXf.forEach(([tx, tz, s], i) => { d.position.set(tx, 1.8 * s, tz); d.rotation.set(0, 0, 0); d.scale.set(s, s, s); d.updateMatrix(); trunkMesh.setMatrixAt(i, d.matrix); });
     trunkMesh.instanceMatrix.needsUpdate = true;
     scene.add(trunkMesh);
     for (const [list, mat] of [[leaf1Xf, fLeafMat], [leaf2Xf, fLeafMat2]]) {
       const leafMesh = new THREE.InstancedMesh(fLeafGeo, mat, list.length);
       leafMesh.frustumCulled = false;
-      list.forEach(([tx, tz], i) => { d.position.set(tx, 4.3, tz); d.rotation.set(0, 0, 0); d.scale.set(1, 1.3, 1); d.updateMatrix(); leafMesh.setMatrixAt(i, d.matrix); });
+      list.forEach(([tx, tz, s], i) => { d.position.set(tx, 4.3 * s, tz); d.rotation.set(0, 0, 0); d.scale.set(s, 1.3 * s, s); d.updateMatrix(); leafMesh.setMatrixAt(i, d.matrix); });
       leafMesh.instanceMatrix.needsUpdate = true;
       scene.add(leafMesh);
     }
+    // Round 2: dead trees — bare trunks, taller and thinner, no leaves.
+    // 1 InstancedMesh, 8 instances, placed at the forest edge.
+    const deadGeo = new THREE.CylinderGeometry(0.12, 0.2, 5.5, 7);
+    const deadMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1, map: barkTex }); // darker than living bark, still textured
+    const deadMesh = new THREE.InstancedMesh(deadGeo, deadMat, 8);
+    deadMesh.frustumCulled = false;
+    for (let i = 0; i < 8; i++) {
+      const tx = rand(-210, -140), tz = rand(-100, -56), ds = rand(0.9, 1.2);
+      d.position.set(tx, 2.75 * ds, tz); d.rotation.set(rand(-0.05, 0.05), 0, rand(-0.06, 0.06));
+      d.scale.set(ds, ds, ds); d.updateMatrix(); deadMesh.setMatrixAt(i, d.matrix);
+    }
+    deadMesh.instanceMatrix.needsUpdate = true;
+    scene.add(deadMesh);
   }
   // Winding dirt paths through the forest (flat planes, rotated in plan view)
   function dirtPath(x, z, w, d, rotZ) {
-    const m = new THREE.Mesh(sharedPlaneGeo(w, d), sharedStdMat({ color: 0x3a2e20, roughness: 1 }));
+    const m = new THREE.Mesh(sharedPlaneGeo(w, d), dirtPathMat); // dedicated mat: photo upgrade targets paths only
     m.rotation.x = -Math.PI / 2; m.rotation.z = rotZ; m.position.set(x, 0.04, z); scene.add(m);
   }
   dirtPath(-175, -77, 78, 2.6, 0.12); dirtPath(-195, -88, 30, 2.4, -0.5);
@@ -1080,6 +1517,7 @@ const lampBoxGeo = new THREE.BoxGeometry(0.08, 0.16, 0.36);
 // are read AFTER the car groups are placed, so the instanced parts land
 // exactly where the original meshes were.
 const carParts = { sideGlass: [], shield: [], rear: [], headlight: [], taillight: [], bumper: [], wheel: [], hub: [] };
+const procCarGroups = []; // Round 2: procedural cars stay as the fallback; hidden per spot when its glTF model loads
 carSpots.forEach(([x, z, rot], i) => {
   const g = new THREE.Group();
   const paintMat = new THREE.MeshStandardMaterial({ map: paintWearTex, color: carColors[i], roughness: 0.65, metalness: 0.25 });
@@ -1108,11 +1546,13 @@ carSpots.forEach(([x, z, rot], i) => {
   });
   g.position.set(x, 0, z); g.rotation.y = rot;
   scene.add(g);
+  procCarGroups.push(g);
   // axis-aligned bounds from rotated corners (UNCHANGED footprint: 4.6 x 2.2, h 1.6)
   const c = Math.cos(rot), s = Math.sin(rot), hx = 2.3, hz = 1.1;
   const corners = [[hx, hz], [hx, -hz], [-hx, hz], [-hx, -hz]].map(([px, pz]) => [x + px * c + pz * s, z - px * s + pz * c]);
   colliders.push({ x0: Math.min(...corners.map(p => p[0])), x1: Math.max(...corners.map(p => p[0])), z0: Math.min(...corners.map(p => p[1])), z1: Math.max(...corners.map(p => p[1])), h: 1.6 });
 });
+const carPartMeshes = {}; // Round 2: kept so a spot's instances can be zero-scaled when its glTF car loads
 for (const [key, geo, mat] of [
   ['sideGlass', sideGlassGeo, carGlassMat], ['shield', shieldGeo, carGlassMat],
   ['rear', rearGlassGeo, carGlassMat], ['headlight', lampBoxGeo, headlightMat],
@@ -1125,17 +1565,77 @@ for (const [key, geo, mat] of [
   list.forEach((m, i) => { m.updateWorldMatrix(true, false); im.setMatrixAt(i, m.matrixWorld); if (m.parent) m.parent.remove(m); });
   im.instanceMatrix.needsUpdate = true;
   scene.add(im);
+  carPartMeshes[key] = im;
 }
+// ============ Round 2: licensed glTF cars (Poly Pizza, CC BY 3.0) ============
+// Spot -> model: two pickups + two SUVs (different paint), one sedan, one
+// hatchback, one van, one rusted wreck. Parts are pushed in spot order, so
+// car i owns: sideGlass [2i,2i+1], shield/rear [i], headlight/taillight/
+// bumper [2i,2i+1], wheel/hub [4i..4i+3]. A spot whose model fails to load
+// keeps its procedural car — the fallback is per model, never all-or-nothing.
+// Colliders are unchanged (the procedural pass pushed them above).
+const CAR_GLTF = [
+  { file: 'car-pickup.glb', len: 4.8, front: 1, textured: true },
+  { file: 'car-sedan.glb', len: 4.4, front: -1, textured: false },
+  { file: 'car-suv.glb', len: 4.4, front: 1, textured: false },
+  { file: 'car-hatchback.glb', len: 4.3, front: 1, textured: true },
+  { file: 'car-van.glb', len: 4.6, front: 1, textured: true },
+  { file: 'car-broken.glb', len: 4.6, front: 1, textured: false, tune: false, tilt: 0.06, sink: 0.06 }, // rusted wreck: keep its own paint, sagging
+  { file: 'car-pickup.glb', len: 4.8, front: 1, textured: true },
+  { file: 'car-suv.glb', len: 4.4, front: 1, textured: false },
+];
+const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
+function hideProceduralCar(i) {
+  procCarGroups[i].visible = false;
+  const ranges = {
+    sideGlass: [2 * i, 2 * i + 1], shield: [i], rear: [i],
+    headlight: [2 * i, 2 * i + 1], taillight: [2 * i, 2 * i + 1], bumper: [2 * i, 2 * i + 1],
+    wheel: [4 * i, 4 * i + 1, 4 * i + 2, 4 * i + 3], hub: [4 * i, 4 * i + 1, 4 * i + 2, 4 * i + 3],
+  };
+  for (const [key, idxs] of Object.entries(ranges)) {
+    const im = carPartMeshes[key];
+    for (const idx of idxs) im.setMatrixAt(idx, _zeroMat);
+    im.instanceMatrix.needsUpdate = true;
+  }
+}
+async function setupGltfCars() {
+  const loaded = {};
+  let replaced = 0;
+  await Promise.all([...new Set(CAR_GLTF.map((c) => c.file))].map(async (file) => {
+    const gltf = await loadGltf(file);
+    if (gltf) loaded[file] = gltf.scene;
+  }));
+  CAR_GLTF.forEach((cfg, i) => {
+    const tpl = loaded[cfg.file];
+    if (!tpl) return; // fallback: procedural car stays
+    const clone = tpl.clone(true);
+    const fitted = fitCarModel(clone, cfg.len, cfg.front); // wrapper group: recentred, feet on the ground
+    if (cfg.tune !== false) tuneCarMaterials(clone, carColors[i], cfg.textured);
+    if (cfg.tilt) clone.rotation.z = cfg.tilt; // sideways sag (model-local Z = car length axis)
+    const [x, z, rot] = carSpots[i];
+    fitted.position.set(x, -(cfg.sink || 0), z);
+    fitted.rotation.y = rot;
+    scene.add(fitted);
+    hideProceduralCar(i);
+    replaced++;
+  });
+  // If every spot was replaced, the 8 (now empty) procedural part meshes
+  // can hide entirely — 8 draw calls saved in the all-loaded case.
+  if (replaced === 8) for (const im of Object.values(carPartMeshes)) im.visible = false;
+}
+setupGltfCars();
 const lampGlowTex = glowTexture('rgba(255,190,90,0.9)', 'rgba(255,150,40,0)');
 const sharedLampPoleMat = new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 1 });
 const sharedLampHeadMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 });
 const lamps = [];
+const procLampMeshes = []; // Round 2: procedural pole+head meshes, hidden per lamp when the glTF streetlight loads
 [[-50, -5.2], [-25, 5.2], [0, -5.2], [25, 5.2], [50, -5.2], [-85, -5.2], [-85, 5.2], [85, -5.2], [85, 5.2], [64, -35], [64, 35], [-100, -5.2], [100, 5.2]].forEach(([x, z], i) => {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.4, 8), sharedLampPoleMat);
   pole.position.set(x, 2.2, z); scene.add(pole);
   const headMat = i === 2 ? new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 }) : sharedLampHeadMat; // only the flickering lamp needs its own material
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.3), headMat);
   head.position.set(x, 4.45, z); scene.add(head);
+  procLampMeshes.push(pole, head);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, transparent: true, opacity: 0.55, depthWrite: false }));
   glow.scale.set(3.2, 3.2, 1); glow.position.set(x, 4.35, z); scene.add(glow);
   valveGlows.push(glow); // atmosphere only: the valve may hide it at L2
@@ -1144,11 +1644,51 @@ const lamps = [];
   const pool = new THREE.Mesh(new THREE.CircleGeometry(3.4, 20),
     new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0.18, depthWrite: false }));
   pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.05, z); scene.add(pool);
-  lamps.push({ headMat, glow, pool, flicker: i === 2, t: 0 });
+  lamps.push({ headMat, glow, pool, bulb, x, z, headX: x, headZ: z, flicker: i === 2, t: 0 });
 });
-const sharedLeafMat = new THREE.MeshStandardMaterial({ color: 0x16240f, roughness: 1 });
-const sharedLeaf2Mat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
-const streetTrunkMat = sharedStdMat({ color: 0x14100c, roughness: 1 });
+// ============ Round 2: licensed glTF streetlight (Poly Pizza, CC BY 3.0) ====
+// One InstancedMesh from the model's single mesh (176 tris), 13 instances.
+// The cobra-head arm extends -X in model space, so Main St lamps rotate the
+// head over the road (+Z for north-side poles, -Z for south-side); the two
+// cross-street lamps sit mid-road and point +Z. Glow, bulb and light pool
+// move to the arm tip. If the model fails to load, the procedural lamps stay.
+async function setupGltfLamps() {
+  const gltf = await loadGltf('streetlamp.glb');
+  if (!gltf) return;
+  let srcMesh = null;
+  gltf.scene.traverse((o) => { if (o.isMesh && !srcMesh) srcMesh = o; });
+  if (!srcMesh) return;
+  const lampMat = srcMesh.material.clone();
+  lampMat.color.multiplyScalar(0.8);
+  lampMat.roughness = 0.6; lampMat.metalness = 0.4;
+  lampMat.userData.envSet = true; lampMat.envMapIntensity = 0.5;
+  const LAMP_SCALE = 4.4 / 0.96; // model is 0.96 units tall -> 4.4 m pole
+  const HEAD_OFF = 0.239 * LAMP_SCALE; // arm tip offset from the pole (~1.1 m)
+  const im = new THREE.InstancedMesh(srcMesh.geometry, lampMat, lamps.length);
+  im.frustumCulled = false;
+  const d = new THREE.Object3D();
+  lamps.forEach((l, i) => {
+    const armZ = l.x === 64 ? 1 : (l.z < 0 ? 1 : -1); // toward the street
+    d.position.set(l.x, 0, l.z);
+    d.rotation.set(0, armZ > 0 ? Math.PI / 2 : -Math.PI / 2, 0);
+    d.scale.setScalar(LAMP_SCALE);
+    d.updateMatrix();
+    im.setMatrixAt(i, d.matrix);
+    l.headX = l.x; l.headZ = l.z + armZ * HEAD_OFF;
+    l.glow.position.set(l.headX, 4.35, l.headZ);
+    l.bulb.position.set(l.headX, 4.32, l.headZ);
+    l.pool.position.set(l.headX, 0.05, l.headZ);
+    if (l.cone) l.cone.position.set(l.headX, 2.2, l.headZ); // light cone follows the head
+    if (l.flicker) l.headMat = null; // head is shared now: glow + pool keep flickering, material no longer can
+  });
+  im.instanceMatrix.needsUpdate = true;
+  scene.add(im);
+  for (const m of procLampMeshes) m.visible = false;
+}
+setupGltfLamps();
+const sharedLeafMat = new THREE.MeshStandardMaterial({ color: 0x16240f, roughness: 1, map: leafTex });
+const sharedLeaf2Mat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1, map: leafTex });
+const streetTrunkMat = sharedStdMat({ color: 0xffffff, roughness: 1, map: barkTex });
 for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62, -12]]) {
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 3.4, 7), streetTrunkMat);
   trunk.position.set(x, 1.7, z); scene.add(trunk);
@@ -1176,6 +1716,165 @@ addBox(1.8, 0.45, 0.5, -3.5, 0.45, 2.5, 0x3a2e22);
 addBox(1.8, 0.45, 0.5, 3.5, 0.45, 2.5, 0x3a2e22);
 furniture.push({ x0: -0.7, x1: 0.7, z0: -3.2, z1: -1.8 }, { x0: -4.4, x1: -2.6, z0: 2.2, z1: 2.8 }, { x0: 2.6, x1: 4.4, z0: 2.2, z1: 2.8 });
 
+// ============ Round 2: street-level detail (mostly instanced) ============
+// Puddles (wet reflective streets — the visual-reference bar), debris,
+// weeds, skid marks, manholes, traffic light, street signs, water tower,
+// horizon glow, drifting ground fog, lamp light cones. All instanced groups
+// here are flushed by the second _instFlush() at the end of this block.
+for (const [px, pz] of [[-48, 1.5], [-23, -2], [-2, 2], [24, -1.5], [48, 1], [64, 25], [64, -30], [-80, -1], [80, 2]]) {
+  _instPush('puddle', _puddleGeo, puddleMat, px, 0.055, pz, rand(1.2, 2.6), rand(0.8, 1.6), 1, Math.random() * Math.PI, -Math.PI / 2);
+}
+for (let i = 0; i < 50; i++) { // scattered debris along sidewalks + street
+  const dx = rand(-110, 110), dz = rand(-7.5, 7.5);
+  const paper = Math.random() < 0.5;
+  instBox(paper ? 0x9a9a8a : 0x2a2d33, rand(0.08, 0.3), 0.03, rand(0.08, 0.25), dx, 0.06, dz);
+}
+{ // tipped trash cans (lying on their sides)
+  const canGeo = new THREE.CylinderGeometry(0.28, 0.24, 0.7, 10);
+  const canMat = new THREE.MeshStandardMaterial({ color: 0x2a3a2a, roughness: 0.8, metalness: 0.3 });
+  for (const [cx, cz] of [[-45, 5.5], [-12, -5.5], [18, 5.5], [47, -5.5], [66, 8], [-88, 5.5]]) {
+    _instPush('trashCan', canGeo, canMat, cx, 0.28, cz, 1, 1, 1, Math.random() * Math.PI, Math.PI / 2);
+  }
+}
+for (let i = 0; i < 80; i++) { // weeds along curbs + building bases (crossed planes)
+  const wx = rand(-110, 110), wz = (Math.random() < 0.5 ? -1 : 1) * rand(5.0, 7.4);
+  const ry = Math.random() * Math.PI;
+  _instPush('weed', _weedGeo, weedMat, wx, 0.35, wz, 1, 1, 1, ry);
+  _instPush('weed', _weedGeo, weedMat, wx, 0.35, wz, 1, 1, 1, ry + Math.PI / 2);
+}
+for (const [sx, sz] of [[-35, 1.2], [10, -1.8], [40, 0.8], [62, -12]]) {
+  _instPush('skid', _skidGeo, skidMat, sx, 0.05, sz, 1, 1, 1, Math.random() * Math.PI, -Math.PI / 2);
+}
+for (const [mx, mz] of [[0, 0], [-40, 0.5], [40, -0.5]]) {
+  _instPush('manhole', _puddleGeo, manholeMat, mx, 0.045, mz, 0.5, 0.5, 1, 0, -Math.PI / 2);
+}
+{ // traffic light at Main x 64th: pole + arm + 3-light head (red lit)
+  const tlMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.6, metalness: 0.5 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 5.5, 8), tlMat);
+  pole.position.set(67, 2.75, -6.5); scene.add(pole);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 6), tlMat);
+  arm.position.set(67, 5.2, -3.5); scene.add(arm);
+  const headBox = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.95, 0.3), tlMat);
+  headBox.position.set(67, 4.6, -0.5); scene.add(headBox);
+  const lensGeo = new THREE.CircleGeometry(0.11, 12);
+  const lensCols = [0xff2211, 0x2a1a08, 0x0a2a12]; // red lit, amber + green dark
+  for (let i = 0; i < 3; i++) {
+    const lens = new THREE.Mesh(lensGeo, new THREE.MeshBasicMaterial({ color: lensCols[i], toneMapped: false }));
+    lens.position.set(67, 4.9 - i * 0.3, -0.34); lens.rotation.y = Math.PI; scene.add(lens);
+  }
+  const tglow = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, color: 0xff3020, transparent: true, opacity: 0.3, depthWrite: false }));
+  tglow.scale.set(1.4, 1.4, 1); tglow.position.set(67, 4.9, -0.5); scene.add(tglow);
+  valveGlows.push(tglow);
+}
+for (const [text, sx, sz, ry] of [['MAIN ST', 64, -5.8, 0], ['DEPOT RD', 64, 5.8, Math.PI]]) {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3, 6), sharedStdMat({ color: 0x3a3d42, roughness: 0.6, metalness: 0.5 }));
+  pole.position.set(sx, 1.5, sz); scene.add(pole);
+  const blade = new THREE.Mesh(sharedPlaneGeo(1.4, 0.35),
+    new THREE.MeshStandardMaterial({ map: signTexture(text, '', '#1a3a24', '#e8ffe8'), roughness: 0.8 }));
+  blade.position.set(sx, 2.85, sz); blade.rotation.y = ry; scene.add(blade);
+}
+{ // water tower on the eastern horizon (visible landmark, far from play)
+  const twMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.7, metalness: 0.4 });
+  const tankMat = new THREE.MeshStandardMaterial({ color: 0x4a3028, roughness: 0.85, metalness: 0.2 });
+  for (const [lx, lz, rz] of [[-4, -4, 0.12], [4, -4, -0.12], [-4, 4, 0.12], [4, 4, -0.12]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 12, 6), twMat);
+    leg.position.set(180 + lx, 6, -95 + lz); leg.rotation.z = rz; scene.add(leg);
+  }
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 5, 16), tankMat);
+  tank.position.set(180, 14.5, -95); scene.add(tank);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(6.3, 2, 16), twMat);
+  roof.position.set(180, 18, -95); scene.add(roof);
+}
+{ // horizon glow: a faint orange smear at the far east edge (distant town light)
+  const hg = new THREE.Sprite(new THREE.SpriteMaterial({ map: whiteGlowTex, color: 0xff8040, transparent: true, opacity: 0.16, depthWrite: false }));
+  hg.scale.set(120, 40, 1); hg.position.set(300, 15, -60); scene.add(hg);
+  valveGlows.push(hg);
+}
+// Drifting ground fog: 8 large soft sprites, slowly wandering (updated in
+// tick via updateFog). Registered with the valve (hidden at L2).
+const fogSprites = [];
+for (let i = 0; i < 8; i++) {
+  const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: whiteGlowTex, color: 0x8a97ad, transparent: true, opacity: rand(0.07, 0.12), depthWrite: false }));
+  const bx = rand(-100, 100), bz = rand(-30, 30);
+  f.scale.set(rand(18, 30), rand(6, 9), 1);
+  f.position.set(bx, 0.9, bz);
+  scene.add(f);
+  valveGlows.push(f);
+  fogSprites.push({ s: f, bx, bz, ph: Math.random() * 10 });
+}
+function updateFog(t) {
+  for (const f of fogSprites) {
+    f.s.position.x = f.bx + Math.sin(t * 0.02 + f.ph) * 8;
+    f.s.position.z = f.bz + Math.cos(t * 0.015 + f.ph * 1.3) * 5;
+  }
+}
+{ // Lamp light cones: faint additive cones under the 5 central Main St lamps
+  const coneGeo = new THREE.ConeGeometry(2.2, 4.3, 12, 1, true);
+  const coneMat = new THREE.MeshBasicMaterial({ color: 0xffc46b, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  for (let i = 0; i < 5; i++) {
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.set(lamps[i].headX, 2.2, lamps[i].headZ);
+    scene.add(cone);
+    lamps[i].cone = cone; // repositioned with the head if the glTF lamps load
+  }
+}
+_instFlush(); // second flush: puddles, debris, weeds, skid, manholes, trash cans
+
+// ============ Round 2: photo textures (Poly Haven, CC0) ============
+// Swaps the canvas textures for photo textures once they load; every swap
+// is best-effort — a failed download leaves the canvas texture in place.
+// Repeats are chosen for ~square texels on the main surfaces (10 m tiles
+// on the road/grass); the cross streets share the road materials, so their
+// sidewalks stretch the pavement photo — acceptable at night, noted in the
+// build notes. Siding uses the dark-planks photo (horizontal lap siding).
+function upgradePhotoTextures() {
+  const white = new THREE.Color(0xffffff);
+  // Centerline strips: the canvas asphalt has a painted centerline, the
+  // photo asphalt does not — so the strips stay hidden until the photo loads.
+  dashTex.repeat.set(37, 1);
+  const centerlineStrips = [];
+  for (const [w, d, x, z] of [[440, 0.25, 0, 0], [0.25, 220, 64, 0]]) {
+    const s = new THREE.Mesh(sharedPlaneGeo(w, d), dashMat);
+    s.rotation.x = -Math.PI / 2; s.position.set(x, 0.025, z);
+    s.visible = false; scene.add(s);
+    centerlineStrips.push(s);
+  }
+  upgradeMap(ASSET_BASE + 'tex-asphalt_02-1k.jpg',
+    sharedStdMat({ map: asphaltTex, color: 0xffffff, roughness: 1 }), 44, 1,
+    () => { for (const s of centerlineStrips) s.visible = true; });
+  upgradeMap(ASSET_BASE + 'tex-grass_ground-1k.jpg',
+    sharedStdMat({ map: grassTex, color: 0xffffff, roughness: 1 }), 48, 24);
+  upgradeMap(ASSET_BASE + 'tex-concrete_pavement_03-1k.jpg',
+    sharedStdMat({ map: concreteGroundTex, color: 0xffffff, roughness: 1 }), 183, 1);
+  upgradeMap(ASSET_BASE + 'tex-concrete_pavement_03-1k.jpg',
+    sharedStdMat({ map: plazaTex, color: 0xffffff, roughness: 1 }), 2, 2);
+  upgradeMap(ASSET_BASE + 'tex-dirt-1k.jpg', dirtPathMat, 8, 1);
+  upgradeMap(ASSET_BASE + 'tex-dark_planks-1k.jpg', dockMat, 1, 1,
+    (m) => { m.color.set(0xffffff); });
+  upgradeMap(ASSET_BASE + 'tex-dark_planks-1k.jpg', boardMat, 1, 1);
+  // Walls: brick (diner/gas) -> brick photo, concrete (all other non-siding
+  // kinds) -> concrete photo, siding (hardware/houses) -> dark planks photo
+  // (verified: horizontal weathered lap siding, 9 boards/tile — at repeat
+  // (5,2) the boards read ~19 cm, a realistic siding exposure). Colors lerp
+  // toward white so the photo's own tones read while each building keeps
+  // some of its identity (siding lerps less, 0.35, to keep house colors).
+  // The siding upgrade is part of the flashlight-slab fix: the spawn-view
+  // hardware wall now has real surface detail, so the pool reads as light
+  // on wood instead of a flat panel.
+  const seenWalls = new Set();
+  for (const b of BUILDINGS) {
+    const wallTex = b.kind === 'diner' || b.kind === 'gas' ? brickTex : b.kind === 'hardware' || b.kind === 'house' ? sidingTex : concreteWallTex;
+    const key = wallTex.uuid + '|' + b.color;
+    if (seenWalls.has(key)) continue;
+    seenWalls.add(key);
+    const mat = sharedStdMat({ map: wallTex, color: b.color, roughness: 1 });
+    if (wallTex === brickTex) upgradeMap(ASSET_BASE + 'tex-dark_brick_wall-1k.jpg', mat, 5, 1, (m) => m.color.lerp(white, 0.6));
+    else if (wallTex === concreteWallTex) upgradeMap(ASSET_BASE + 'tex-concrete-1k.jpg', mat, 4, 1, (m) => m.color.lerp(white, 0.6));
+    else upgradeMap(ASSET_BASE + 'tex-dark_planks-1k.jpg', mat, 5, 2, (m) => m.color.lerp(white, 0.35));
+  }
+}
+upgradePhotoTextures();
+
 // ============ weapons: dual wield, unlimited ammo, no reloading ============
 // MARKER-DH2-DUALWIELD-UNLIMITED
 const WEAPONS = {
@@ -1197,9 +1896,13 @@ const gunMounts = { right: new THREE.Group(), left: new THREE.Group() };
 const HANDS = ['right', 'left'];
 scene.add(gunMounts.right, gunMounts.left);
 const steelMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.35, metalness: 0.7 });
+steelMat.userData.envSet = true; steelMat.envMapIntensity = 0.7;
 const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x141418, roughness: 0.5, metalness: 0.5 });
+darkMetalMat.userData.envSet = true; darkMetalMat.envMapIntensity = 0.5;
 const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.9 });
+woodMat.userData.envSet = true; woodMat.envMapIntensity = 0.25;
 const gripMat = new THREE.MeshStandardMaterial({ color: 0x2e1c10, roughness: 0.95 });
+gripMat.userData.envSet = true; gripMat.envMapIntensity = 0.2;
 function buildHandWeapon(hand) {
   const mount = gunMounts[hand];
   while (mount.children.length) mount.remove(mount.children[0]);
@@ -1215,6 +1918,16 @@ function buildHandWeapon(hand) {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, 12), mat);
     m.position.set(x, y, z); if (rx) m.rotation.x = rx; g.add(m); return m;
   };
+  // Round 2: a licensed glTF model replaces the primitives when loaded
+  // (weaponModels is filled asynchronously; buildHandWeapon re-runs then).
+  const wgl = weaponModels[name];
+  let flashZ = null;
+  if (wgl) {
+    const fitted = fitWeaponModel(wgl.clone(true), WEAPON_GLTF[name]);
+    g.add(fitted.model);
+    flashZ = fitted.muzzleZ + 0.03;
+  }
+  if (!wgl) {
   if (name === 'pistol') {
     box(0.07, 0.09, 0.24, darkMetalMat, 0, 0, 0); // frame
     box(0.06, 0.05, 0.27, steelMat, 0, 0.055, 0.01); // slide
@@ -1256,11 +1969,12 @@ function buildHandWeapon(hand) {
     box(0.06, 0.13, 0.3, woodMat, 0, -0.02, -0.36); // stock
     box(0.05, 0.05, 0.12, darkMetalMat, 0, -0.08, 0.05); // bipod stub
   }
+  } // end primitive fallback
   mount.add(g);
   if (!WEAPONS[name].melee) {
     const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(255,220,120,1)', 'rgba(255,120,0,0)'), transparent: true, opacity: 0, depthWrite: false }));
     flash.scale.set(0.4, 0.4, 1);
-    flash.position.set(0, 0.02, name === 'pistol' ? 0.3 : name === 'shotgun' ? 0.55 : name === 'sniper' ? 0.85 : 0.62);
+    flash.position.set(0, 0.02, flashZ !== null ? flashZ : name === 'pistol' ? 0.3 : name === 'shotgun' ? 0.55 : name === 'sniper' ? 0.85 : 0.62);
     g.add(flash);
     mount.userData.flash = flash;
   }
@@ -1340,6 +2054,37 @@ function updateParticles(dt) {
   }
 }
 
+// ============ Round 2: blood pools (pooled, 12) ============
+// A dark pool spawns under each killed zombie and fades over ~25 s, so
+// kills leave a mark on the street. Shared geometry; per-pool material
+// (opacity fades independently). Pool is one draw call each when visible.
+const bloodPools = [];
+{
+  const poolGeo = new THREE.CircleGeometry(1, 14);
+  for (let i = 0; i < 12; i++) {
+    const m = new THREE.Mesh(poolGeo, new THREE.MeshBasicMaterial({ color: 0x2a0505, transparent: true, opacity: 0, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.visible = false; scene.add(m);
+    bloodPools.push({ m, life: 0 });
+  }
+}
+let bloodPoolNext = 0;
+function spawnBloodPool(x, z) {
+  const p = bloodPools[bloodPoolNext]; bloodPoolNext = (bloodPoolNext + 1) % bloodPools.length;
+  p.m.position.set(x, 0.07, z);
+  p.m.scale.setScalar(rand(0.5, 1.0));
+  p.m.rotation.z = Math.random() * Math.PI;
+  p.m.visible = true; p.m.material.opacity = 0.75;
+  p.life = 25;
+}
+function updateBloodPools(dt) {
+  for (const p of bloodPools) {
+    if (p.life <= 0) continue;
+    p.life -= dt;
+    if (p.life <= 0) { p.m.visible = false; p.m.material.opacity = 0; }
+    else if (p.life < 5) p.m.material.opacity = 0.75 * (p.life / 5);
+  }
+}
+
 // ============ zombies ============
 const ZTYPES = {
   // DH4: dead skin — pale grey-green, never healthy. Eye glow by type.
@@ -1352,10 +2097,13 @@ const ZTYPES = {
 const legGeo = new THREE.CapsuleGeometry(0.095, 0.5, 4, 10); legGeo.translate(0, -0.36, 0);
 const shoeGeo = new THREE.BoxGeometry(0.13, 0.09, 0.26);
 const shoeMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
+shoeMat.userData.envSet = true; shoeMat.envMapIntensity = 0.15;
 const torsoGeo = new THREE.SphereGeometry(0.32, 14, 12); torsoGeo.scale(1, 1.35, 0.62); // rounded torso, not a slab
 const neckGeo = new THREE.CylinderGeometry(0.09, 0.10, 0.14, 8);
 const headGeo = new THREE.SphereGeometry(0.19, 12, 10); headGeo.scale(1, 1.15, 0.95);
 const noseGeo = new THREE.BoxGeometry(0.07, 0.09, 0.08);
+const teethGeo = new THREE.BoxGeometry(0.09, 0.03, 0.02); // Round 2: bared teeth under the nose
+const teethMat = new THREE.MeshStandardMaterial({ color: 0xcfc8a8, roughness: 0.6 });
 const armUpGeo = new THREE.CapsuleGeometry(0.075, 0.24, 4, 10); armUpGeo.translate(0, -0.17, 0);
 const armLoGeo = new THREE.CapsuleGeometry(0.055, 0.22, 4, 10); armLoGeo.translate(0, -0.16, 0);
 const handGeo = new THREE.SphereGeometry(0.065, 8, 6);
@@ -1368,23 +2116,90 @@ const socketGeo = new THREE.SphereGeometry(0.058, 8, 6);
 const socketMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
 const eyeMats = {};
 for (const k in ZTYPES) eyeMats[k] = new THREE.MeshBasicMaterial({ color: ZTYPES[k].eye, toneMapped: false });
-const skinPalette = [0x93a08a, 0x7f8a76, 0xa89a86, 0x6f7f6a, 0x8f9a7e].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1, emissive: 0x0e1a0c, emissiveIntensity: 0.7 })); // faint sickly skin glow: zombies stay readable silhouettes in the dark
-const pantsPalette = [0x1e2126, 0x26221e, 0x1a222b, 0x2a2018].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+const skinPalette = [0x93a08a, 0x7f8a76, 0xa89a86, 0x6f7f6a, 0x8f9a7e].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1, map: skinTex, emissive: 0x0e1a0c, emissiveIntensity: 0.7 })); // faint sickly skin glow: zombies stay readable silhouettes in the dark; mottled skin map (Round 2)
+for (const m of skinPalette) { m.userData.envSet = true; m.envMapIntensity = 0.15; }
+// Round 2: head materials with a painted hair cap (top of the canvas = top of the sphere)
+const headMats = skinPalette.map((m) => { const h = m.clone(); h.map = headTex; return h; });
+const pantsPalette = [0x1e2126, 0x26221e, 0x1a222b, 0x2a2018].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1, map: shirtTex }));
+for (const m of pantsPalette) { m.userData.envSet = true; m.envMapIntensity = 0.2; }
 const bloodMat = new THREE.MeshStandardMaterial({ color: 0x3a0808, roughness: 1 });
+bloodMat.userData.envSet = true; bloodMat.envMapIntensity = 0.15;
 const bloodGeo = new THREE.SphereGeometry(0.13, 8, 6);
 const typeMats = {};
 for (const k in ZTYPES) {
   const base = new THREE.Color(ZTYPES[k].shirt);
   typeMats[k] = {
-    shirt: new THREE.MeshStandardMaterial({ color: ZTYPES[k].shirt, roughness: 1 }),
-    torn: new THREE.MeshStandardMaterial({ color: base.clone().multiplyScalar(0.55), roughness: 1 }),
+    shirt: new THREE.MeshStandardMaterial({ color: ZTYPES[k].shirt, roughness: 1, map: shirtTex }),
+    torn: new THREE.MeshStandardMaterial({ color: base.clone().multiplyScalar(0.55), roughness: 1, map: shirtTex }),
   };
+  typeMats[k].shirt.userData.envSet = true; typeMats[k].shirt.envMapIntensity = 0.2;
+  typeMats[k].torn.userData.envSet = true; typeMats[k].torn.envMapIntensity = 0.2;
 }
 const zombies = [];
+// ============ Round 2: animated glTF zombie (Quaternius, CC BY 3.0) ========
+// When zombie.glb has loaded, spawns use the skinned model with real walk /
+// run / bite clips instead of the procedural puppet. Hit spheres are
+// UNCHANGED (head y 1.68 r 0.3, body y 1.1 r 0.55 in the fire code): the
+// model's head sits ~1.40 m after fitting, inside the body sphere, so hits
+// stay fair. If the model never loads, the procedural path below runs.
+function zombiePlayAction(z, name, loop) {
+  const clip = z.clips && z.clips[name];
+  if (!clip) return null;
+  const a = z.mixer.clipAction(clip);
+  a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce);
+  a.reset().play();
+  return a;
+}
+function buildGltfZombie(type, t) {
+  const grp = new THREE.Group();
+  const model = SkeletonUtils.clone(zombieGltf.scene);
+  fitZombieModel(model);
+  // Per-zombie brightness variation (shared atlas texture — brightness only)
+  const v = rand(0.85, 1.05);
+  model.traverse((o) => {
+    if (o.isMesh && o.material && o.material.isMeshStandardMaterial) {
+      o.material = o.material.clone();
+      o.material.color.multiplyScalar(v);
+      o.material.userData.envSet = true;
+      o.material.envMapIntensity = 0.25;
+    }
+  });
+  grp.add(model);
+  // Glowing eyes attached to the Head bone so they follow the animation.
+  // Best-effort: any failure leaves the model eyeless, never breaks a spawn.
+  try {
+    const head = model.getObjectByName('Head');
+    if (head) {
+      head.updateWorldMatrix(true, false);
+      const hp = new THREE.Vector3(); head.getWorldPosition(hp);
+      const hq = new THREE.Quaternion(); head.getWorldQuaternion(hq);
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
+      const rgt = new THREE.Vector3(1, 0, 0).applyQuaternion(hq);
+      for (const s of [-1, 1]) {
+        const eye = new THREE.Mesh(eyeGeo, eyeMats[type]);
+        const wp = hp.clone().addScaledVector(fwd, 0.12).addScaledVector(rgt, 0.045 * s);
+        head.worldToLocal(wp);
+        eye.position.copy(wp);
+        head.add(eye);
+      }
+    }
+  } catch (e) { /* eyes are optional */ }
+  grp.scale.setScalar(t.scale);
+  scene.add(grp);
+  const mixer = new THREE.AnimationMixer(model);
+  const clips = {};
+  for (const c of zombieGltf.animations) clips[c.name.split('|').pop()] = c;
+  const z = { grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL: null, legR: null, armL: null, armR: null, head: null, torso: null, tilt: rand(-0.25, 0.25), mixer, clips, moveAction: null, biteAction: null, attacking: false };
+  z.moveAction = zombiePlayAction(z, type === 'runner' ? 'ZombieRun' : 'ZombieWalk', true);
+  zombies.push(z);
+}
 function spawnZombie(type) {
   const t = ZTYPES[type];
+  if (zombieGltf) { buildGltfZombie(type, t); return; }
   const grp = new THREE.Group();
-  const skinMat = skinPalette[Math.floor(Math.random() * skinPalette.length)];
+  const skinIdx = Math.floor(Math.random() * skinPalette.length);
+  const skinMat = skinPalette[skinIdx];
+  const headMat = headMats[skinIdx];
   const pantsMat = pantsPalette[Math.floor(Math.random() * pantsPalette.length)];
   // DH4 variation: torn/darker shirt on some zombies, and one exposed
   // (skin) sleeve on others — texture/material variation only, no extra
@@ -1419,8 +2234,9 @@ function spawnZombie(type) {
   blood.position.set(rand(-0.12, 0.12), rand(1.0, 1.3), 0.19); blood.scale.set(rand(0.8, 1.4), rand(0.8, 1.4), 0.25); grp.add(blood);
   const neck = new THREE.Mesh(neckGeo, skinMat); neck.position.y = 1.52; grp.add(neck);
   const armL = arm(-1), armR = arm(1);
-  const head = new THREE.Mesh(headGeo, skinMat); head.position.y = 1.68; grp.add(head);
+  const head = new THREE.Mesh(headGeo, headMat); head.position.y = 1.68; grp.add(head);
   const nose = new THREE.Mesh(noseGeo, skinMat); nose.position.set(0, 1.65, 0.185); grp.add(nose);
+  const teeth = new THREE.Mesh(teethGeo, teethMat); teeth.position.set(0, 1.60, 0.17); grp.add(teeth);
   // Dark sunken sockets with glowing eyes (per-type colour)
   for (const sx of [-1, 1]) {
     const sock = new THREE.Mesh(socketGeo, socketMat); sock.position.set(0.075 * sx, 1.71, 0.15); grp.add(sock);
@@ -1531,6 +2347,10 @@ function addPickup(kind, x, z) {
     const b = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.7 }));
     g.add(b); label = 'FOOD';
   }
+  // Round 2: the meshes added so far are the weapon itself (glow, label and
+  // beam are added below) — record them so upgradePickupModels can swap
+  // them for the glTF model when it loads.
+  const wgMeshes = g.children.slice();
   const glow = new THREE.Sprite(sharedSpriteMat({ map: pickupGlowTex, transparent: true, opacity: 0.6, depthWrite: false }));
   glow.scale.set(1.4, 1.4, 1); g.add(glow);
   const lab = labelSprite(label, '#eaffea'); lab.position.y = 0.55; g.add(lab);
@@ -1560,7 +2380,23 @@ function addPickup(kind, x, z) {
   }
   g.position.set(x, 0.7, z);
   scene.add(g);
-  pickups.push({ grp: g, kind, taken: false, phase: Math.random() * 6, pool: beamPool });
+  pickups.push({ grp: g, kind, taken: false, phase: Math.random() * 6, pool: beamPool, wgMeshes, upgraded: false });
+}
+// Round 2: swap a weapon pickup's primitive meshes for its glTF model when
+// loaded. Guns/blades lie on their side (holder rolls about the barrel axis).
+function upgradePickupModels() {
+  for (const p of pickups) {
+    if (p.taken || p.upgraded) continue;
+    const wgl = weaponModels[p.kind];
+    if (!wgl) continue;
+    for (const m of p.wgMeshes) p.grp.remove(m);
+    const fitted = fitWeaponModel(wgl.clone(true), WEAPON_GLTF[p.kind]);
+    const holder = new THREE.Group();
+    holder.add(fitted.model);
+    holder.rotation.z = Math.PI / 2;
+    p.grp.add(holder);
+    p.upgraded = true;
+  }
 }
 // weapons in their homes
 addPickup('shotgun', -2, -15.6);
@@ -1576,6 +2412,20 @@ for (const [k, x, z] of [
   ['medkit', -21, -15], ['medkit', -10, 14.5], ['medkit', -38, -14],
   ['food', -44, -11], ['food', 12, 13], ['food', 32, -12], ['food', 34, 13],
 ]) addPickup(k, x, z);
+
+// ============ Round 2: load weapon + zombie models (async, never rejects) ==
+// When a weapon model arrives, rebuild both hands (cheap) and upgrade the
+// matching pickup. The zombie template loads once; spawnZombie branches on it.
+for (const name of Object.keys(WEAPON_GLTF)) {
+  loadGltf(WEAPON_GLTF[name].file).then((gltf) => {
+    if (!gltf) return;
+    weaponModels[name] = gltf.scene;
+    buildHandWeapon('right');
+    buildHandWeapon('left');
+    upgradePickupModels();
+  });
+}
+loadGltf('zombie.glb').then((gltf) => { if (gltf) zombieGltf = gltf; });
 
 // ============ audio (synthesized, no assets) ============
 let AC = null, masterGain = null;
@@ -1870,6 +2720,20 @@ function drawPerfCell() {
   perfTex.needsUpdate = true;
 }
 
+// Round 2: the perf readout is a TESTING tool, not part of normal play —
+// the before/after captures showed it leaking into the normal-play view.
+// Gated behind a debug toggle, default OFF: F3 on desktop, right-thumbstick
+// click in VR (right buttons[3] was unassigned; left buttons[3] is run).
+// The pause overlay always shows a perf line (drawPauseOverlay), so Danny
+// can read frame times without the toggle.
+let debugPerf = false;
+function setDebugPerf(v) {
+  debugPerf = v;
+  const row = document.getElementById('perfr');
+  if (row) row.style.display = v ? '' : 'none';
+}
+setDebugPerf(false); // default: clean normal play
+
 // ============ pause / restart (new: the game had no pause) ============
 // Camera-attached overlay, visible in VR and on desktop alike. B/Y (or P)
 // toggles pause; A/X (or M) while paused toggles mute; holding B/Y (or R)
@@ -1897,6 +2761,8 @@ function drawPauseOverlay() {
   g.fillText('PAUSED', 512, 76);
   g.fillStyle = '#f5f2ff'; g.font = '700 34px system-ui, sans-serif';
   g.fillText('HP ' + Math.max(0, Math.ceil(hp)) + '   ·   WAVE ' + (wave > 0 ? wave : '—') + '   ·   KILLS ' + kills, 512, 146);
+  g.fillStyle = '#9d8fd0'; g.font = '600 26px system-ui, sans-serif';
+  g.fillText('PERF ' + perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 512, 186);
   g.fillStyle = '#d8d2f0'; g.font = '600 30px system-ui, sans-serif';
   g.fillText('B / Y  —  RESUME', 512, 224);
   g.fillText('A / X  —  ' + (muted ? 'UNMUTE  (MUTED)' : 'MUTE'), 512, 276);
@@ -1927,7 +2793,7 @@ function setPaused(p) {
   }
 }
 function resetRunState() {
-  for (const z of zombies) scene.remove(z.grp);
+  for (const z of zombies) { if (z.mixer) z.mixer.stopAllAction(); scene.remove(z.grp); }
   zombies.length = 0;
   wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 2.5;
   kills = 0; hp = 100; hurtCd = 0; shakeT = 0; blackoutT = -1;
@@ -1949,6 +2815,7 @@ function restartRun() {
   showBanner('NEW RUN — HOLLOW CREEK', 2000);
 }
 function quitToMenu() {
+  finalizePerfSession(); // V2.0: close the perf record when quitting to the menu
   resetRunState();
   freshRun = true;
   mode = 'menu';
@@ -1984,6 +2851,7 @@ function damagePlayer(d) {
 const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
+  if (e.code === 'F3' && !e.repeat) { e.preventDefault(); setDebugPerf(!debugPerf); } // Round 2: PERF readout toggle (desktop)
   if (e.code === 'KeyM' && !e.repeat) setMuted(!muted);
   if (e.code === 'KeyP' && !e.repeat && mode === 'play') setPaused(!paused);
   if (e.code === 'KeyR' && !e.repeat && mode === 'play' && paused) restartRun();
@@ -2036,6 +2904,7 @@ let rightCtl = null, leftCtl = null;
   c.addEventListener('disconnected', () => { if (rightCtl === c) rightCtl = null; if (leftCtl === c) leftCtl = null; });
 });
 let prevCycleL = false, prevCycleR = false, snapCd = 0, snapArm = true; // DH4: snap turn is INSTANT (comfort) — easing removed
+let prevDebugBtn = false; // Round 2: right-stick-click edge detection for the PERF toggle
 const handGamepad = { left: null, right: null }; // DH5: per-hand gamepad refs for haptics + grip
 // MARKER-DH2-MOVEFIX
 const pairBuf = { x: 0, y: 0 };
@@ -2058,7 +2927,7 @@ function pollInput(dt) {
   if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
   if (mouseDown && !renderer.xr.isPresenting) fireR = true;
   if (keys['ShiftLeft'] || keys['ShiftRight']) running = true; // desktop run: hold Shift
-  let cycleL = false, cycleR = false, axisSeen = false;
+  let cycleL = false, cycleR = false, axisSeen = false, dbgBtn = false;
   const applyHand = (hand, axes, buttons, gp) => {
     pickPair(axes); const ax = pairBuf.x, ay = pairBuf.y;
     const dx = dead(ax), dy = dead(ay);
@@ -2084,6 +2953,8 @@ function pollInput(dt) {
     // DH4 run: hold the LEFT thumbstick click (buttons[3]) while moving.
     // Full-forward stick alone is still walk only — running is opt-in.
     if (hand === 'left' && buttons && buttons[3] && buttons[3].pressed) running = true;
+    // Round 2: RIGHT thumbstick click toggles the PERF readout (debug only).
+    if (hand === 'right' && buttons && buttons[3] && buttons[3].pressed) dbgBtn = true;
     if (buttons && buttons[4] && buttons[4].pressed) {
       if (hand === 'left') cycleL = true; else cycleR = true;
     }
@@ -2109,6 +2980,8 @@ function pollInput(dt) {
   if (cycleL && !prevCycleL) cycleHandWeapon('left');
   if (cycleR && !prevCycleR) cycleHandWeapon('right');
   prevCycleL = cycleL; prevCycleR = cycleR;
+  if (dbgBtn && !prevDebugBtn) setDebugPerf(!debugPerf); // Round 2: PERF toggle on the press edge
+  prevDebugBtn = dbgBtn;
   const len = Math.hypot(mx, mz);
   if (len > 1) { mx /= len; mz /= len; }
   return { fire: { left: fireL, right: fireR }, mx, mz, lx, ly, rx, ry, running, grip: { left: gripL, right: gripR } };
@@ -2194,9 +3067,11 @@ function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 }
 function killZombie(z, hand) {
   z.dead = true; z.deadT = 0; kills++;
+  if (z.mixer) z.mixer.stopAllAction(); // glTF zombie: freeze the clip, the group fall still plays
   if (hand) hapticPulse(hand, 60, 0.7); // kill confirm buzz on the firing hand
   tmpB.copy(z.grp.position); tmpB.y += 1;
   spawnBurst(tmpB, 10, 0x5a0a0a, 3);
+  spawnBloodPool(z.grp.position.x, z.grp.position.z); // Round 2: persistent blood pool under the body
   updateHUD();
 }
 function whooshSound(dur, vol) {
@@ -2308,13 +3183,28 @@ function updateZombies(dt) {
       const k = Math.min(1, z.deadT / 0.35);
       z.grp.rotation.x = -Math.PI / 2 * k;
       z.grp.position.y = -0.1 * k;
-      if (z.deadT > 1.4) { scene.remove(z.grp); zombies.splice(i, 1); }
+      if (z.deadT > 1.4) { if (z.mixer) z.mixer.stopAllAction(); scene.remove(z.grp); zombies.splice(i, 1); }
       continue;
     }
     z.attackCd = Math.max(0, z.attackCd - dt);
     z.groanT -= dt;
     const dx = playerPos.x - z.grp.position.x, dz = playerPos.z - z.grp.position.z;
     const dist = Math.hypot(dx, dz) || 0.001;
+    // Round 2 (glTF zombies): advance the clip mixer and switch walk/run ->
+    // bite when in attack range. Procedural zombies have no mixer.
+    if (z.mixer) {
+      z.mixer.update(dt);
+      const biting = dist <= 1.0;
+      if (biting && !z.attacking) {
+        z.attacking = true;
+        if (z.moveAction) z.moveAction.stop();
+        z.biteAction = zombiePlayAction(z, 'ZombieBite', true);
+      } else if (!biting && z.attacking) {
+        z.attacking = false;
+        if (z.biteAction) { z.biteAction.stop(); z.biteAction = null; }
+        z.moveAction = zombiePlayAction(z, z.type === 'runner' ? 'ZombieRun' : 'ZombieWalk', true);
+      }
+    }
     if (dist > 1.0) {
       z.grp.position.x += dx / dist * z.speed * dt;
       z.grp.position.z += dz / dist * z.speed * dt;
@@ -2327,20 +3217,25 @@ function updateZombies(dt) {
       // DH4 horror walk: hunched torso, arms reaching forward, jerky uneven
       // leg timing (offset phases + a second harmonic), head lolling on its
       // own tilt. Hit spheres are computed from grp position only, so this
-      // never changes hit fairness.
-      z.torso.rotation.x = 0.22;
-      const swL = Math.sin(z.phase) + 0.25 * Math.sin(z.phase * 2.3);
-      const swR = Math.sin(z.phase + 1.3) + 0.25 * Math.sin(z.phase * 2.1 + 1.0);
-      z.legL.rotation.x = swL * 0.8; z.legR.rotation.x = swR * 0.8;
-      z.armL.rotation.x = -1.35 - swL * 0.3; z.armR.rotation.x = -1.35 + swR * 0.3; // reaching forward, swaying
-      z.armL.rotation.z = 0.25 + Math.sin(z.phase * 0.7) * 0.1; z.armR.rotation.z = -0.25 - Math.sin(z.phase * 0.7) * 0.1;
-      z.head.rotation.x = 0.35; z.head.rotation.z = z.tilt + Math.sin(z.phase * 0.9) * 0.12;
-      z.grp.position.y = Math.abs(Math.cos(z.phase)) * 0.05;
-      z.grp.rotation.z = Math.sin(z.phase * 0.5) * 0.05;
+      // never changes hit fairness. Procedural zombies only — glTF zombies
+      // are animated by their clip mixer (above).
+      if (!z.mixer) {
+        z.torso.rotation.x = 0.22;
+        const swL = Math.sin(z.phase) + 0.25 * Math.sin(z.phase * 2.3);
+        const swR = Math.sin(z.phase + 1.3) + 0.25 * Math.sin(z.phase * 2.1 + 1.0);
+        z.legL.rotation.x = swL * 0.8; z.legR.rotation.x = swR * 0.8;
+        z.armL.rotation.x = -1.35 - swL * 0.3; z.armR.rotation.x = -1.35 + swR * 0.3; // reaching forward, swaying
+        z.armL.rotation.z = 0.25 + Math.sin(z.phase * 0.7) * 0.1; z.armR.rotation.z = -0.25 - Math.sin(z.phase * 0.7) * 0.1;
+        z.head.rotation.x = 0.35; z.head.rotation.z = z.tilt + Math.sin(z.phase * 0.9) * 0.12;
+        z.grp.position.y = Math.abs(Math.cos(z.phase)) * 0.05;
+        z.grp.rotation.z = Math.sin(z.phase * 0.5) * 0.05;
+      }
     } else {
-      // Attacking: arms swing fast at the player
-      const atk = Math.sin(elapsed * 20) * 0.4;
-      z.armL.rotation.x = -1.6 + atk; z.armR.rotation.x = -1.6 - atk;
+      // Attacking: arms swing fast at the player (procedural zombies only)
+      if (!z.mixer) {
+        const atk = Math.sin(elapsed * 20) * 0.4;
+        z.armL.rotation.x = -1.6 + atk; z.armR.rotation.x = -1.6 - atk;
+      }
       if (z.attackCd <= 0) {
         z.attackCd = 1.0;
         damagePlayer(12);
@@ -2406,6 +3301,7 @@ function tick() {
   if (mode === 'play' && !paused) {
     if (perfWarmup > 0) perfWarmup -= dt;
     else perfValve.update(dt);
+    samplePerf(dt); // V2.0: ~1/s frame-time + valve-level sample (local only)
   }
   if (mode === 'play') {
     pollPauseInput(dt); // B/Y pause toggle + hold-to-restart + A/X mute (VR); works paused or not
@@ -2538,11 +3434,13 @@ function tick() {
     updateZombies(dt);
     updatePickups(dt, elapsed);
     updateParticles(dt);
+    updateBloodPools(dt); // Round 2: fade the kill blood pools
+    updateFog(elapsed); // Round 2: drift the ground fog
     for (const l of lamps) {
       if (l.flicker) {
         l.t += dt;
         const on = Math.sin(l.t * 37) > -0.6 && Math.random() > 0.12;
-        l.headMat.emissiveIntensity = on ? 1.4 : 0.15;
+        if (l.headMat) l.headMat.emissiveIntensity = on ? 1.4 : 0.15; // null when the glTF lamp head is shared
         l.glow.material.opacity = on ? 0.55 : 0.06;
         l.pool.material.opacity = on ? 0.18 : 0.02;
       }
@@ -2558,7 +3456,7 @@ function tick() {
       else {
         playerGroup.position.set(0, 0, 0); yaw = 0; playerGroup.rotation.y = 0;
         hp = 100; hurtCd = 0;
-        for (const z of zombies) scene.remove(z.grp);
+        for (const z of zombies) { if (z.mixer) z.mixer.stopAllAction(); scene.remove(z.grp); }
         zombies.length = 0; wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 2.5; // DH5: waves restart
         blackoutT = -1; blackMat.opacity = 0;
         showBanner('YOU BLACKED OUT — you wake up in the square.', 3000);
@@ -2574,29 +3472,34 @@ function tick() {
     if (hudT > 0.15) { hudT = 0; updateHUD(); }
   }
   // VR overlay visibility, every frame: HUD + banner only while playing in
-  // VR and not paused; the perf cell whenever playing in VR.
+  // VR and not paused; the perf cell only when the debug toggle is on.
   const presenting = renderer.xr.isPresenting;
   vrHud.visible = presenting && mode === 'play' && !paused;
   if (vrBannerT > 0) vrBanner.visible = presenting && mode === 'play' && !paused;
-  perfCell.visible = presenting && mode === 'play';
+  perfCell.visible = debugPerf && presenting && mode === 'play';
   if (perfCell.visible) {
     perfT += dt;
     if (perfT > 0.25) { perfT = 0; drawPerfCell(); }
   }
   renderer.render(scene, camera);
 }
+// Round 2: apply the night environment map intensity to every standard
+// material in the scene (materials that set their own envMapIntensity carry
+// userData.envSet and are left alone).
+applyEnvDefaults();
 renderer.setAnimationLoop(tick);
 
 // ============ menu / start / VR ============
 const menuEl = document.getElementById('menu');
 const vrStatusEl = document.getElementById('vrstatus');
 function setVrStatus(msg) { if (vrStatusEl) vrStatusEl.textContent = msg; }
-document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · hold LEFT stick click to RUN · right stick Y also walks · right stick X snap-turns instantly · each trigger fires its own hand — grab a second gun to dual wield · A/X on a controller swaps THAT hand\'s weapon · hold the GRIP (squeeze) button with the SNIPER equipped to aim down sights · B/Y pauses (A/X mutes, hold B/Y restarts) · guns buzz when fired · unlimited ammo, no reloading · comfort vignette darkens edges while you move. Desktop: WASD moves · hold Shift to run · mouse looks · click fires right hand · hold right-click with the SNIPER to aim down sights · Q swaps right hand · E swaps left hand · P pauses · M mutes · R restarts (while paused).';
+document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · hold LEFT stick click to RUN · right stick Y also walks · right stick X snap-turns instantly · each trigger fires its own hand — grab a second gun to dual wield · A/X on a controller swaps THAT hand\'s weapon · hold the GRIP (squeeze) button with the SNIPER equipped to aim down sights · B/Y pauses (A/X mutes, hold B/Y restarts) · guns buzz when fired · unlimited ammo, no reloading · comfort vignette darkens edges while you move · right stick click toggles the PERF readout (F3 on desktop). Desktop: WASD moves · hold Shift to run · mouse looks · click fires right hand · hold right-click with the SNIPER to aim down sights · Q swaps right hand · E swaps left hand · P pauses · M mutes · R restarts (while paused).';
 document.getElementById('mutebtn').onclick = () => setMuted(!muted);
 document.getElementById('quitbtn').onclick = () => quitToMenu();
 function startGame() {
   startAudio();
   mode = 'play';
+  if (!perfSession) startPerfSession(); // V2.0: a play session starts a perf record
   menuEl.style.display = 'none';
   document.getElementById('hint').textContent = renderer.xr.isPresenting
     ? 'Left stick moves where you look · hold left click to RUN · right stick turn · each trigger fires its hand · A/X swaps that hand · B/Y pauses'
@@ -2626,6 +3529,7 @@ function onSessionStart(session) {
   session.addEventListener('end', onSessionEnd);
 }
 function onSessionEnd() {
+  finalizePerfSession(); // V2.0: close the perf record when the headset session ends
   // Camera + scope state back to desktop defaults.
   camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); pitch = 0;
   scoped = false; crossQuad.visible = false; camera.fov = 72; camera.updateProjectionMatrix();
@@ -2664,6 +3568,10 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+// V2.0: close the perf record if the page is left mid-session (finalize is
+// idempotent — a second call is a no-op because perfSession is null then).
+addEventListener('beforeunload', finalizePerfSession);
+addEventListener('pagehide', finalizePerfSession);
 </script>
 </body>
 </html>
