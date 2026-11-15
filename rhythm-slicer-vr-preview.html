@@ -71,7 +71,7 @@
     <div class="sub">Neon Rhythm Slice &middot; original rhythm-slicing &middot; PROTOTYPE</div>
     <p class="small" style="color:#ffd319">Phase 2 prototype build — not the live version. Overhaul: energy blades, rebuilt hit detection, cinematic arena.</p>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
-    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. On Normal/Hard, slice <b>in the arrow's direction</b>. Dodge the bombs.</p>
+    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. Any swing direction counts. Dodge the bombs.</p>
     <p><b>Desktop:</b> hold the mouse button and drag — your blade cuts any color. M mutes.</p>
     <p class="small">No lives, no game over, ever — misses and bombs only reset your combo. Every track is original synth, generated live in your browser.</p>
     <button id="vrBtn">ENTER VR</button>
@@ -744,7 +744,7 @@ function updateDebugViz() {
     const now = performance.now();
     if (now - _dbgLast > 250) {
       _dbgLast = now;
-      dbgEl.textContent = 'BLADE L ' + vrBladeSpeed('left').toFixed(2) + ' m/s · R ' + vrBladeSpeed('right').toFixed(2) + ' m/s (gate 1.50)\nHITS ' + dbgHits + ' · MISS ' + dbgMiss + '\nC toggles debug viz';
+      dbgEl.textContent = 'BLADE L ' + vrBladeSpeed('left').toFixed(2) + ' m/s · R ' + vrBladeSpeed('right').toFixed(2) + ' m/s (gate 0.50)\nHITS ' + dbgHits + ' · MISS ' + dbgMiss + '\nC toggles debug viz';
     }
   } else dbgEl.style.display = 'none';
 }
@@ -891,7 +891,7 @@ function drawMenu() {
   g.font = '400 20px Arial'; g.fillStyle = '#c9b8e8';
   let foot = 'VR: slice cyan LEFT / magenta RIGHT';
   if (prefs.colorblind) foot += ' (circle = LEFT, triangle = RIGHT)';
-  foot += ' · Normal/Hard: slice in the arrow direction · Desktop: hold mouse + drag.';
+  foot += ' · Any swing direction counts · Desktop: hold mouse + drag.';
   g.fillText(foot, 512, 608);
   menuTex.needsUpdate = true;
 }
@@ -1131,10 +1131,18 @@ const LEVELS = [
     bass:  [0,0,-1,0, 0,0,-1,0, -2,-2,-1,-2, -4,-4,-1,-4],
     lead:  [12,12,-1,12, -1,15,-1,17, 19,-1,19,22, -1,19,17,15] },
 ];
+// Direction gating REMOVED 2026-11-15 (Danny's headset feedback): notes
+// carried random chevron directions and the dominant-axis snap misjudged
+// natural swings (diagonals, thrusts, wrist flicks), so clean contact
+// read OFF ANGLE / WRONG WAY with no points and no haptics. Contact with
+// the correct blade always scores now; difficulty comes from travel time
+// and bomb rate. dirStrict/wrongDirReset stay in the table as inert
+// documentation of the removed mechanic — do not re-enable without an
+// owner decision.
 const DIFFS = [
   { label: 'EASY',   travel: 1.8, bombRate: 0,    dirStrict: false, wrongDirReset: false },
-  { label: 'NORMAL', travel: 1.4, bombRate: 0.06, dirStrict: true,  wrongDirReset: false },
-  { label: 'HARD',   travel: 1.1, bombRate: 0.12, dirStrict: true,  wrongDirReset: true },
+  { label: 'NORMAL', travel: 1.4, bombRate: 0.06, dirStrict: false, wrongDirReset: false },
+  { label: 'HARD',   travel: 1.1, bombRate: 0.12, dirStrict: false, wrongDirReset: false },
 ];
 const DIR_VECS = [ { x: 0, y: 1 }, { x: 1, y: 0 }, { x: 0, y: -1 }, { x: -1, y: 0 } ]; // up,right,down,left
 const DIR_NAMES = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
@@ -1429,7 +1437,9 @@ let levelSpeed = 1;   // 1 = full tempo, 0.65 = practice mode
 let curTravel = 1.4;  // effective note travel time for the current run
 let lastResult = null; // { isBest, prevBest } from the last recorded run
 
-// Direction arrow textures (chevron, 4 rotations) for Normal/Hard notes
+// Direction arrow textures (chevron, 4 rotations) — currently unused:
+// direction gating was removed 2026-11-15, so no note carries a direction
+// and the arrows stay hidden. Kept for a possible future optional mode.
 const arrowTex = [];
 {
   const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
@@ -1748,7 +1758,7 @@ function drawPerfCell() {
   g.textAlign = 'left'; g.fillStyle = '#ffffff';
   if (debugCollision) {
     // Debug mode: three lines — perf, live blade speeds (the speed-gate
-    // diagnostic; gate is 1.50 m/s), and the TEMPORARY HIT/MISS counter.
+    // diagnostic; gate is 0.50 m/s), and the TEMPORARY HIT/MISS counter.
     g.font = '700 26px Arial';
     g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 16, 36);
     g.fillStyle = '#2bff88';
@@ -1791,7 +1801,7 @@ function buildChart(lv, di, baseTime, speed = 1) {
       const isBomb = rng() < diff.bombRate;
       evts.push({
         hitTime: T, lane, kind: isBomb ? 'bomb' : 'note',
-        dir: (diff.dirStrict && !isBomb) ? Math.floor(rng() * 4) : -1
+        dir: -1 // no required direction (removed 2026-11-15): any swing counts
       });
     }
   }
@@ -1880,7 +1890,6 @@ function applyMult() {
   mult = combo >= 50 ? 8 : combo >= 25 ? 4 : combo >= 10 ? 2 : 1;
 }
 function resolveNoteSlice(n, hand, dirIdx) {
-  const diff = DIFFS[selDiff];
   n.active = false; n.grp.visible = false;
   if (hand !== 'both' && hand !== n.hand) {
     // Wrong blade: note consumed, combo kept, no points — clear feedback
@@ -1888,45 +1897,30 @@ function resolveNoteSlice(n, hand, dirIdx) {
     sfxThud();
     return;
   }
-  let pts = 0, tag = '', dirOk = true;
-  if (diff.dirStrict && n.dir >= 0) {
-    // V2: snapped dominant-axis direction vs the chevron (replaces the old
-    // world-XY dot product, which misjudged every non-downward swing).
-    if (dirIdx < 0 || dirIdx !== n.dir) {
-      dirOk = false;
-      if (diff.wrongDirReset) {
-        combo = 0; tag = 'WRONG WAY';
-        doFlash(0.25); sfxThud();
-      } else {
-        // Normal: wrong direction keeps the combo but pays no points
-        tag = 'OFF ANGLE';
-        sfxThud();
-      }
-    }
-  }
-  let perfect = false;
-  if (dirOk) {
-    combo++; maxCombo = Math.max(maxCombo, combo);
-    // PERFECT: sliced within the timing band of the note's beat-locked hit time.
-    perfect = !!audioSys.ctx && Math.abs(audioSys.now - n.hitTime) <= perfectWin();
-    pts = perfect ? 150 : 100;
-  }
+  // Contact with the correct blade ALWAYS scores (2026-11-15, Danny's
+  // headset feedback): the old direction gate rejected clean contact with
+  // OFF ANGLE / WRONG WAY whenever a natural swing (diagonal, thrust,
+  // wrist flick) didn't match the note's random chevron direction.
+  // Direction still shapes the cube-split visual (spawnHalves) but never
+  // gates scoring.
+  combo++; maxCombo = Math.max(maxCombo, combo);
+  // PERFECT: sliced within the timing band of the note's beat-locked hit time.
+  const perfect = !!audioSys.ctx && Math.abs(audioSys.now - n.hitTime) <= perfectWin();
+  const pts = perfect ? 150 : 100;
   applyMult();
-  if (pts > 0) {
-    const gained = pts * mult;
-    score += gained;
-    notesHit++;
-    dbgHits++; // TEMPORARY diagnostic counter
-    const col = n.hand === 'left' ? '#27e8ff' : '#ff3df0';
-    floatText((perfect ? 'PERFECT +' : '+') + gained, perfect ? '#2bff88' : col, n.x, n.y + 0.35, n.z);
-    burst(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, Math.max(2, Math.round((perfect ? 18 : 12) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
-    ringFlash(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG);
-    spawnHalves(n.x, n.y, n.z, n.hand, dirIdx);
-    if (perfect) sfxPerfect(); else sfxSlice(combo, n.x);
-    if (hand === 'left' || hand === 'right') pulseHaptics(hand, perfect ? 0.9 : 0.6, perfect ? 90 : 60);
-  } else if (tag) {
-    floatText(tag, '#ffd319', n.x, n.y + 0.35, n.z);
-  }
+  const gained = pts * mult;
+  score += gained;
+  notesHit++;
+  dbgHits++; // TEMPORARY diagnostic counter
+  const col = n.hand === 'left' ? '#27e8ff' : '#ff3df0';
+  floatText((perfect ? 'PERFECT +' : '+') + gained, perfect ? '#2bff88' : col, n.x, n.y + 0.35, n.z);
+  burst(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, Math.max(2, Math.round((perfect ? 18 : 12) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
+  ringFlash(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG);
+  spawnHalves(n.x, n.y, n.z, n.hand, dirIdx);
+  if (perfect) sfxPerfect(); else sfxSlice(combo, n.x);
+  // Haptics on EVERY successful slice (Danny, 2026-11-15): a firm buzz the
+  // player can always feel, not a light tap.
+  if (hand === 'left' || hand === 'right') pulseHaptics(hand, perfect ? 0.9 : 0.8, perfect ? 90 : 80);
   updateScoreboard();
 }
 function resolveBombHit(b, hand) {
@@ -1949,8 +1943,9 @@ function resolveBombHit(b, hand) {
 // code tested only the two endpoint poses; the swept test is strictly more
 // correct and costs 5 segment tests per candidate — only run for notes/bombs
 // inside the strike zone while the speed gate is open. Speed gate +
-// direction judgment are unchanged in threshold (1.5 m/s / 0.4 m/s) but now
-// use mid-blade velocity (see trackBlade) instead of controller translation.
+// direction judgment use mid-blade velocity (see trackBlade) instead of
+// controller translation (gate 0.5 m/s since 2026-11-15, was 1.5; the
+// direction threshold stays 0.4 m/s, used only for the split visual).
 const BLADE_R = 0.25;  // generous capsule radius around the visible blade
 const NOTE_R = 0.20;   // ~1.3x the note cube's visual half-size
 const BOMB_R = 0.25;
@@ -1997,14 +1992,17 @@ function bladeHits(key, px, py, pz, r) {
   return false;
 }
 function trySlice(key, hand, dt) {
-  // VR uses MID-BLADE velocity (speed gate 1.5 m/s so drifting through a
-  // stationary blade never counts); desktop keeps its tip path. The gate
-  // MUST use blade motion, not controller translation — a wrist flick moves
-  // the controller ~0.3 m/s while the blade sweeps ~7 m/s (2026-11-14 MISS
-  // root cause: the old controller-velocity gate never opened).
+  // VR uses MID-BLADE velocity (speed gate 0.5 m/s so a stationary or
+  // drifting blade never counts, while a slow deliberate swing does —
+  // lowered from 1.5 m/s on 2026-11-15: Danny's slow swings visibly passed
+  // through cubes and still read MISS because the gate never opened);
+  // desktop keeps its tip path. The gate MUST use blade motion, not
+  // controller translation — a wrist flick moves the controller ~0.3 m/s
+  // while the blade sweeps ~7 m/s (2026-11-14 MISS root cause: the old
+  // controller-velocity gate never opened).
   const isDesk = key === 'desk';
   const spd = isDesk ? bladeSpeed(key, dt) : vrBladeSpeed(key);
-  if (spd < 1.5 || sliceCd[key] > 0) return;
+  if (spd < 0.5 || sliceCd[key] > 0) return;
   const dirIdx = isDesk ? snapDir2D(bladeDir(key, dt)) : sliceDirIndex(key);
   // Notes + bombs near the hit plane — positions read live from the meshes
   for (const n of notes) {
