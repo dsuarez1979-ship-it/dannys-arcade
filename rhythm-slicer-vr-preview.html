@@ -1353,7 +1353,7 @@ function ensureBladeHums() {
 }
 function updateBladeHums() {
   if (!bladeHum.left || !bladeHum.right) ensureBladeHums();
-  const active = presenting && screen === 'playing' && audioSys.ctx && !audioSys.muted;
+  const active = renderer.xr.isPresenting && screen === 'playing' && audioSys.ctx && !audioSys.muted;
   for (const key of ['left', 'right']) {
     const h = bladeHum[key]; if (!h) continue;
     const ctl = key === 'left' ? leftCtl : rightCtl;
@@ -1395,7 +1395,7 @@ function maybeWhoosh(key) {
 const _lisPos = new THREE.Vector3(), _lisQuat = new THREE.Quaternion();
 const _lisFwd = new THREE.Vector3(), _lisUp = new THREE.Vector3();
 function updateAudioListener() {
-  if (!presenting || !audioSys.ctx) return;
+  if (!renderer.xr.isPresenting || !audioSys.ctx) return;
   try {
     const l = audioSys.ctx.listener;
     camera.getWorldPosition(_lisPos);
