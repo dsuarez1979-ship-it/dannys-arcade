@@ -76,7 +76,7 @@ Primary platform: standalone Meta Quest 2 browser using WebXR.
 
 ## 8. Standing owner decisions that bound this standard
 
-- **Rad VR graphics are PARKED** (Danny, Nov 14 ~5:26 PM, confirmed in the Phase 2 requirements): Rad gets performance, sound, comfort, and usability upgrades only. Its graphics are preserved until Danny separately authorizes a visual pass. This standard does not silently lift that park.
+- **Rad VR graphics: PARK LIFTED** (Danny, Nov 15 ~3:00 PM). The Nov 14 park ("Rad graphics preserved until separately authorized") is superseded — Rad gets the full cinematic upgrade including visuals, same as the other games.
 - **Blade color (Rhythm Slicer):** Danny asked for red/blue blades; the build keeps cyan/magenta because the color-match mechanic runs on it. A full red/blue retheme is an owner decision, not taken. (Open.)
 - **Delivery:** builds reach Danny via the hub tile, not links in chat.
 - **Single-player only** (multiplayer declined Oct 27, never re-pitch). Unlimited lives/retries, no game-over path. Original tributes only.
