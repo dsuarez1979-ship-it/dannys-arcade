@@ -16,7 +16,7 @@
   #panel .box { max-width:600px; padding:24px 20px; }
   #panel h1 {
     font-size:58px; letter-spacing:5px; margin:0 0 4px 0; font-weight:900; font-style:italic;
-    background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
+    background:linear-gradient(92deg,#2f7fff 10%,#2bff88 55%,#ff2b2b 100%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     text-shadow:0 0 34px rgba(255,113,206,.25);
   }
@@ -25,7 +25,7 @@
   #panel p.small { font-size:13px; color:#e8c9e2; }
   #vrBtn {
     margin-top:20px; font-size:22px; font-weight:800; letter-spacing:2px; cursor:pointer;
-    color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
+    color:#06121f; background:linear-gradient(92deg,#2f7fff,#2bff88); border:none; border-radius:12px;
     padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
   }
   #vrBtn:disabled { opacity:.55; cursor:wait; }
@@ -34,12 +34,12 @@
      border, TOP-LEFT. Mirrored 1:1 by the VR camera-attached plane below. */
   #hud {
     position:fixed; top:12px; left:12px; z-index:5;
-    background:rgba(8,6,20,0.72); border:2px solid #27e8ff; border-radius:10px;
+    background:rgba(8,6,20,0.72); border:2px solid #2f7fff; border-radius:10px;
     padding:8px 12px; pointer-events:none; display:none; text-align:left;
     text-shadow:0 2px 8px #000; letter-spacing:1px;
   }
   #hudL1 { color:#ffffff; font-size:20px; font-weight:900; letter-spacing:1px; }
-  #hudL2 { color:#27e8ff; font-size:14px; font-weight:700; letter-spacing:1px; margin-top:2px; }
+  #hudL2 { color:#2f7fff; font-size:14px; font-weight:700; letter-spacing:1px; margin-top:2px; }
   #hudL3 { color:#ffd319; font-size:13px; font-weight:700; letter-spacing:1px; margin-top:2px; }
   #muteBtn {
     position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
@@ -71,7 +71,7 @@
     <div class="sub">Neon Rhythm Slice &middot; original rhythm-slicing &middot; PROTOTYPE</div>
     <p class="small" style="color:#ffd319">Phase 2 prototype build — not the live version. Overhaul: energy blades, rebuilt hit detection, cinematic arena.</p>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
-    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. Cubes alternate sides, so follow the COLOR, not the side. Any swing direction counts. Dodge the bombs.</p>
+    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#2f7fff">BLUE cubes = left hand</b>, <b style="color:#ff2b2b">RED cubes = right hand</b>. Cubes alternate sides, so follow the COLOR, not the side. Any swing direction counts. Dodge the bombs.</p>
     <p><b>Desktop:</b> hold the mouse button and drag — your blade cuts any color. M mutes.</p>
     <p class="small">No lives, no game over, ever — misses and bombs only reset your combo. Every track is original synth, generated live in your browser.</p>
     <button id="vrBtn">ENTER VR</button>
@@ -320,9 +320,9 @@ let smoothHeadY = 1.6;
 // Lights: hemisphere base + two colored stage lights that pulse on the beat
 const hemiLight = new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.8);
 scene.add(hemiLight);
-const stageL = new THREE.PointLight(0x27e8ff, 30, 30, 1.8);
+const stageL = new THREE.PointLight(0x2f7fff, 30, 30, 1.8);
 stageL.position.set(-4, 4, -4); scene.add(stageL);
-const stageR = new THREE.PointLight(0xff3df0, 30, 30, 1.8);
+const stageR = new THREE.PointLight(0xff2b2b, 30, 30, 1.8);
 stageR.position.set(4, 4, -4); scene.add(stageR);
 
 // Shared radial glow texture (every fake glow in the game uses it)
@@ -351,7 +351,7 @@ function glowSprite(color, scale, opacity) {
 }
 
 // ============================== environment: skybox, stars, grid, stage ==============================
-const COL_CYAN = 0x27e8ff, COL_MAG = 0xff3df0, COL_YEL = 0xffd319;
+const COL_BLUE = 0x2f7fff, COL_RED = 0xff2b2b, COL_YEL = 0xffd319;
 {
   // Gradient sky dome via vertex colors (one draw call, fog-exempt)
   const skyGeo = new THREE.SphereGeometry(400, 24, 14);
@@ -388,7 +388,7 @@ const COL_CYAN = 0x27e8ff, COL_MAG = 0xff3df0, COL_YEL = 0xffd319;
   })));
 }
 // Beat-reactive floor grid
-const grid = new THREE.GridHelper(70, 35, COL_CYAN, 0x1a2a5a);
+const grid = new THREE.GridHelper(70, 35, COL_BLUE, 0x1a2a5a);
 grid.position.y = 0;
 grid.material.transparent = true; grid.material.opacity = 0.4;
 scene.add(grid);
@@ -401,24 +401,24 @@ const towerGlows = [];
   for (const sx of [-5.5, 5.5]) {
     const t = new THREE.Mesh(towerGeo, towerMat);
     t.position.set(sx, 3.5, -9); scene.add(t);
-    const glow = glowSprite(sx < 0 ? COL_CYAN : COL_MAG, 3.2, 0.7);
+    const glow = glowSprite(sx < 0 ? COL_BLUE : COL_RED, 3.2, 0.7);
     glow.position.set(sx, 7.2, -9); scene.add(glow);
     glow.userData.base = 3.2;
     towerGlows.push(glow);
   }
   // Back arch ring
   const arch = new THREE.Mesh(new THREE.TorusGeometry(9, 0.16, 10, 48),
-    new THREE.MeshBasicMaterial({ color: 0xff3df0, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: 0xff2b2b, toneMapped: false }));
   arch.position.set(0, 2.2, -16); scene.add(arch);
-  const archGlow = glowSprite(0xff3df0, 20, 0.18);
+  const archGlow = glowSprite(0xff2b2b, 20, 0.18);
   archGlow.position.set(0, 2.2, -16); scene.add(archGlow);
   archGlow.userData.base = 20;
   towerGlows.push(archGlow);
   // Second, larger arch ring (overhaul 2026-11-14): depth layering.
   const arch2 = new THREE.Mesh(new THREE.TorusGeometry(12, 0.14, 10, 48),
-    new THREE.MeshBasicMaterial({ color: COL_CYAN, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: COL_BLUE, toneMapped: false }));
   arch2.position.set(0, 2.2, -22); scene.add(arch2);
-  const arch2Glow = glowSprite(COL_CYAN, 26, 0.14);
+  const arch2Glow = glowSprite(COL_BLUE, 26, 0.14);
   arch2Glow.position.set(0, 2.2, -22); scene.add(arch2Glow);
   arch2Glow.userData.base = 26;
   towerGlows.push(arch2Glow);
@@ -426,8 +426,8 @@ const towerGlows = [];
 // Neon side pillars (overhaul 2026-11-14): beat-pulsed light columns framing
 // the play area. Two shared materials, pulsed by opacity in the tick.
 const pillarMats = [
-  new THREE.MeshBasicMaterial({ color: COL_CYAN, transparent: true, opacity: 0.55, toneMapped: false }),
-  new THREE.MeshBasicMaterial({ color: COL_MAG, transparent: true, opacity: 0.55, toneMapped: false })
+  new THREE.MeshBasicMaterial({ color: COL_BLUE, transparent: true, opacity: 0.55, toneMapped: false }),
+  new THREE.MeshBasicMaterial({ color: COL_RED, transparent: true, opacity: 0.55, toneMapped: false })
 ];
 {
   const pillarGeo = new THREE.BoxGeometry(0.18, 6, 0.18);
@@ -453,7 +453,7 @@ const strikeFrame = new THREE.Group();
 scene.add(strikeFrame);
 {
   // Neon frame around the strike zone
-  const frameMat = new THREE.MeshBasicMaterial({ color: COL_CYAN, toneMapped: false });
+  const frameMat = new THREE.MeshBasicMaterial({ color: COL_BLUE, toneMapped: false });
   const mkBar = (w, h, x, y) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frameMat);
     m.position.set(x, y, HIT_Z); strikeFrame.add(m);
@@ -473,16 +473,16 @@ scene.add(strikeFrame);
   }
 }
 // Runway light strip (overhaul 2026-11-14): one additive plane on the floor
-// from spawn to the hit plane, magenta (far) → cyan (near) via vertex colors.
+// from spawn to the hit plane, red (far) → blue (near) via vertex colors.
 {
   const runLen = HIT_Z - SPAWN_Z; // 11.9 m
   const rg = new THREE.PlaneGeometry(0.4, runLen, 1, 8);
   const rp = rg.attributes.position;
   const rc = new Float32Array(rp.count * 3);
-  const cFar = new THREE.Color(COL_MAG), cNear = new THREE.Color(COL_CYAN), cc = new THREE.Color();
+  const cFar = new THREE.Color(COL_RED), cNear = new THREE.Color(COL_BLUE), cc = new THREE.Color();
   for (let i = 0; i < rp.count; i++) {
     // Local +Y maps to the FAR end after the -90° X rotation, so invert t:
-    // 0 = far (magenta), 1 = near (cyan).
+    // 0 = far (red), 1 = near (blue).
     const t = 0.5 - rp.getY(i) / runLen;
     cc.copy(cFar).lerp(cNear, t);
     rc[i * 3] = cc.r; rc[i * 3 + 1] = cc.g; rc[i * 3 + 2] = cc.b;
@@ -498,18 +498,19 @@ scene.add(strikeFrame);
 }
 
 // ============================== VR controllers + energy blades ==============================
-// Left hand = CYAN blade, right hand = MAGENTA blade. The blade colors MATCH
-// the note/lane colors — color-matching is the core mechanic — so the palette
-// stays cyan/magenta even though the owner directive said "red/blue":
-// recoloring the blades alone would break the color match. A full red/blue
-// retheme (notes + lanes + UI) is an owner decision, not taken here.
+// Left hand = BLUE blade, right hand = RED blade. The blade colors MATCH
+// the note/lane colors — color-matching is the core mechanic.
+// PALETTE (owner decision, final Nov 15, 2026): clearly distinguishable red
+// and blue, subject to the owner's visual confirmation. Full retheme applied
+// Nov 15 (notes + blades + lanes + markers + UI). Bombs use AMBER markers
+// and emissive so they stay distinct from the red right-hand cubes.
 // Energy-blade design (overhaul 2026-11-14): 1.0 m visible blade, white-hot
 // core + colored mid layer + soft additive outer shell + glow sprites —
 // layered geometry, NOT full-screen bloom (forbidden on Quest 2).
 // BLADES ATTACH BY HANDEDNESS, NOT BY CONTROLLER INDEX (fix 2026-11-14):
 // getController(0/1) enumerate in session order, which is NOT guaranteed to
 // be left-then-right — attaching bladeL to getController(0) could put the
-// cyan blade in the right hand while the collision system treats that hand
+// blue blade in the right hand while the collision system treats that hand
 // as 'right', turning every correct-color swing into WRONG BLADE. Each blade
 // is parented to its controller only once the 'connected' event reports the
 // handedness, so the visible blade, the collision capsule, and the hand
@@ -553,7 +554,7 @@ function buildBlade(color) {
   g.visible = false;
   return g;
 }
-const bladeL = buildBlade(COL_CYAN), bladeR = buildBlade(COL_MAG);
+const bladeL = buildBlade(COL_BLUE), bladeR = buildBlade(COL_RED);
 const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
 let rightCtl = null, leftCtl = null;
 [ctlL, ctlR].forEach(c => {
@@ -633,7 +634,7 @@ function makeVrTrail(color) {
   scene.add(mesh);
   return mesh;
 }
-const vrTrailL = makeVrTrail(COL_CYAN), vrTrailR = makeVrTrail(COL_MAG);
+const vrTrailL = makeVrTrail(COL_BLUE), vrTrailR = makeVrTrail(COL_RED);
 function pushVrTrail(ribbon, base, tip) {
   const a = ribbon.geometry.attributes.position.array;
   // Shift poses down by one (pose i <- pose i-1); copyWithin is overlap-safe.
@@ -695,7 +696,7 @@ function makeDebugCapsule(color) {
   const baseDot = new THREE.Mesh(dotGeo, dotMat); baseDot.visible = false; baseDot.renderOrder = 999; scene.add(baseDot);
   return { line, tipDot, baseDot };
 }
-const debugCapsuleL = makeDebugCapsule(COL_CYAN), debugCapsuleR = makeDebugCapsule(COL_MAG);
+const debugCapsuleL = makeDebugCapsule(COL_BLUE), debugCapsuleR = makeDebugCapsule(COL_RED);
 // Hitbox wireframes: pooled, assigned each frame to notes/bombs near the plane.
 const debugHitboxes = [];
 {
@@ -737,7 +738,7 @@ function updateDebugViz() {
     }
     for (const b of bombs) {
       if (!b.active || Math.abs(b.z - HIT_Z) > 1.2) continue;
-      place(b.grp.position.x, b.grp.position.y, b.grp.position.z, BOMB_R, 0xff2222);
+      place(b.grp.position.x, b.grp.position.y, b.grp.position.z, BOMB_R, 0xffaa00);
     }
   }
   for (; hi < debugHitboxes.length; hi++) debugHitboxes[hi].visible = false;
@@ -785,7 +786,7 @@ function drawScoreCell(l1, l2, l3) {
   g.lineTo(8 + r, 216); g.arcTo(8, 216, 8, 216 - r, 216 - r); g.arcTo(8, 216, 8, 216 - r, r);
   g.lineTo(8, 8 + r); g.arcTo(8, 8, 8 + r, 8, r); g.closePath();
   g.fillStyle = 'rgba(8,6,20,0.72)'; g.fill();
-  g.lineWidth = 5; g.strokeStyle = '#27e8ff'; g.stroke();
+  g.lineWidth = 5; g.strokeStyle = '#2f7fff'; g.stroke();
   g.textAlign = 'left';
   const fit = (txt, weight, px) => {
     let s = px;
@@ -793,7 +794,7 @@ function drawScoreCell(l1, l2, l3) {
     while (g.measureText(txt).width > 460 && s > 18) { s -= 2; g.font = weight + ' ' + s + 'px Arial'; }
   };
   fit(l1, '900', 52); g.fillStyle = '#ffffff'; g.fillText(l1, 26, 74);
-  fit(l2, '700', 34); g.fillStyle = '#27e8ff'; g.fillText(l2, 26, 128);
+  fit(l2, '700', 34); g.fillStyle = '#2f7fff'; g.fillText(l2, 26, 128);
   fit(l3, '700', 29); g.fillStyle = '#ffd319'; g.fillText(l3, 26, 182);
   scoreCellTex.needsUpdate = true;
 }
@@ -855,11 +856,11 @@ function drawMenu() {
   const g = menuCtx;
   g.clearRect(0, 0, 1024, 640);
   g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
-  g.strokeStyle = '#27e8ff'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.strokeStyle = '#2f7fff'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
   g.textAlign = 'center';
   g.font = '900 64px Arial';
   const grad = g.createLinearGradient(200, 0, 824, 0);
-  grad.addColorStop(0, '#27e8ff'); grad.addColorStop(0.55, '#2bff88'); grad.addColorStop(1, '#ff3df0');
+  grad.addColorStop(0, '#2f7fff'); grad.addColorStop(0.55, '#2bff88'); grad.addColorStop(1, '#ff2b2b');
   g.fillStyle = grad;
   g.fillText('RHYTHM SLICER', 512, 92);
   g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
@@ -893,7 +894,7 @@ function drawMenu() {
   g.fillText(best ? ('BEST ' + best.score.toLocaleString() + ' PTS · ' + best.accuracy + '% ACC · COMBO ' + best.maxCombo)
     : 'NO BEST YET FOR THIS LEVEL + DIFFICULTY', 512, 578);
   g.font = '400 20px Arial'; g.fillStyle = '#c9b8e8';
-  let foot = 'VR: slice cyan LEFT / magenta RIGHT — colors alternate sides, follow the color';
+  let foot = 'VR: slice blue LEFT / red RIGHT — colors alternate sides, follow the color';
   if (prefs.colorblind) foot += ' (circle = LEFT, triangle = RIGHT)';
   foot += ' · Any swing direction counts · Desktop: hold mouse + drag.';
   g.fillText(foot, 512, 608);
@@ -913,7 +914,7 @@ function drawResults() {
   g.font = '900 44px Arial'; g.fillStyle = '#ffffff'; g.textAlign = 'left';
   g.fillText('SCORE', 240, 230); g.fillText('MAX COMBO', 240, 292);
   g.fillText('ACCURACY', 240, 354); g.fillText('NOTES', 240, 416);
-  g.fillStyle = '#27e8ff'; g.textAlign = 'right';
+  g.fillStyle = '#2f7fff'; g.textAlign = 'right';
   g.fillText('' + score, 790, 230); g.fillText('' + maxCombo, 790, 292);
   g.fillText(acc + '%', 790, 354); g.fillText(notesHit + ' / ' + notesTotal, 790, 416);
   g.font = '700 28px Arial'; g.textAlign = 'center';
@@ -943,7 +944,7 @@ function drawPause() {
   const g = menuCtx;
   g.clearRect(0, 0, 1024, 640);
   g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
-  g.strokeStyle = '#27e8ff'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.strokeStyle = '#2f7fff'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
   g.textAlign = 'center';
   g.font = '900 64px Arial'; g.fillStyle = '#ffffff';
   g.fillText('PAUSED', 512, 96);
@@ -1493,8 +1494,8 @@ function makeEdgeFrameTexture() {
 const edgeFrameTex = makeEdgeFrameTexture();
 const noteGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
 const noteMats = {
-  left: new THREE.MeshStandardMaterial({ color: COL_CYAN, map: edgeFrameTex, emissive: COL_CYAN, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 }),
-  right: new THREE.MeshStandardMaterial({ color: COL_MAG, map: edgeFrameTex, emissive: COL_MAG, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 })
+  left: new THREE.MeshStandardMaterial({ color: COL_BLUE, map: edgeFrameTex, emissive: COL_BLUE, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 }),
+  right: new THREE.MeshStandardMaterial({ color: COL_RED, map: edgeFrameTex, emissive: COL_RED, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 })
 };
 const arrowGeo = new THREE.PlaneGeometry(0.22, 0.22);
 const notes = [];
@@ -1516,23 +1517,23 @@ for (let i = 0; i < 26; i++) {
   grp.add(shape);
   // Glow halo behind the cube so notes read earlier at distance. The valve
   // hides these at level 2 (they are pure decoration, never gameplay).
-  const nglow = glowSprite(COL_CYAN, 0.55, 0.45);
+  const nglow = glowSprite(COL_BLUE, 0.55, 0.45);
   nglow.position.z = -0.12;
   grp.add(nglow);
   grp.visible = false; scene.add(grp);
   notes.push({ grp, cube, arrow, shape, nglow, active: false, x: 0, y: 0, z: 0, vz: 0, hand: 'left', dir: -1, bomb: false, judged: false, hitTime: 0 });
 }
 const bombGeo = new THREE.SphereGeometry(0.19, 14, 12);
-const bombMat = new THREE.MeshStandardMaterial({ color: 0x1a1a22, metalness: 0.9, roughness: 0.3, emissive: 0xff2222, emissiveIntensity: 0.15 });
+const bombMat = new THREE.MeshStandardMaterial({ color: 0x1a1a22, metalness: 0.9, roughness: 0.3, emissive: 0xffaa00, emissiveIntensity: 0.15 });
 const ringGeo = new THREE.TorusGeometry(0.26, 0.03, 8, 24);
-const ringMat = new THREE.MeshBasicMaterial({ color: 0xff2222, toneMapped: false });
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, toneMapped: false });
 const bombs = [];
 for (let i = 0; i < 8; i++) {
   const grp = new THREE.Group();
   grp.add(new THREE.Mesh(bombGeo, bombMat));
   const ring = new THREE.Mesh(ringGeo, ringMat);
   grp.add(ring);
-  const glow = glowSprite(0xff2222, 0.7, 0.5);
+  const glow = glowSprite(0xffaa00, 0.7, 0.5);
   grp.add(glow);
   grp.visible = false; scene.add(grp);
   bombs.push({ grp, ring, active: false, x: 0, y: 0, z: 0, vz: 0, judged: false, spin: 0, hitTime: 0 });
@@ -1628,7 +1629,7 @@ function floatText(str, color, x, y, z) {
 // Screen flash: DOM overlay on desktop, camera-attached red quad in VR
 const flashEl = document.getElementById('flash');
 const flashQuad = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6),
-  new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+  new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
 flashQuad.position.set(0, 0, -1.2);
 camera.add(flashQuad);
 let flashAmt = 0;
@@ -1640,7 +1641,7 @@ function doFlash(a) {
 // ============================== prototype additions: approach markers, ring flashes, vignette, perf readout ==============================
 // Approach markers: one pulsing ring per lane at the hit plane, showing where
 // the next note in that lane will land (red ring = incoming bomb). The ring
-// takes the incoming note's HAND color (cyan = left hand, magenta = right
+// takes the incoming note's HAND color (blue = left hand, red = right
 // hand), not the lane's side — hands alternate sides since 2026-11-15.
 // Gameplay feedback, so the valve never hides these — they are only 4 meshes.
 const approachMarkers = [];
@@ -1682,7 +1683,7 @@ function updateApproachMarkers(now) {
     if (!ev || screen !== 'playing') { m.visible = false; continue; }
     const k = 1 - ev.tLeft / 0.9; // 0 far -> 1 at the plane
     m.visible = true;
-    m.material.color.setHex(ev.bomb ? 0xff2222 : (ev.hand === 'left' ? COL_CYAN : COL_MAG));
+    m.material.color.setHex(ev.bomb ? 0xffaa00 : (ev.hand === 'left' ? COL_BLUE : COL_RED));
     m.material.opacity = 0.25 + 0.65 * k;
     const s = 1.35 - 0.45 * k;
     m.scale.set(s, s, 1);
@@ -1786,8 +1787,8 @@ function buildChart(lv, di, baseTime, speed = 1) {
   const nBeats = Math.floor(lv.dur / (60 / lv.bpm)) - 1;
   // Alternating color/position patterns (2026-11-15, owner directive):
   // the two cube colors ALTERNATE sides — color tells the HAND, not the
-  // side. A cyan cube can come down a right lane (left hand crosses over)
-  // and a magenta cube down a left lane. Sequences vary: same-side pairs,
+  // side. A blue cube can come down a right lane (left hand crosses over)
+  // and a red cube down a left lane. Sequences vary: same-side pairs,
   // cross pairs, alternating hands on one side, short same-hand runs.
   // FAIRNESS RULES (hard, pinned by chart-pattern-tests.js):
   //  - Cross-body notes use ONLY the inner lanes (1 and 2), so every reach
@@ -1873,7 +1874,7 @@ function spawnNote(e) {
     n.active = true; n.judged = false; n.x = x; n.y = y; n.z = SPAWN_Z; n.vz = vz;
     n.hand = hand; n.dir = e.dir; n.bomb = false; n.hitTime = e.hitTime;
     n.cube.material = noteMats[hand];
-    n.nglow.material.color.setHex(hand === 'left' ? COL_CYAN : COL_MAG);
+    n.nglow.material.color.setHex(hand === 'left' ? COL_BLUE : COL_RED);
     n.nglow.visible = perfValve.glowsOn;
     if (prefs.colorblind) {
       n.shape.visible = true;
@@ -1957,10 +1958,10 @@ function resolveNoteSlice(n, hand, dirIdx) {
   score += gained;
   notesHit++;
   dbgHits++; // TEMPORARY diagnostic counter
-  const col = n.hand === 'left' ? '#27e8ff' : '#ff3df0';
+  const col = n.hand === 'left' ? '#2f7fff' : '#ff2b2b';
   floatText((perfect ? 'PERFECT +' : '+') + gained, perfect ? '#2bff88' : col, n.x, n.y + 0.35, n.z);
-  burst(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, Math.max(2, Math.round((perfect ? 18 : 12) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
-  ringFlash(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG);
+  burst(n.x, n.y, n.z, n.hand === 'left' ? COL_BLUE : COL_RED, Math.max(2, Math.round((perfect ? 18 : 12) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
+  ringFlash(n.x, n.y, n.z, n.hand === 'left' ? COL_BLUE : COL_RED);
   spawnHalves(n.x, n.y, n.z, n.hand, dirIdx);
   if (perfect) sfxPerfect(); else sfxSlice(combo, n.x);
   // Haptics on EVERY successful slice (Danny, 2026-11-15): a firm buzz the
@@ -1972,7 +1973,7 @@ function resolveBombHit(b, hand) {
   b.active = false; b.grp.visible = false;
   combo = 0; applyMult();
   score = Math.max(0, score - 50);
-  burst(b.x, b.y, b.z, 0xff2222, Math.max(2, Math.round(16 * perfValve.particleScale)), 3.5);
+  burst(b.x, b.y, b.z, 0xffaa00, Math.max(2, Math.round(16 * perfValve.particleScale)), 3.5);
   floatText('-50', '#ff5555', b.x, b.y + 0.4, b.z);
   doFlash(0.75);
   sfxBomb();
