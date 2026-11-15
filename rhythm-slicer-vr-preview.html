@@ -84,6 +84,26 @@
 <div id="flash"></div>
 <div id="dbg"></div>
 
+<script>
+// Boot watchdog (2026-11-14): the module sets window.__rsBooted when it
+// starts and window.__rsRendered after its first frame. If the 3D library
+// (loaded from a CDN) fails to arrive, the module never runs and the page
+// would otherwise sit silently on the title screen — this says so out loud
+// instead of leaving a black screen with no explanation.
+window.__rsBooted = false; window.__rsRendered = false;
+setTimeout(function () {
+  var st = document.getElementById('status');
+  if (!st) return;
+  if (!window.__rsBooted) {
+    st.textContent = 'The game did not start: the 3D library did not load. Check your connection, then reload this page.';
+    st.style.color = '#ff5a5a';
+  } else if (!window.__rsRendered) {
+    st.textContent = 'The game started but the 3D view is not drawing. Try reloading; if it repeats, tell Echo this exact message.';
+    st.style.color = '#ff5a5a';
+  }
+}, 8000);
+</script>
+
 <script type="module">
 // MARKER: RHYTHM-SLICER-V1
 // MARKER: RHYTHM-SLICER-V2
@@ -95,6 +115,7 @@
 // Everything here (art, music, names) is original: synth loops are generated
 // live with the Web Audio API, all meshes are procedural neon geometry.
 import * as THREE from 'three';
+window.__rsBooted = true; // boot watchdog (see inline script above the module)
 
 // ============================== helpers ==============================
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -2427,6 +2448,7 @@ function tick() {
   if (showPerfCell && clock.elapsedTime > perfDrawAt) { drawPerfCell(); perfDrawAt = clock.elapsedTime + 0.5; }
 
   renderer.render(scene, camera);
+  if (!window.__rsRendered) window.__rsRendered = true; // boot watchdog
 }
 renderer.setAnimationLoop(tick);
 
