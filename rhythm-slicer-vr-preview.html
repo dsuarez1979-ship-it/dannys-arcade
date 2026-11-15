@@ -51,6 +51,13 @@
     background:radial-gradient(ellipse at center, rgba(255,30,30,0.55) 0%, rgba(255,0,0,0.25) 60%, rgba(255,0,0,0) 100%);
     transition:opacity 0.08s linear;
   }
+  /* Temporary collision-debug readout (see updateDebugViz): hidden unless
+     ?debug=collision or the C key enables it. */
+  #dbg {
+    position:fixed; left:12px; bottom:12px; z-index:20; display:none;
+    background:rgba(0,0,0,.75); color:#2bff88; font:12px/1.5 monospace;
+    padding:6px 10px; border-radius:6px; pointer-events:none; white-space:pre;
+  }
 </style>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -62,9 +69,9 @@
   <div class="box">
     <h1>RHYTHM SLICER</h1>
     <div class="sub">Neon Rhythm Slice &middot; original rhythm-slicing &middot; PROTOTYPE</div>
-    <p class="small" style="color:#ffd319">Phase 2 prototype build — not the live version. New: pause menu, settings, practice mode, high scores.</p>
+    <p class="small" style="color:#ffd319">Phase 2 prototype build — not the live version. Overhaul: energy blades, rebuilt hit detection, cinematic arena.</p>
     <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
-    <p><b>VR:</b> slice the glowing cubes with the matching blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. On Normal/Hard, slice <b>in the arrow's direction</b>. Grab the bonus orbs, dodge the bombs.</p>
+    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#27e8ff">CYAN cubes = left hand</b>, <b style="color:#ff3df0">MAGENTA cubes = right hand</b>. On Normal/Hard, slice <b>in the arrow's direction</b>. Dodge the bombs.</p>
     <p><b>Desktop:</b> hold the mouse button and drag — your blade cuts any color. M mutes.</p>
     <p class="small">No lives, no game over, ever — misses and bombs only reset your combo. Every track is original synth, generated live in your browser.</p>
     <button id="vrBtn">ENTER VR</button>
@@ -75,6 +82,7 @@
 <div id="hud"><div id="hudL1">0 PTS · x1</div><div id="hudL2">COMBO 0 · MAX 0</div><div id="hudL3">LV1 · EASY</div></div>
 <button id="muteBtn">SOUND: ON</button>
 <div id="flash"></div>
+<div id="dbg"></div>
 
 <script type="module">
 // MARKER: RHYTHM-SLICER-V1
@@ -289,7 +297,8 @@ const _headV = new THREE.Vector3();
 let smoothHeadY = 1.6;
 
 // Lights: hemisphere base + two colored stage lights that pulse on the beat
-scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.8));
+const hemiLight = new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.8);
+scene.add(hemiLight);
 const stageL = new THREE.PointLight(0x27e8ff, 30, 30, 1.8);
 stageL.position.set(-4, 4, -4); scene.add(stageL);
 const stageR = new THREE.PointLight(0xff3df0, 30, 30, 1.8);
@@ -363,7 +372,7 @@ grid.position.y = 0;
 grid.material.transparent = true; grid.material.opacity = 0.4;
 scene.add(grid);
 
-// Stage: two light towers with pulsing glow orbs, plus a back arch
+// Stage: two light towers with pulsing glow sprites, plus a back arch
 const towerGlows = [];
 {
   const towerMat = new THREE.MeshBasicMaterial({ color: 0x0d0a24 });
@@ -384,6 +393,27 @@ const towerGlows = [];
   archGlow.position.set(0, 2.2, -16); scene.add(archGlow);
   archGlow.userData.base = 20;
   towerGlows.push(archGlow);
+  // Second, larger arch ring (overhaul 2026-11-14): depth layering.
+  const arch2 = new THREE.Mesh(new THREE.TorusGeometry(12, 0.14, 10, 48),
+    new THREE.MeshBasicMaterial({ color: COL_CYAN, toneMapped: false }));
+  arch2.position.set(0, 2.2, -22); scene.add(arch2);
+  const arch2Glow = glowSprite(COL_CYAN, 26, 0.14);
+  arch2Glow.position.set(0, 2.2, -22); scene.add(arch2Glow);
+  arch2Glow.userData.base = 26;
+  towerGlows.push(arch2Glow);
+}
+// Neon side pillars (overhaul 2026-11-14): beat-pulsed light columns framing
+// the play area. Two shared materials, pulsed by opacity in the tick.
+const pillarMats = [
+  new THREE.MeshBasicMaterial({ color: COL_CYAN, transparent: true, opacity: 0.55, toneMapped: false }),
+  new THREE.MeshBasicMaterial({ color: COL_MAG, transparent: true, opacity: 0.55, toneMapped: false })
+];
+{
+  const pillarGeo = new THREE.BoxGeometry(0.18, 6, 0.18);
+  for (const [sx, sz] of [[-3.2, -4], [-3.2, -8], [3.2, -4], [3.2, -8]]) {
+    const p = new THREE.Mesh(pillarGeo, pillarMats[sx < 0 ? 0 : 1]);
+    p.position.set(sx, 3, sz); scene.add(p);
+  }
 }
 
 // ============================== hit plane + lane guides ==============================
@@ -417,18 +447,96 @@ scene.add(strikeFrame);
     })));
   }
 }
+// Runway light strip (overhaul 2026-11-14): one additive plane on the floor
+// from spawn to the hit plane, magenta (far) → cyan (near) via vertex colors.
+{
+  const runLen = HIT_Z - SPAWN_Z; // 11.9 m
+  const rg = new THREE.PlaneGeometry(0.4, runLen, 1, 8);
+  const rp = rg.attributes.position;
+  const rc = new Float32Array(rp.count * 3);
+  const cFar = new THREE.Color(COL_MAG), cNear = new THREE.Color(COL_CYAN), cc = new THREE.Color();
+  for (let i = 0; i < rp.count; i++) {
+    // Local +Y maps to the FAR end after the -90° X rotation, so invert t:
+    // 0 = far (magenta), 1 = near (cyan).
+    const t = 0.5 - rp.getY(i) / runLen;
+    cc.copy(cFar).lerp(cNear, t);
+    rc[i * 3] = cc.r; rc[i * 3 + 1] = cc.g; rc[i * 3 + 2] = cc.b;
+  }
+  rg.setAttribute('color', new THREE.BufferAttribute(rc, 3));
+  const runway = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending,
+    depthWrite: false, toneMapped: false
+  }));
+  runway.rotation.x = -Math.PI / 2;
+  runway.position.set(0, 0.02, (SPAWN_Z + HIT_Z) / 2);
+  scene.add(runway);
+}
 
-// ============================== VR controllers + neon blades ==============================
-// Left hand = CYAN blade, right hand = MAGENTA blade. Original blade design:
-// simple glowing blade bar on a dark grip — no borrowed likeness.
+// ============================== VR controllers + energy blades ==============================
+// Left hand = CYAN blade, right hand = MAGENTA blade. The blade colors MATCH
+// the note/lane colors — color-matching is the core mechanic — so the palette
+// stays cyan/magenta even though the owner directive said "red/blue":
+// recoloring the blades alone would break the color match. A full red/blue
+// retheme (notes + lanes + UI) is an owner decision, not taken here.
+// Energy-blade design (overhaul 2026-11-14): 1.0 m visible blade, white-hot
+// core + colored mid layer + soft additive outer shell + glow sprites —
+// layered geometry, NOT full-screen bloom (forbidden on Quest 2).
+// BLADES ATTACH BY HANDEDNESS, NOT BY CONTROLLER INDEX (fix 2026-11-14):
+// getController(0/1) enumerate in session order, which is NOT guaranteed to
+// be left-then-right — attaching bladeL to getController(0) could put the
+// cyan blade in the right hand while the collision system treats that hand
+// as 'right', turning every correct-color swing into WRONG BLADE. Each blade
+// is parented to its controller only once the 'connected' event reports the
+// handedness, so the visible blade, the collision capsule, and the hand
+// identity always agree. (If a controller disconnects, its blade stays
+// parented to the dead group but is hidden by the visibility rule below.)
+const BLADE_LEN = 1.0;      // visible blade length (m) — target range 0.9–1.1
+const BLADE_BASE_Z = -0.07; // blade starts here (local z); tip at -1.07
+// Shared handle materials (PBR standard materials, lit by the scene lights).
+const gripMat = new THREE.MeshStandardMaterial({ color: 0x2a2d34, metalness: 0.9, roughness: 0.35 });
+const gripDarkMat = new THREE.MeshStandardMaterial({ color: 0x14151c, metalness: 0.85, roughness: 0.45 });
+const bladeCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+function buildBlade(color) {
+  const g = new THREE.Group();
+  // --- Handle: metallic grip + band + pommel + glowing emitter ring ---
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.025, 0.15, 12), gripMat);
+  grip.rotation.x = Math.PI / 2; grip.position.z = 0.015; g.add(grip);
+  const gripBand = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.02, 12), gripDarkMat);
+  gripBand.rotation.x = Math.PI / 2; gripBand.position.z = 0.075; g.add(gripBand);
+  const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.02, 0.025, 12), gripMat);
+  pommel.rotation.x = Math.PI / 2; pommel.position.z = 0.1; g.add(pommel);
+  const emitter = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.008, 8, 20),
+    new THREE.MeshBasicMaterial({ color, toneMapped: false }));
+  emitter.position.z = BLADE_BASE_Z; g.add(emitter);
+  // --- Blade: layered cylinders, center at base - LEN/2 ---
+  const midZ = BLADE_BASE_Z - BLADE_LEN / 2;
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, BLADE_LEN, 10), bladeCoreMat);
+  core.rotation.x = Math.PI / 2; core.position.z = midZ; g.add(core);
+  const mid = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, BLADE_LEN, 12),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, toneMapped: false }));
+  mid.rotation.x = Math.PI / 2; mid.position.z = midZ; g.add(mid);
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, BLADE_LEN, 12),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  shell.rotation.x = Math.PI / 2; shell.position.z = midZ; g.add(shell);
+  // Rounded tip cap (hemisphere, dome toward -Z).
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.021, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color, toneMapped: false }));
+  cap.rotation.x = -Math.PI / 2; cap.position.z = BLADE_BASE_Z - BLADE_LEN; g.add(cap);
+  // Glow sprites: bright at the tip, soft along the blade.
+  const tip = glowSprite(color, 0.4, 0.9); tip.position.z = BLADE_BASE_Z - BLADE_LEN; g.add(tip);
+  const edge = glowSprite(color, 0.55, 0.3); edge.position.z = midZ; g.add(edge);
+  g.visible = false;
+  return g;
+}
+const bladeL = buildBlade(COL_CYAN), bladeR = buildBlade(COL_MAG);
 const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
 let rightCtl = null, leftCtl = null;
 [ctlL, ctlR].forEach(c => {
   c.addEventListener('connected', e => {
     c.userData.handedness = e.data.handedness;
     c.userData.connected = true;
-    if (e.data.handedness === 'right') rightCtl = c;
-    if (e.data.handedness === 'left') leftCtl = c;
+    if (e.data.handedness === 'right') { rightCtl = c; c.add(bladeR); }
+    if (e.data.handedness === 'left') { leftCtl = c; c.add(bladeL); }
   });
   c.addEventListener('disconnected', () => {
     c.userData.connected = false;
@@ -437,21 +545,6 @@ let rightCtl = null, leftCtl = null;
   });
   scene.add(c);
 });
-function buildBlade(color) {
-  const g = new THREE.Group();
-  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.16, 10),
-    new THREE.MeshBasicMaterial({ color: 0x11111c }));
-  grip.rotation.x = Math.PI / 2; grip.position.z = 0.02; g.add(grip);
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.62),
-    new THREE.MeshBasicMaterial({ color, toneMapped: false }));
-  blade.position.z = -0.38; g.add(blade);
-  const tip = glowSprite(color, 0.34, 0.9); tip.position.z = -0.70; g.add(tip);
-  const edge = glowSprite(color, 0.5, 0.35); edge.position.z = -0.38; g.add(edge);
-  g.visible = false;
-  return g;
-}
-const bladeL = buildBlade(COL_CYAN), bladeR = buildBlade(COL_MAG);
-ctlL.add(bladeL); ctlR.add(bladeR);
 // Blade tip trackers: world position of the blade tip this frame and last frame
 const tipPrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
 const tipCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
@@ -461,62 +554,89 @@ const sliceCd = { left: 0, right: 0, desk: 0 };
 // transform as the rendered blade mesh — no offset between seen and colliding.
 const basePrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
 const baseCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
-// V2: controller world-position tracking. Blade velocity comes from the
-// CONTROLLER's world translation (clean signal), not the amplified tip —
-// the tip still drives the slice proximity test and the visible trail.
-const ctlPrev = { left: new THREE.Vector3(), right: new THREE.Vector3() };
-const ctlCur  = { left: new THREE.Vector3(), right: new THREE.Vector3() };
-const ctlVel  = { left: new THREE.Vector3(), right: new THREE.Vector3() };
-const ctlInit = { left: false, right: false };
-function trackController(key, ctl, dt) {
-  ctlPrev[key].copy(ctlCur[key]);
-  ctlCur[key].setFromMatrixPosition(ctl.matrixWorld);
-  if (!ctlInit[key]) { ctlInit[key] = true; ctlVel[key].set(0, 0, 0); return; }
-  if (dt > 0) ctlVel[key].copy(ctlCur[key]).sub(ctlPrev[key]).divideScalar(dt);
-  else ctlVel[key].set(0, 0, 0);
+// Mid-blade velocity — the speed-gate + direction signal. ROOT-CAUSE FIX
+// (2026-11-14): the old gate used the CONTROLLER's translational velocity.
+// During a wrist flick — the natural rhythm-game swing — the controller
+// translates ~0.3 m/s while the blade tip sweeps ~7 m/s, so the 1.5 m/s gate
+// never opened and EVERY strike read MISS (proven in a headless simulation
+// of the verbatim collision code: wrist flick, tip 0.067 m from the note
+// center, 11 frames in the zone, gate open 0 frames). The mid-blade point
+// (base+tip)/2 captures both translation AND rotation, with half the noise
+// amplification of the tip. The desktop path already used tip speed — the VR
+// path was the inconsistent one.
+const bladeVel = { left: new THREE.Vector3(), right: new THREE.Vector3() };
+const bladeInit = { left: false, right: false };
+const _midPrev = new THREE.Vector3(), _midCur = new THREE.Vector3();
+function trackBlade(key, dt) {
+  _midPrev.copy(basePrev[key]).add(tipPrev[key]).multiplyScalar(0.5);
+  _midCur.copy(baseCur[key]).add(tipCur[key]).multiplyScalar(0.5);
+  if (!bladeInit[key]) { bladeInit[key] = true; bladeVel[key].set(0, 0, 0); return; }
+  if (dt > 0) bladeVel[key].copy(_midCur).sub(_midPrev).divideScalar(dt);
+  else bladeVel[key].set(0, 0, 0);
 }
-// V2: per-hand VR blade trails (the old build only had a desktop trail, so in
-// VR there was no visible feedback of swing direction at all).
-const V_TRAIL_N = 24;
+function vrBladeSpeed(key) { return bladeVel[key].length(); }
+// V2 (overhaul 2026-11-14): ribbon trails — a triangle strip swept by the
+// WHOLE blade (base→tip), last 14 poses, vertex colors fading blade-color
+// → black. Additive blending makes black read as transparent. 2 meshes,
+// 26 triangles each. Opacity is speed-gated in the tick (fades out at rest).
+const V_TRAIL_N = 14;
 function makeVrTrail(color) {
   const geo = new THREE.BufferGeometry();
-  const arr = new Float32Array(V_TRAIL_N * 3);
-  for (let i = 0; i < V_TRAIL_N; i++) arr[i * 3 + 1] = -999;
-  geo.setAttribute('position', new THREE.BufferAttribute(arr, 3).setUsage(THREE.DynamicDrawUsage));
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-    color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+  const pos = new Float32Array(V_TRAIL_N * 2 * 3);
+  const col = new Float32Array(V_TRAIL_N * 2 * 3);
+  const c = new THREE.Color(color);
+  for (let i = 0; i < V_TRAIL_N; i++) {
+    pos[i * 6 + 1] = -999; pos[i * 6 + 4] = -999; // both verts of pose i offscreen
+    const f = 1 - i / (V_TRAIL_N - 1); // 1 at the blade, 0 at the tail
+    const fade = f * f; // quadratic falloff
+    col[i * 6] = c.r * fade; col[i * 6 + 1] = c.g * fade; col[i * 6 + 2] = c.b * fade;
+    col[i * 6 + 3] = c.r * fade; col[i * 6 + 4] = c.g * fade; col[i * 6 + 5] = c.b * fade;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const idx = [];
+  for (let i = 0; i < V_TRAIL_N - 1; i++) {
+    const a = i * 2, b = a + 1, d = a + 2, e = a + 3;
+    idx.push(a, b, d, b, e, d);
+  }
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending,
+    depthWrite: false, side: THREE.DoubleSide, toneMapped: false
   }));
-  line.frustumCulled = false; line.visible = false;
-  scene.add(line);
-  return line;
+  mesh.frustumCulled = false; mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
 }
 const vrTrailL = makeVrTrail(COL_CYAN), vrTrailR = makeVrTrail(COL_MAG);
-function pushVrTrail(line, p) {
-  const a = line.geometry.attributes.position.array;
-  for (let i = V_TRAIL_N - 1; i > 0; i--) {
-    a[i * 3] = a[(i - 1) * 3]; a[i * 3 + 1] = a[(i - 1) * 3 + 1]; a[i * 3 + 2] = a[(i - 1) * 3 + 2];
-  }
-  a[0] = p.x; a[1] = p.y; a[2] = p.z;
-  line.geometry.attributes.position.needsUpdate = true;
+function pushVrTrail(ribbon, base, tip) {
+  const a = ribbon.geometry.attributes.position.array;
+  // Shift poses down by one (pose i <- pose i-1); copyWithin is overlap-safe.
+  a.copyWithin(6, 0, (V_TRAIL_N - 1) * 6);
+  a[0] = base.x; a[1] = base.y; a[2] = base.z;
+  a[3] = tip.x; a[4] = tip.y; a[5] = tip.z;
+  ribbon.geometry.attributes.position.needsUpdate = true;
 }
 function resetVrTrails() {
-  for (const line of [vrTrailL, vrTrailR]) {
-    const a = line.geometry.attributes.position.array;
-    for (let i = 0; i < V_TRAIL_N; i++) { a[i * 3] = 0; a[i * 3 + 1] = -999; a[i * 3 + 2] = 0; }
-    line.geometry.attributes.position.needsUpdate = true;
+  for (const ribbon of [vrTrailL, vrTrailR]) {
+    const a = ribbon.geometry.attributes.position.array;
+    for (let i = 0; i < V_TRAIL_N; i++) { a[i * 6 + 1] = -999; a[i * 6 + 4] = -999; }
+    ribbon.geometry.attributes.position.needsUpdate = true;
   }
 }
-const _tipLocal = new THREE.Vector3(0, 0, -0.70);
+// MUST stay a numeric literal: the collision regression tests read TIP_LEN
+// from this line by regex. Tip = BLADE_BASE_Z - BLADE_LEN = -0.07 - 1.0.
+const _tipLocal = new THREE.Vector3(0, 0, -1.07);
 const _ctlQ = new THREE.Quaternion();
 function controllerTip(ctl, out) {
   ctl.getWorldQuaternion(_ctlQ);
   out.setFromMatrixPosition(ctl.matrixWorld);
-  _tipLocal.set(0, 0, -0.70).applyQuaternion(_ctlQ);
+  _tipLocal.set(0, 0, -1.07).applyQuaternion(_ctlQ);
   out.add(_tipLocal);
   return out;
 }
 // V3: world position of the blade BASE (local z=-0.07, where the visible
-// blade box starts). Same transform chain as controllerTip — the capsule
+// energy blade starts). Same transform chain as controllerTip — the capsule
 // base->tip matches the rendered mesh exactly.
 const _baseLocal = new THREE.Vector3(0, 0, -0.07);
 function controllerBase(ctl, out) {
@@ -525,6 +645,87 @@ function controllerBase(ctl, out) {
   _baseLocal.set(0, 0, -0.07).applyQuaternion(_ctlQ);
   out.add(_baseLocal);
   return out;
+}
+
+// ============================== TEMPORARY collision debug visualization ==============================
+// Diagnostic aid for the 2026-11-14 MISS investigation. Enable with the URL
+// ?debug=collision, or press C on desktop. Shows, per hand, the collision
+// capsule axis (the exact segment bladeHits tests — compare it against the
+// visible blade), wireframe hitboxes on notes/bombs near the hit plane, and
+// live blade speeds with the gate threshold. This is NOT part of the shipped
+// game feel and stays OFF unless explicitly enabled. Safe to delete once the
+// collision system is validated on the headset.
+let debugCollision = false;
+try { debugCollision = new URLSearchParams(window.location.search).has('debug'); } catch (e) { /* no URL API: stays off */ }
+const dbgEl = document.getElementById('dbg');
+function makeDebugCapsule(color) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, toneMapped: false, depthTest: false, transparent: true, opacity: 0.95 }));
+  line.frustumCulled = false; line.visible = false; line.renderOrder = 999;
+  scene.add(line);
+  const dotGeo = new THREE.SphereGeometry(0.03, 8, 6);
+  const dotMat = new THREE.MeshBasicMaterial({ color, toneMapped: false, depthTest: false, transparent: true, opacity: 0.95 });
+  const tipDot = new THREE.Mesh(dotGeo, dotMat); tipDot.visible = false; tipDot.renderOrder = 999; scene.add(tipDot);
+  const baseDot = new THREE.Mesh(dotGeo, dotMat); baseDot.visible = false; baseDot.renderOrder = 999; scene.add(baseDot);
+  return { line, tipDot, baseDot };
+}
+const debugCapsuleL = makeDebugCapsule(COL_CYAN), debugCapsuleR = makeDebugCapsule(COL_MAG);
+// Hitbox wireframes: pooled, assigned each frame to notes/bombs near the plane.
+const debugHitboxes = [];
+{
+  const hbGeo = new THREE.SphereGeometry(1, 10, 8);
+  for (let i = 0; i < 8; i++) {
+    const m = new THREE.Mesh(hbGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.6, toneMapped: false, depthTest: false }));
+    m.visible = false; m.renderOrder = 998; scene.add(m);
+    debugHitboxes.push(m);
+  }
+}
+let _dbgLast = 0;
+function updateDebugViz() {
+  const on = debugCollision;
+  const showCapsule = (dc, key, ctl) => {
+    const vis = on && !!ctl;
+    dc.line.visible = vis; dc.tipDot.visible = vis; dc.baseDot.visible = vis;
+    if (!vis) return;
+    const p = dc.line.geometry.attributes.position.array;
+    p[0] = baseCur[key].x; p[1] = baseCur[key].y; p[2] = baseCur[key].z;
+    p[3] = tipCur[key].x; p[4] = tipCur[key].y; p[5] = tipCur[key].z;
+    dc.line.geometry.attributes.position.needsUpdate = true;
+    dc.tipDot.position.copy(tipCur[key]);
+    dc.baseDot.position.copy(baseCur[key]);
+  };
+  showCapsule(debugCapsuleL, 'left', leftCtl);
+  showCapsule(debugCapsuleR, 'right', rightCtl);
+  let hi = 0;
+  if (on) {
+    const place = (x, y, z, r, color) => {
+      if (hi >= debugHitboxes.length) return;
+      const m = debugHitboxes[hi++];
+      m.visible = true;
+      m.position.set(x, y, z); m.scale.set(r, r, r);
+      m.material.color.setHex(color);
+    };
+    for (const n of notes) {
+      if (!n.active || Math.abs(n.z - HIT_Z) > 1.2) continue;
+      place(n.grp.position.x, n.grp.position.y, n.grp.position.z, NOTE_R, 0xffffff);
+    }
+    for (const b of bombs) {
+      if (!b.active || Math.abs(b.z - HIT_Z) > 1.2) continue;
+      place(b.grp.position.x, b.grp.position.y, b.grp.position.z, BOMB_R, 0xff2222);
+    }
+  }
+  for (; hi < debugHitboxes.length; hi++) debugHitboxes[hi].visible = false;
+  // DOM readout (desktop + 2D preview): live blade speeds + gate state.
+  // The VR perf cell shows the same speeds when debug is on (drawPerfCell).
+  if (on) {
+    dbgEl.style.display = 'block';
+    const now = performance.now();
+    if (now - _dbgLast > 250) {
+      _dbgLast = now;
+      dbgEl.textContent = 'BLADE L ' + vrBladeSpeed('left').toFixed(2) + ' m/s · R ' + vrBladeSpeed('right').toFixed(2) + ' m/s (gate 1.50)\nHITS ' + dbgHits + ' · MISS ' + dbgMiss + '\nC toggles debug viz';
+    }
+  } else dbgEl.style.display = 'none';
 }
 
 // Aim laser for the 3D menu (visible only on menu/results screens in VR)
@@ -686,21 +887,20 @@ function drawResults() {
   const acc = notesTotal > 0 ? Math.round(100 * notesHit / notesTotal) : 0;
   g.font = '900 44px Arial'; g.fillStyle = '#ffffff'; g.textAlign = 'left';
   g.fillText('SCORE', 240, 230); g.fillText('MAX COMBO', 240, 292);
-  g.fillText('ACCURACY', 240, 354); g.fillText('NOTES', 240, 416); g.fillText('ORBS', 240, 478);
+  g.fillText('ACCURACY', 240, 354); g.fillText('NOTES', 240, 416);
   g.fillStyle = '#27e8ff'; g.textAlign = 'right';
   g.fillText('' + score, 790, 230); g.fillText('' + maxCombo, 790, 292);
   g.fillText(acc + '%', 790, 354); g.fillText(notesHit + ' / ' + notesTotal, 790, 416);
-  g.fillText('' + orbsSliced, 790, 478);
   g.font = '700 28px Arial'; g.textAlign = 'center';
   if (prefs.practice) {
     g.fillStyle = '#c9b8e8';
-    g.fillText('PRACTICE RUN — SCORES NOT SAVED', 512, 508);
+    g.fillText('PRACTICE RUN — SCORES NOT SAVED', 512, 478);
   } else if (lastResult && lastResult.isBest) {
     g.fillStyle = '#2bff88';
-    g.fillText('★ NEW BEST! ★', 512, 508);
+    g.fillText('★ NEW BEST! ★', 512, 478);
   } else if (lastResult && lastResult.prevBest) {
     g.fillStyle = '#ffd319';
-    g.fillText('BEST: ' + lastResult.prevBest.score.toLocaleString() + ' PTS', 512, 508);
+    g.fillText('BEST: ' + lastResult.prevBest.score.toLocaleString() + ' PTS', 512, 478);
   }
   menuButtons = [];
   let bx = 112;
@@ -740,7 +940,9 @@ function drawPause() {
   // The EMA holds the last ACTIVE-PLAY average while paused (menu/paused
   // frames are not fed to it), and FB is the XR layer's real framebuffer
   // size — 'n/a' on desktop, where no XR layer exists.
-  g.fillText('PERF ' + perfValve.ema.toFixed(1) + 'ms AVG (PLAY) · VALVE L' + perfValve.level + ' · FB ' + xrLayerSize(), 512, 584);
+  let perfLine = 'PERF ' + perfValve.ema.toFixed(1) + 'ms AVG (PLAY) · VALVE L' + perfValve.level + ' · FB ' + xrLayerSize();
+  if (debugCollision) perfLine += ' · HITS ' + dbgHits + ' · MISS ' + dbgMiss; // TEMPORARY diagnostic
+  g.fillText(perfLine, 512, 584);
   g.fillStyle = '#c9b8e8';
   g.fillText('B/Y or Esc to resume · Trigger to choose', 512, 614);
   menuTex.needsUpdate = true;
@@ -870,8 +1072,8 @@ function quitToMenu() {
   levelActive = false;
   for (const n of notes) { n.active = false; n.grp.visible = false; }
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
-  for (const o of orbs) { o.active = false; o.m.visible = false; }
   for (const t of texts) { t.life = 0; t.sp.visible = false; }
+  resetHalves();
   hideApproachMarkers();
   screen = 'menu';
   menuPlane.visible = true;
@@ -1030,20 +1232,30 @@ const audioSys = {
   get endTime() { return this.baseTime + this.totalSteps * this.stepDur; },
 };
 // One-shot SFX (all synthesized)
-function sfxSlice(comboN) {
+function sfxSlice(comboN, x = 0) {
   if (!audioSys.ctx || audioSys.muted) return;
   const t = audioSys.now, c = audioSys.ctx;
+  // Stereo pan by slice position so the impact sits where the cube was.
+  const pan = c.createStereoPanner ? c.createStereoPanner() : null;
+  if (pan) { pan.pan.value = clamp(x / 1.2, -1, 1); pan.connect(audioSys.sfxBus); }
+  const out = pan || audioSys.sfxBus;
   const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
   const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 1.2;
   const g = c.createGain();
   g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-  n.connect(f); f.connect(g); g.connect(audioSys.sfxBus); n.start(t); n.stop(t + 0.13);
+  n.connect(f); f.connect(g); g.connect(out); n.start(t); n.stop(t + 0.13);
   const o = c.createOscillator(), g2 = c.createGain();
   o.type = 'sine';
   const p = 620 + Math.min(comboN, 60) * 9;
   o.frequency.setValueAtTime(p, t); o.frequency.exponentialRampToValueAtTime(p * 1.6, t + 0.09);
   g2.gain.setValueAtTime(0.22, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-  o.connect(g2); g2.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.11);
+  o.connect(g2); g2.connect(out); o.start(t); o.stop(t + 0.11);
+  // Deeper thunk layer: the impact body under the slice shimmer.
+  const o3 = c.createOscillator(), g3 = c.createGain();
+  o3.type = 'sine';
+  o3.frequency.setValueAtTime(180, t); o3.frequency.exponentialRampToValueAtTime(60, t + 0.1);
+  g3.gain.setValueAtTime(0.32, t); g3.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  o3.connect(g3); g3.connect(out); o3.start(t); o3.stop(t + 0.13);
 }
 function sfxPerfect() {
   if (!audioSys.ctx || audioSys.muted) return;
@@ -1087,15 +1299,6 @@ function sfxBomb() {
   g2.gain.setValueAtTime(0.55, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
   o.connect(g2); g2.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.47);
 }
-function sfxOrb() {
-  if (!audioSys.ctx || audioSys.muted) return;
-  const t = audioSys.now, c = audioSys.ctx;
-  const o = c.createOscillator(), g = c.createGain();
-  o.type = 'sine';
-  o.frequency.setValueAtTime(1180, t); o.frequency.exponentialRampToValueAtTime(1900, t + 0.12);
-  g.gain.setValueAtTime(0.2, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-  o.connect(g); g.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.15);
-}
 function sfxClick() {
   if (!audioSys.ctx || audioSys.muted) return;
   const t = audioSys.now, c = audioSys.ctx;
@@ -1105,11 +1308,101 @@ function sfxClick() {
   o.connect(g); g.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.06);
 }
 
+// ============================== blade hum, whoosh, spatial listener (overhaul 2026-11-14) ==============================
+// Per-blade hum: a low sawtooth through a lowpass, spatialized with an HRTF
+// panner at the blade midpoint, gain tied to blade speed (quiet at rest).
+// The oscillators are created once and left running with gain 0 when idle —
+// no start/stop churn. They route through the SFX bus, so mute/volume work.
+const bladeHum = { left: null, right: null }; // { osc, gain, pan }
+function ensureBladeHums() {
+  if (!audioSys.ctx) return;
+  for (const key of ['left', 'right']) {
+    if (bladeHum[key]) continue;
+    const c = audioSys.ctx;
+    const osc = c.createOscillator(); osc.type = 'sawtooth';
+    osc.frequency.value = key === 'left' ? 55 : 65;
+    const flt = c.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = 320; flt.Q.value = 0.7;
+    const gain = c.createGain(); gain.gain.value = 0;
+    const pan = c.createPanner(); pan.panningModel = 'HRTF'; pan.distanceModel = 'inverse';
+    pan.refDistance = 0.5; pan.maxDistance = 8; pan.rolloffFactor = 1;
+    osc.connect(flt); flt.connect(gain); gain.connect(pan); pan.connect(audioSys.sfxBus);
+    osc.start();
+    bladeHum[key] = { osc, gain, pan };
+  }
+}
+function updateBladeHums() {
+  if (!bladeHum.left || !bladeHum.right) ensureBladeHums();
+  const active = presenting && screen === 'playing' && audioSys.ctx && !audioSys.muted;
+  for (const key of ['left', 'right']) {
+    const h = bladeHum[key]; if (!h) continue;
+    const ctl = key === 'left' ? leftCtl : rightCtl;
+    if (!active || !ctl) { h.gain.gain.setTargetAtTime(0, audioSys.now, 0.05); continue; }
+    const speed = vrBladeSpeed(key);
+    h.gain.gain.setTargetAtTime(0.012 + Math.min(1, speed / 6) * 0.05, audioSys.now, 0.06);
+    _midCur.copy(baseCur[key]).add(tipCur[key]).multiplyScalar(0.5);
+    if (h.pan.positionX) { h.pan.positionX.value = _midCur.x; h.pan.positionY.value = _midCur.y; h.pan.positionZ.value = _midCur.z; }
+    else h.pan.setPosition(_midCur.x, _midCur.y, _midCur.z);
+  }
+}
+// Whoosh: edge-triggered when a blade's speed crosses 2.5 m/s upward, with a
+// per-hand cooldown and a re-arm below 1.5 m/s (so one swing = one whoosh).
+const whooshCd = { left: 0, right: 0 };
+const whooshArmed = { left: true, right: true };
+function maybeWhoosh(key) {
+  if (!audioSys.ctx || audioSys.muted || screen !== 'playing') return;
+  const speed = vrBladeSpeed(key);
+  if (speed < 1.5) { whooshArmed[key] = true; return; }
+  if (!whooshArmed[key] || speed < 2.5) return;
+  const now = audioSys.now;
+  if (now - whooshCd[key] < 0.18) return;
+  whooshArmed[key] = false; whooshCd[key] = now;
+  const c = audioSys.ctx, t = now;
+  const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
+  const f = c.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.0;
+  f.frequency.setValueAtTime(400, t); f.frequency.exponentialRampToValueAtTime(1800, t + 0.14);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+  const pan = c.createStereoPanner ? c.createStereoPanner() : null;
+  n.connect(f); f.connect(g);
+  if (pan) { pan.pan.value = clamp(tipCur[key].x / 1.2, -1, 1); g.connect(pan); pan.connect(audioSys.sfxBus); }
+  else g.connect(audioSys.sfxBus);
+  n.start(t); n.stop(t + 0.24);
+}
+// Keep the Web Audio listener on the headset (position + orientation) so the
+// HRTF panners spatialize correctly. Best-effort: never throws.
+const _lisPos = new THREE.Vector3(), _lisQuat = new THREE.Quaternion();
+const _lisFwd = new THREE.Vector3(), _lisUp = new THREE.Vector3();
+function updateAudioListener() {
+  if (!presenting || !audioSys.ctx) return;
+  try {
+    const l = audioSys.ctx.listener;
+    camera.getWorldPosition(_lisPos);
+    camera.getWorldQuaternion(_lisQuat);
+    _lisFwd.set(0, 0, -1).applyQuaternion(_lisQuat);
+    _lisUp.set(0, 1, 0).applyQuaternion(_lisQuat);
+    if (l.positionX) {
+      l.positionX.value = _lisPos.x; l.positionY.value = _lisPos.y; l.positionZ.value = _lisPos.z;
+      l.forwardX.value = _lisFwd.x; l.forwardY.value = _lisFwd.y; l.forwardZ.value = _lisFwd.z;
+      l.upX.value = _lisUp.x; l.upY.value = _lisUp.y; l.upZ.value = _lisUp.z;
+    } else {
+      l.setPosition(_lisPos.x, _lisPos.y, _lisPos.z);
+      l.setOrientation(_lisFwd.x, _lisFwd.y, _lisFwd.z, _lisUp.x, _lisUp.y, _lisUp.z);
+    }
+  } catch (e) { /* listener update is best-effort */ }
+}
+
 // ============================== game state ==============================
 let score = 0, combo = 0, maxCombo = 0, mult = 1;
-let notesHit = 0, notesTotal = 0, orbsSliced = 0;
+let notesHit = 0, notesTotal = 0;
+// TEMPORARY HIT/MISS diagnostic counter (owner request 2026-11-14, for the
+// headset retest of the MISS fix): counts scored slices (HITS) and notes
+// that passed the boundary unhit (MISS) separately, per run. Displayed only
+// when the collision debug viz is on (perf cell, pause line, DOM readout).
+// Remove together with the debug visualization once validated.
+let dbgHits = 0, dbgMiss = 0;
 let beatPulse = 0;
-let chart = [], orbEvents = [], chartIdx = 0, orbIdx = 0;
+let chart = [], chartIdx = 0;
 let levelActive = false;
 let levelSpeed = 1;   // 1 = full tempo, 0.65 = practice mode
 let curTravel = 1.4;  // effective note travel time for the current run
@@ -1145,8 +1438,29 @@ const shapeTex = [];
 }
 
 // ============================== object pools (zero per-frame allocation) ==============================
+// Edge-frame texture for the note cubes: dark glassy base + bright frame.
+// Used as both map and emissiveMap on the standard materials, so the cube
+// edges glow in the hand color with ZERO extra draw calls.
+function makeEdgeFrameTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 8, 64, 64, 90);
+  gr.addColorStop(0, '#3d3d52'); gr.addColorStop(0.7, '#23232f'); gr.addColorStop(1, '#101018');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 12; g.lineJoin = 'round';
+  g.strokeRect(8, 8, 112, 112);
+  g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 3;
+  g.strokeRect(22, 22, 84, 84);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const edgeFrameTex = makeEdgeFrameTexture();
 const noteGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-const noteMats = { left: new THREE.MeshBasicMaterial({ color: COL_CYAN }), right: new THREE.MeshBasicMaterial({ color: COL_MAG }) };
+const noteMats = {
+  left: new THREE.MeshStandardMaterial({ color: COL_CYAN, map: edgeFrameTex, emissive: COL_CYAN, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 }),
+  right: new THREE.MeshStandardMaterial({ color: COL_MAG, map: edgeFrameTex, emissive: COL_MAG, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 })
+};
 const arrowGeo = new THREE.PlaneGeometry(0.22, 0.22);
 const notes = [];
 for (let i = 0; i < 26; i++) {
@@ -1174,7 +1488,7 @@ for (let i = 0; i < 26; i++) {
   notes.push({ grp, cube, arrow, shape, nglow, active: false, x: 0, y: 0, z: 0, vz: 0, hand: 'left', dir: -1, bomb: false, judged: false, hitTime: 0 });
 }
 const bombGeo = new THREE.SphereGeometry(0.19, 14, 12);
-const bombMat = new THREE.MeshBasicMaterial({ color: 0x14141c });
+const bombMat = new THREE.MeshStandardMaterial({ color: 0x1a1a22, metalness: 0.9, roughness: 0.3, emissive: 0xff2222, emissiveIntensity: 0.15 });
 const ringGeo = new THREE.TorusGeometry(0.26, 0.03, 8, 24);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xff2222, toneMapped: false });
 const bombs = [];
@@ -1188,19 +1502,8 @@ for (let i = 0; i < 8; i++) {
   grp.visible = false; scene.add(grp);
   bombs.push({ grp, ring, active: false, x: 0, y: 0, z: 0, vz: 0, judged: false, spin: 0, hitTime: 0 });
 }
-const orbGeo = new THREE.SphereGeometry(0.16, 14, 12);
-const ORB_COLORS = [0xffd319, 0xff71ce, 0x2bff88, 0x27e8ff, 0xff9e4f];
-const orbs = [];
-for (let i = 0; i < 6; i++) {
-  const mat = new THREE.MeshBasicMaterial({ color: ORB_COLORS[i % ORB_COLORS.length] });
-  const m = new THREE.Mesh(orbGeo, mat);
-  const glow = glowSprite(ORB_COLORS[i % ORB_COLORS.length], 0.6, 0.7);
-  m.add(glow);
-  m.visible = false; scene.add(m);
-  orbs.push({ m, mat, active: false, t: 0, x0: 0, x1: 0, y0: 1.6, judged: false });
-}
 // Particles (slice bursts): pooled additive sprites
-const PMAX = 64;
+const PMAX = 96;
 const pGeo = new THREE.BufferGeometry();
 const pPos = new Float32Array(PMAX * 3);
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
@@ -1224,6 +1527,47 @@ function burst(x, y, z, color, count, speed) {
     pLife[k] = 0.55;
   }
 }
+// Cube splitting (overhaul 2026-11-14): pooled halves that fly apart on a
+// scored slice. 12 halves = up to 6 simultaneous splits; each half reuses
+// the note materials (no new materials, no per-slice allocation). The split
+// axis is perpendicular to the slice direction in the XY plane.
+const halfGeo = new THREE.BoxGeometry(0.15, 0.3, 0.3);
+const halves = [];
+for (let i = 0; i < 12; i++) {
+  const m = new THREE.Mesh(halfGeo, noteMats.left);
+  m.visible = false; scene.add(m);
+  halves.push({ m, life: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0 });
+}
+let halfHead = 0;
+function spawnHalves(x, y, z, hand, dirIdx) {
+  const dv = DIR_VECS[dirIdx] || DIR_VECS[0];
+  const px = -dv.y, py = dv.x; // split axis, perpendicular to the swing
+  const ang = Math.atan2(py, px); // align the half's thin axis with the split
+  for (let s = -1; s <= 1; s += 2) {
+    const h = halves[halfHead]; halfHead = (halfHead + 1) % halves.length;
+    h.m.material = noteMats[hand];
+    h.m.position.set(x + px * s * 0.08, y + py * s * 0.08, z);
+    h.m.rotation.set(0, 0, ang);
+    h.m.scale.set(1, 1, 1);
+    h.m.visible = true;
+    h.life = 0.5;
+    h.vx = px * s * 1.6; h.vy = py * s * 1.6 - 0.4; h.vz = 0.6 + Math.random() * 0.4;
+    h.rx = (Math.random() - 0.5) * 8; h.ry = (Math.random() - 0.5) * 8;
+  }
+}
+function updateHalves(sdt) {
+  for (const h of halves) {
+    if (h.life <= 0) continue;
+    h.life -= sdt;
+    if (h.life <= 0) { h.m.visible = false; continue; }
+    h.m.position.x += h.vx * sdt; h.m.position.y += h.vy * sdt; h.m.position.z += h.vz * sdt;
+    h.vy -= 3.5 * sdt; // slight gravity
+    h.m.rotation.x += h.rx * sdt; h.m.rotation.y += h.ry * sdt;
+    const s = Math.max(0.01, h.life / 0.5);
+    h.m.scale.set(s, s, s);
+  }
+}
+function resetHalves() { for (const h of halves) { h.life = 0; h.m.visible = false; } }
 // Floating hit text: pooled canvas sprites
 const texts = [];
 for (let i = 0; i < 10; i++) {
@@ -1365,11 +1709,11 @@ const vignette = (() => {
 // layer's actual framebuffer size. This is a measurement display, not a
 // performance claim — Quest 2 numbers come only from the owner's headset.
 const perfCanvas = document.createElement('canvas');
-perfCanvas.width = 512; perfCanvas.height = 96;
+perfCanvas.width = 512; perfCanvas.height = 144; // 1 line normally, 3 lines in debug mode
 const perfCtx = perfCanvas.getContext('2d');
 const perfTex = new THREE.CanvasTexture(perfCanvas);
 perfTex.colorSpace = THREE.SRGBColorSpace;
-const perfCell = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.09),
+const perfCell = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.14),
   new THREE.MeshBasicMaterial({ map: perfTex, transparent: true, toneMapped: false }));
 perfCell.position.set(0.55, -0.75, -1.5);
 perfCell.visible = false;
@@ -1377,11 +1721,23 @@ camera.add(perfCell);
 let perfDrawAt = 0;
 function drawPerfCell() {
   const g = perfCtx;
-  g.clearRect(0, 0, 512, 96);
-  g.fillStyle = 'rgba(8,6,20,0.72)'; g.fillRect(0, 0, 512, 96);
-  g.strokeStyle = '#2bff88'; g.lineWidth = 3; g.strokeRect(3, 3, 506, 90);
-  g.font = '700 30px Arial'; g.textAlign = 'left'; g.fillStyle = '#ffffff';
-  g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 16, 60);
+  g.clearRect(0, 0, 512, 144);
+  g.fillStyle = 'rgba(8,6,20,0.72)'; g.fillRect(0, 0, 512, 144);
+  g.strokeStyle = '#2bff88'; g.lineWidth = 3; g.strokeRect(3, 3, 506, 138);
+  g.textAlign = 'left'; g.fillStyle = '#ffffff';
+  if (debugCollision) {
+    // Debug mode: three lines — perf, live blade speeds (the speed-gate
+    // diagnostic; gate is 1.50 m/s), and the TEMPORARY HIT/MISS counter.
+    g.font = '700 26px Arial';
+    g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 16, 36);
+    g.fillStyle = '#2bff88';
+    g.fillText('BLADE L ' + vrBladeSpeed('left').toFixed(2) + ' · R ' + vrBladeSpeed('right').toFixed(2) + ' m/s', 16, 76);
+    g.fillStyle = '#7CFF6B';
+    g.fillText('HITS ' + dbgHits + '   ·   MISS ' + dbgMiss, 16, 116);
+  } else {
+    g.font = '700 30px Arial';
+    g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 16, 88);
+  }
   perfTex.needsUpdate = true;
 }
 
@@ -1419,14 +1775,7 @@ function buildChart(lv, di, baseTime, speed = 1) {
     }
   }
   evts.sort((a, b2) => a.hitTime - b2.hitTime);
-  // Bonus orbs: independent of the beat grid, every 3.5–6s (stretched by practice speed)
-  const orbsE = [];
-  let ot = baseTime + 3;
-  while (ot < baseTime + lv.dur / speed - 3) {
-    orbsE.push({ time: ot, x0: (rng() - 0.5) * 1.4, x1: (rng() - 0.5) * 1.4, color: ORB_COLORS[Math.floor(rng() * ORB_COLORS.length)] });
-    ot += (3.5 + rng() * 2.5) / speed;
-  }
-  return { evts, orbsE };
+  return evts;
 }
 function spawnNote(e) {
   const diff = DIFFS[selDiff];
@@ -1466,16 +1815,6 @@ function spawnNote(e) {
     notesTotal++;
   }
 }
-function spawnOrb(e) {
-  const o = orbs.find(q => !q.active);
-  if (!o) return;
-  o.active = true; o.judged = false; o.t = 0; o.x0 = e.x0; o.x1 = e.x1;
-  o.y0 = smoothHeadY; // V2: arc origin anchored to eye level
-  o.mat.color.setHex(e.color);
-  o.m.children[0].material.color.setHex(e.color);
-  o.m.visible = true;
-}
-
 // ============================== slicing ==============================
 const _bd = new THREE.Vector3();
 function bladeDir(key, dt) {
@@ -1489,23 +1828,26 @@ function bladeSpeed(key, dt) {
   if (dt <= 0) return 0;
   return tipCur[key].distanceTo(tipPrev[key]) / dt;
 }
-// V2: VR slice direction = dominant axis of the controller's WORLD velocity,
-// projected onto the plane perpendicular to the player's view direction
-// (camera world quaternion). Returns 0=up,1=right,2=down,3=left, -1=indeterminate.
+// VR slice direction = dominant axis of the MID-BLADE velocity, projected
+// onto the plane perpendicular to the player's view direction (camera world
+// quaternion). Returns 0=up,1=right,2=down,3=left, -1=indeterminate. Uses the
+// same mid-blade signal as the speed gate: controller translation is too weak
+// during a wrist flick to give a direction at all (same root cause as the
+// 2026-11-14 MISS bug — a flick's controller velocity is ~0.3 m/s, below the
+// 0.4 direction threshold, so every flick read "no clear direction").
 const _sv = new THREE.Vector3(), _camQ = new THREE.Quaternion();
 const _vRight = new THREE.Vector3(), _vUp = new THREE.Vector3();
 function sliceDirIndex(key) {
   camera.getWorldQuaternion(_camQ);
   _vRight.set(1, 0, 0).applyQuaternion(_camQ);
   _vUp.set(0, 1, 0).applyQuaternion(_camQ);
-  _sv.copy(ctlVel[key]);
+  _sv.copy(bladeVel[key]);
   const px = _sv.dot(_vRight), py = _sv.dot(_vUp);
   const ax = Math.abs(px), ay = Math.abs(py);
   if (Math.max(ax, ay) < 0.4) return -1; // straight thrust: no clear direction
   if (ax > ay) return px > 0 ? 1 : 3;
   return py > 0 ? 0 : 2;
 }
-function vrBladeSpeed(key) { return ctlVel[key].length(); }
 // Snap a 2D direction vector to the dominant axis (desktop path).
 function snapDir2D(bdir) {
   const ax = Math.abs(bdir.x), ay = Math.abs(bdir.y);
@@ -1553,11 +1895,13 @@ function resolveNoteSlice(n, hand, dirIdx) {
     const gained = pts * mult;
     score += gained;
     notesHit++;
+    dbgHits++; // TEMPORARY diagnostic counter
     const col = n.hand === 'left' ? '#27e8ff' : '#ff3df0';
     floatText((perfect ? 'PERFECT +' : '+') + gained, perfect ? '#2bff88' : col, n.x, n.y + 0.35, n.z);
-    burst(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, Math.max(2, Math.round((perfect ? 14 : 10) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
+    burst(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG, Math.max(2, Math.round((perfect ? 18 : 12) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
     ringFlash(n.x, n.y, n.z, n.hand === 'left' ? COL_CYAN : COL_MAG);
-    if (perfect) sfxPerfect(); else sfxSlice(combo);
+    spawnHalves(n.x, n.y, n.z, n.hand, dirIdx);
+    if (perfect) sfxPerfect(); else sfxSlice(combo, n.x);
     if (hand === 'left' || hand === 'right') pulseHaptics(hand, perfect ? 0.9 : 0.6, perfect ? 90 : 60);
   } else if (tag) {
     floatText(tag, '#ffd319', n.x, n.y + 0.35, n.z);
@@ -1576,25 +1920,19 @@ function resolveBombHit(b, hand) {
   else { pulseHaptics('left', 0.7, 120); pulseHaptics('right', 0.7, 120); }
   updateScoreboard();
 }
-function resolveOrbSlice(o, hand) {
-  o.active = false; o.judged = true; o.m.visible = false;
-  const gained = 50 * mult;
-  score += gained;
-  orbsSliced++;
-  floatText('+' + gained, '#ffd319', o.m.position.x, o.m.position.y + 0.3, o.m.position.z);
-  burst(o.m.position.x, o.m.position.y, o.m.position.z, 0xffd319, Math.max(2, Math.round(6 * perfValve.particleScale)), 1.8);
-  sfxOrb();
-  if (hand === 'left' || hand === 'right') pulseHaptics(hand, 0.4, 50);
-  updateScoreboard();
-}
-// V3: hit registration — the blade collides as a CAPSULE from base to tip
-// (same world transform as the rendered blade mesh, no offset), tested as
-// sphere-vs-segment at both the previous and current frame so fast swings
-// can't tunnel through notes. Speed gate + direction judgment are unchanged.
+// Hit registration — CONTINUOUS SWEPT blade collision (2026-11-14 overhaul).
+// The blade collides as a capsule from base to tip (same world transform as
+// the rendered blade mesh, no offset). The capsule is tested at 5 poses
+// interpolated between the previous and current frame, so a fast swing cannot
+// tunnel through a note between frames even on a 50 ms hitch frame. The old
+// code tested only the two endpoint poses; the swept test is strictly more
+// correct and costs 5 segment tests per candidate — only run for notes/bombs
+// inside the strike zone while the speed gate is open. Speed gate +
+// direction judgment are unchanged in threshold (1.5 m/s / 0.4 m/s) but now
+// use mid-blade velocity (see trackBlade) instead of controller translation.
 const BLADE_R = 0.25;  // generous capsule radius around the visible blade
 const NOTE_R = 0.20;   // ~1.3x the note cube's visual half-size
 const BOMB_R = 0.25;
-const ORB_R = 0.25;
 // Adjustable hit window (Settings): scales the strike-zone depth and the
 // PERFECT timing band. With audio-clock note positioning, the spatial zone
 // IS a timing window, so the two stay consistent. Practice mode always uses
@@ -1620,19 +1958,29 @@ function segPointDist2(ax, ay, az, bx, by, bz, px, py, pz) {
   const dx = px - (ax + _ab.x * t), dy = py - (ay + _ab.y * t), dz = pz - (az + _ab.z * t);
   return dx * dx + dy * dy + dz * dz;
 }
-// True if the blade capsule (at prev or current frame) touches a sphere of
-// radius r centered at (px,py,pz). Desktop's blade is a point, so its capsule
-// degenerates to a tip sphere there.
+// True if the blade capsule — SWEPT from its previous-frame pose to its
+// current-frame pose — touches a sphere of radius r centered at (px,py,pz).
+// The sweep is sampled at 5 interpolated poses; linear interpolation
+// undercuts the true rotational arc by <2 mm at 72 Hz, far below the capsule
+// radius. Desktop's blade is a point, so its capsule degenerates to a swept
+// sphere there.
 function bladeHits(key, px, py, pz, r) {
   const rr = (BLADE_R + r) * (BLADE_R + r);
-  const A = baseCur[key], B = tipCur[key];
-  if (segPointDist2(A.x, A.y, A.z, B.x, B.y, B.z, px, py, pz) < rr) return true;
-  const C = basePrev[key], D = tipPrev[key];
-  return segPointDist2(C.x, C.y, C.z, D.x, D.y, D.z, px, py, pz) < rr;
+  const bp = basePrev[key], bc = baseCur[key], tp = tipPrev[key], tc = tipCur[key];
+  for (let s = 0; s <= 4; s++) {
+    const t = s * 0.25;
+    const ax = bp.x + (bc.x - bp.x) * t, ay = bp.y + (bc.y - bp.y) * t, az = bp.z + (bc.z - bp.z) * t;
+    const bx = tp.x + (tc.x - tp.x) * t, by = tp.y + (tc.y - tp.y) * t, bz = tp.z + (tc.z - tp.z) * t;
+    if (segPointDist2(ax, ay, az, bx, by, bz, px, py, pz) < rr) return true;
+  }
+  return false;
 }
 function trySlice(key, hand, dt) {
-  // V2: VR uses controller world velocity (speed gate ~1.5 m/s so drifting
-  // through a stationary blade never counts); desktop keeps its tip path.
+  // VR uses MID-BLADE velocity (speed gate 1.5 m/s so drifting through a
+  // stationary blade never counts); desktop keeps its tip path. The gate
+  // MUST use blade motion, not controller translation — a wrist flick moves
+  // the controller ~0.3 m/s while the blade sweeps ~7 m/s (2026-11-14 MISS
+  // root cause: the old controller-velocity gate never opened).
   const isDesk = key === 'desk';
   const spd = isDesk ? bladeSpeed(key, dt) : vrBladeSpeed(key);
   if (spd < 1.5 || sliceCd[key] > 0) return;
@@ -1650,12 +1998,6 @@ function trySlice(key, hand, dt) {
     const bp = b.grp.position;
     if (bladeHits(key, bp.x, bp.y, bp.z, BOMB_R)) { b.judged = true; sliceCd[key] = 0.08; resolveBombHit(b, hand); return; }
   }
-  // Orbs anywhere along their arc
-  for (const o of orbs) {
-    if (!o.active || o.judged) continue;
-    const op = o.m.position;
-    if (bladeHits(key, op.x, op.y, op.z, ORB_R)) { sliceCd[key] = 0.08; resolveOrbSlice(o, hand); return; }
-  }
 }
 
 // ============================== level flow ==============================
@@ -1667,17 +2009,18 @@ function startLevel() {
   prefs.level = selLevel; prefs.diff = selDiff; savePrefs();
   // Reset state
   score = 0; combo = 0; maxCombo = 0; mult = 1;
-  notesHit = 0; notesTotal = 0; orbsSliced = 0;
+  notesHit = 0; notesTotal = 0;
+  dbgHits = 0; dbgMiss = 0; // TEMPORARY diagnostic counter, per run
   for (const n of notes) { n.active = false; n.grp.visible = false; }
   for (const b of bombs) { b.active = false; b.grp.visible = false; }
-  for (const o of orbs) { o.active = false; o.m.visible = false; }
   for (const t of texts) { t.life = 0; t.sp.visible = false; }
+  resetHalves();
   resetVrTrails();
-  ctlInit.left = false; ctlInit.right = false;
+  bladeInit.left = false; bladeInit.right = false;
   audioSys.startLevel(lv, levelSpeed);
-  const built = buildChart(lv, selDiff, audioSys.baseTime, levelSpeed);
-  chart = built.evts; orbEvents = built.orbsE;
-  chartIdx = 0; orbIdx = 0;
+  ensureBladeHums(); // hum oscillators (created once; gain-gated in tick)
+  chart = buildChart(lv, selDiff, audioSys.baseTime, levelSpeed);
+  chartIdx = 0;
   screen = 'playing';
   perfWarmup = 0.75; // load/compilation hitches are not gameplay frame time
   resyncDeskBlade(); // stale blade history would fake a supersonic swing
@@ -1728,8 +2071,8 @@ function mouseBladePoint() {
 // speed gate compares tipCur to tipPrev, and the history is NOT updated
 // while paused or in the menu — so a mouse move across a pause used to look
 // like a supersonic swing on the first playing frame, defeating the gate
-// and letting the RESUME click itself slice an orb (+50, no combo —
-// desktop check 2026-11-14). Called on level start and on resume.
+// and letting the RESUME click itself register a phantom slice (desktop
+// check 2026-11-14). Called on level start and on resume.
 function resyncDeskBlade() {
   if (!mouseSeen) return;
   mouseBladePoint();
@@ -1768,6 +2111,7 @@ function setMuted(m) {
 muteBtn.addEventListener('click', () => { audioSys.ensure(); setMuted(!audioSys.muted); });
 window.addEventListener('keydown', e => {
   if (e.key === 'm' || e.key === 'M') { audioSys.ensure(); setMuted(!audioSys.muted); }
+  else if (e.key === 'c' || e.key === 'C') { debugCollision = !debugCollision; updateDebugViz(); }
   else if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
     if (screen === 'playing') pauseGame();
     else if (screen === 'paused') resumeGame();
@@ -1858,6 +2202,7 @@ vrBtn.addEventListener('click', async () => {
     hidePanel();
     menuPlane.visible = true;
     perfValve.reset();
+    bladeInit.left = false; bladeInit.right = false; // stale blade history would fake a velocity spike
     // Re-entering after an auto-pause restores the pause menu, not the menu.
     if (screen === 'paused') { drawPause(); }
     else { screen = 'menu'; drawMenu(); audioSys.resume(); }
@@ -1870,6 +2215,7 @@ vrBtn.addEventListener('click', async () => {
       hidePanel();
       menuPlane.visible = true;
       perfValve.reset();
+      bladeInit.left = false; bladeInit.right = false; // stale blade history would fake a velocity spike
       if (screen === 'paused') { drawPause(); }
       else { screen = 'menu'; drawMenu(); audioSys.resume(); }
       session.addEventListener('end', () => { if (levelActive && screen === 'playing') pauseGame(); showPanel(); vrBtn.disabled = false; });
@@ -1923,6 +2269,8 @@ function tick() {
   grid.material.opacity = 0.3 + 0.45 * beatPulse;
   stageL.intensity = 20 + 45 * beatPulse;
   stageR.intensity = 20 + 45 * beatPulse;
+  hemiLight.intensity = 0.8 + 0.2 * beatPulse;
+  for (const pm of pillarMats) pm.opacity = 0.55 + 0.45 * beatPulse;
   for (let i = 0; i < towerGlows.length; i++) {
     const tg = towerGlows[i];
     const s = 1 + beatPulse * 0.35;
@@ -1939,14 +2287,16 @@ function tick() {
     if (leftCtl) {
       tipPrev.left.copy(tipCur.left); controllerTip(leftCtl, tipCur.left);
       basePrev.left.copy(baseCur.left); controllerBase(leftCtl, baseCur.left);
-      trackController('left', leftCtl, dt);
-      pushVrTrail(vrTrailL, tipCur.left);
+      trackBlade('left', dt);
+      pushVrTrail(vrTrailL, baseCur.left, tipCur.left);
+      vrTrailL.material.opacity = 0.9 * Math.min(1, vrBladeSpeed('left') / 1.5);
     }
     if (rightCtl) {
       tipPrev.right.copy(tipCur.right); controllerTip(rightCtl, tipCur.right);
       basePrev.right.copy(baseCur.right); controllerBase(rightCtl, baseCur.right);
-      trackController('right', rightCtl, dt);
-      pushVrTrail(vrTrailR, tipCur.right);
+      trackBlade('right', dt);
+      pushVrTrail(vrTrailR, baseCur.right, tipCur.right);
+      vrTrailR.material.opacity = 0.9 * Math.min(1, vrBladeSpeed('right') / 1.5);
     }
     vrTrailL.visible = screen === 'playing' && !!leftCtl && perfValve.trailsOn;
     vrTrailR.visible = screen === 'playing' && !!rightCtl && perfValve.trailsOn;
@@ -1957,6 +2307,10 @@ function tick() {
       if (leftCtl) trySlice('left', handL, dt);
       if (rightCtl) trySlice('right', handR, dt);
     }
+    updateAudioListener();
+    updateBladeHums();
+    maybeWhoosh('left');
+    maybeWhoosh('right');
   } else if (screen === 'playing' && mouseSeen) {
     tipPrev.desk.copy(tipCur.desk);
     mouseBladePoint();
@@ -1980,6 +2334,7 @@ function tick() {
     trailLine.visible = false;
   }
   for (const k of ['left', 'right', 'desk']) sliceCd[k] = Math.max(0, sliceCd[k] - dt);
+  updateDebugViz(); // no-op visuals when debug is off (all debug objects hidden)
 
   // Level simulation (frozen while paused)
   if (levelActive && audioSys.ctx && !frozen) {
@@ -1990,9 +2345,6 @@ function tick() {
       const e = chart[chartIdx];
       if (e.hitTime > now - 0.5) spawnNote(e); // skip notes we fell too far behind on
       chartIdx++;
-    }
-    while (orbIdx < orbEvents.length && orbEvents[orbIdx].time - now <= 0.05) {
-      spawnOrb(orbEvents[orbIdx]); orbIdx++;
     }
     // Move notes/bombs; misses break combo (never end the run)
     for (const n of notes) {
@@ -2009,6 +2361,7 @@ function tick() {
       if (n.z >= HIT_Z + 0.65) {
         n.active = false; n.grp.visible = false;
         combo = 0; applyMult();
+        dbgMiss++; // TEMPORARY diagnostic counter
         floatText('MISS', '#8a8f9e', n.x, n.y + 0.35, HIT_Z);
         sfxMiss();
         updateScoreboard();
@@ -2023,18 +2376,6 @@ function tick() {
       const pulse = 1 + Math.sin(now * 10) * 0.15;
       b.ring.scale.set(pulse, pulse, 1);
       if (b.z >= HIT_Z + 0.45) { b.active = false; b.grp.visible = false; }
-    }
-    // Orbs arc; expired orbs vanish silently (no combo break)
-    for (const o of orbs) {
-      if (!o.active) continue;
-      o.t += dt * levelSpeed / 1.15;
-      if (o.t >= 1) { o.active = false; o.m.visible = false; continue; }
-      const t = o.t;
-      o.m.position.set(
-        lerp(o.x0, o.x1, t),
-        o.y0 - 1.3 + 1.9 * Math.sin(Math.PI * t),
-        -2.2 + 1.0 * Math.sin(Math.PI * t)
-      );
     }
     updateApproachMarkers(now);
     // Track end -> results (no fail state ever)
@@ -2058,6 +2399,9 @@ function tick() {
   // Ring flashes
   updateRingFlashes(sdt);
 
+  // Cube split halves
+  updateHalves(sdt);
+
   // Floating text
   for (const t of texts) {
     if (t.life <= 0) continue;
@@ -2078,7 +2422,7 @@ function tick() {
   scoreCell.visible = presenting && screen === 'playing';
   // Comfort vignette + frame-time readout follow their toggles
   vignette.visible = presenting && screen === 'playing' && prefs.vignette;
-  const showPerfCell = presenting && prefs.showPerf;
+  const showPerfCell = presenting && (prefs.showPerf || debugCollision);
   perfCell.visible = showPerfCell;
   if (showPerfCell && clock.elapsedTime > perfDrawAt) { drawPerfCell(); perfDrawAt = clock.elapsedTime + 0.5; }
 
