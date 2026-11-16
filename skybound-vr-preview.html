@@ -146,9 +146,12 @@ setTimeout(function () {
 // is NOT live. A premium VR flying adventure for Meta Quest 2 standalone
 // browser (WebXR). Everything here (art, music, names) is original: the
 // world of Aeralis, the golden solwing Aurea, and Solmere Vale are invented
-// for this game. Meshes are procedural geometry except Aurea, who is a
-// Blender-built GLB (assets/skybound/aurea-solwing.glb, Worker B1) with
-// the procedural bird below as the fallback; three surface textures are
+// for this game. Aurea is a Blender-built GLB (assets/skybound/aurea-solwing-v2.glb,
+// realism rebuild v2 — v1 kept in the library as history) with
+// the procedural bird below as the fallback; the world modules are
+// Blender-built GLBs too (mountains, valley terrain, forest B-trees, clouds,
+// water, landmarks, lumenwood — the realism rebuild R1–R7), each swapping in
+// over a procedural fallback; three surface textures are
 // licensed CC0 (Poly Haven) — see the asset register. All sound is WebAudio
 // synthesis, and the unpkg Three.js r160 links (core + addons, same pinned
 // version) are the only external dependency. Single-player only. No game-over path, no fail state.
@@ -1101,12 +1104,14 @@ function updateEnvMap() {
 
 // ============================== environment ==============================
 // Scene 1 — the mountain valley: Sunspire Perch overlooking Solmere Vale.
-// Draw-call budget (code-derived, Round 3): terrain 1, river 1, ridge
-// rings 1 (5 rings merged), clouds 1, conifers 2, broadleafs 2,
-// undergrowth 1, rocks 1, waterfalls 1, mist 1 (all falls, one Points
-// cloud), birds 1 (merged flock — valley/canyon/seabirds/moongliders),
-// hero peaks 1, perch 1, blob shadows 1 (E4), valley mist 1 (E7),
-// light shafts 1 (E8) = 18 meshes for the valley. Foam (E7) is
+// Draw-call budget (code-derived, Round 3, updated for the realism
+// rebuild): terrain 1, river 1, ridge rings 1, clouds 1, conifers 2,
+// broadleafs 2, undergrowth 1, rocks 1, waterfalls 1, mist 1 (all falls,
+// one Points cloud), birds 1 (merged flock — valley/canyon/seabirds/
+// moongliders), hero peaks 1, blob shadows 1 (E4), valley mist 1 (E7),
+// light shafts 1 (E8) = 17 meshes for the valley (was 18 — the perch
+// platform is gone, replaced by the always-visible R6 landmarks mesh, and
+// the R3 B-trees add 2 more in the GLB world). Foam (E7) is
 // always-visible (1 call, counted under always-visible).
 // The canyon / ocean / forest add their own (see their builders); region
 // culling keeps only the nearby ones visible (see updateRegionVisibility).
@@ -1121,6 +1126,22 @@ const regionDefs = [
   { name: 'ocean', cx: 0, cz: -3700, activeR: 1900, silR: 3200, detail: [], silhouette: [] }, // T2: 4500 -> 3200 (the sea horizon is kept from the canyon mouth northward; from the south valley the ocean sits behind the canyon walls anyway)
   { name: 'forest', cx: 2100, cz: -300, activeR: 1500, silR: 2600, detail: [], silhouette: [] },
 ];
+// Ocean occlusion gate (perf phase, Nov 16 2026): the sea + its dressing
+// are hidden by the ridge-ring curtains from inside the ring system —
+// PROVEN, not assumed (skybound-realism-rebuild-2026-11-16/
+// ocean-visibility-solver.mjs: 46,224 rays from every point with d_O<3200
+// and r<2300 at altitudes floor/200/380 m to 72 sea/isle/stack/glitter
+// targets, 0 visible; ring 2300's top is >=435 m everywhere — above the
+// 380 m flight ceiling — so no sight line from inside can clear it).
+// The gate lifts exactly where the player passes ring 2300, so the sea
+// appears as the curtain is passed (no pop). A blanket silR cut would be
+// WRONG: from east/west/south of the sea (r>2300) the water is visible
+// from 400 m away, and the gate keeps it on there. The ocean CLOUD mesh
+// is exempt (see updateRegionState): it carries the two southern canyon
+// mist banks (z=-1900/-2300), which sit INSIDE the ring system and must
+// stay visible from the canyon. Saves 4 draw calls at the positional max
+// (57 -> 53 mono) and up to 8 in the canyon mouth, zero visual loss.
+const OCEAN_GATE_R = 2300; // outermost ridge-ring radius (makeRidgeRing)
 const regionActive = { valley: true, canyon: false, ocean: false, forest: false };
 function regionDef(name) { for (const r of regionDefs) if (r.name === name) return r; return regionDefs[0]; }
 let worldTime = 0;
@@ -1413,6 +1434,7 @@ function buildEnvironment() {
     new THREE.MeshStandardMaterial({ vertexColors: true, map: terrDetail, roughness: 0.95, metalness: 0 }));
   scene.add(terrainMesh);
   regionDef('valley').silhouette.push(terrainMesh);
+  worldAnim.terrainProc = terrainMesh; // Realism rebuild (R2): stashed for the GLB terrain swap (loadGlbWorld)
 
   // --- River: a ribbon following the carved channel, scrolling shimmer ---
   const riverCv = document.createElement('canvas'); riverCv.width = 128; riverCv.height = 128;
@@ -1454,6 +1476,7 @@ function buildEnvironment() {
     new THREE.MeshStandardMaterial({ map: riverTex, color: 0x9fd4e8, roughness: 0.18, metalness: 0.1, transparent: true, opacity: 0.94 }));
   scene.add(riverMesh);
   regionDef('valley').silhouette.push(riverMesh);
+  worldAnim.riverProc = riverMesh; // Realism rebuild (R5): stashed for the GLB water swap (loadGlbWorld)
 
   // --- Distant mountain ranges: five layered ridge rings, ONE merged mesh ---
   // E2: MeshLambertMaterial (cheap, responds to the sun/hemi) instead of
@@ -1468,6 +1491,7 @@ function buildEnvironment() {
   ]), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true }));
   scene.add(ringsMesh);
   regionDef('valley').silhouette.push(ringsMesh);
+  worldAnim.ringsProc = ringsMesh; // Realism rebuild (R1): stashed for the GLB mountains swap (loadGlbWorld)
 
   // --- Clouds: instanced flattened puffs, mostly BELOW the perch ---
   // E1: smooth shading (the icosahedron's built-in radial normals — no
@@ -1578,6 +1602,7 @@ function buildEnvironment() {
   scene.add(trunkMesh); scene.add(canopyMesh);
   regionDef('valley').detail.push(trunkMesh, canopyMesh);
   worldAnim.coniferProc = { trunk: trunkMesh, canopy: canopyMesh }; // Blender world (B2): stashed for the GLB tree swap (loadGlbWorld)
+  worldAnim.coniferSpots = treeSpots; // Realism rebuild (R3): spot list reused by the B-tree placement (same spots, every 3rd one)
 
   // --- Rocks: instanced boulders on the slopes (licensed rock texture, Phase 2) ---
   // E3: 130 -> 200 instances; the extra 70 are outcrops placed on steep
@@ -1620,16 +1645,13 @@ function buildEnvironment() {
   // --- Crownpeaks: five hero mountains beyond the terrain edge (Phase 2) ---
   // Displaced cones with snow caps, merged into one mesh. They stand clear
   // of the canyon mouth (north) and the forest approach (east) corridors.
-  const peakDefs = [
-    { x: 950, z: -680, r: 260, h: 420 }, { x: 1500, z: -1650, r: 220, h: 380 },
-    { x: 820, z: 920, r: 280, h: 460 }, { x: -250, z: 1280, r: 240, h: 400 },
-    { x: -1250, z: -350, r: 260, h: 430 },
-  ];
+  // PEAK_DEFS is top-level (next to the other world placement defs): the
+  // procedural build and the R1 GLB placement share the one table.
   const peakGeos = [];
   const pkRng = mulberry32(31337);
   const cRockP = new THREE.Color(0x6f6258), cRockP2 = new THREE.Color(0x8a7a68),
         cSnowP = new THREE.Color(0xeef2f5), cTmpP = new THREE.Color();
-  for (const pd of peakDefs) {
+  for (const pd of PEAK_DEFS) {
     const g = new THREE.ConeGeometry(pd.r, pd.h, 9, 4);
     const pp = g.attributes.position;
     const pCols = new Float32Array(pp.count * 3);
@@ -1656,6 +1678,7 @@ function buildEnvironment() {
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }));
   scene.add(peaksMesh);
   regionDef('valley').silhouette.push(peaksMesh);
+  worldAnim.peaksProc = peaksMesh; // Realism rebuild (R1): stashed for the GLB mountains swap (loadGlbWorld)
 
   // --- Broadleaf sunleaf trees (Phase 2): a second tree type for the
   // meadows and river flats — instanced trunks + rounded canopies ---
@@ -1701,6 +1724,7 @@ function buildEnvironment() {
   scene.add(blTrunk); scene.add(blCanopy);
   regionDef('valley').detail.push(blTrunk, blCanopy);
   worldAnim.broadleafProc = { trunk: blTrunk, canopy: blCanopy }; // Blender world (B2): stashed for the GLB tree swap (loadGlbWorld)
+  worldAnim.broadleafSpots = blSpots; // Realism rebuild (R3): spot list reused by the B-tree placement (same spots, every 3rd one)
 
   // --- Blob shadows (E4): one instanced mesh of soft dark discs under every
   // valley tree — the grounding that real shadow maps would give, for 1
@@ -1885,41 +1909,16 @@ function buildEnvironment() {
   worldAnim.shaftMat = shaftMat;
   regionDef('valley').detail.push(shafts);
 
-  // --- Birds (one draw call) + the perch outcrop (one merged mesh) ---
+  // --- Birds (one draw call) ---
   scene.add(birdMesh);
-  // E10: the platform carries lichen/moss patches (vertex colors on the
-  // rock map) so the opening shot's foreground is not bare grey stone.
-  const perchMat = new THREE.MeshStandardMaterial({ map: rockTex, color: 0xffffff, roughness: 0.95, flatShading: true, vertexColors: true });
-  const platformGeo = new THREE.CylinderGeometry(7, 8.5, 2.5, 10);
-  xform(platformGeo, PERCH_POS.x, PERCH_POS.y - 1.6, PERCH_POS.z, 0, 0, 0);
-  {
-    const pp = platformGeo.attributes.position;
-    const pcols = new Float32Array(pp.count * 3);
-    const lrng = mulberry32(808);
-    for (let i = 0; i < pp.count; i++) {
-      // Lichen/moss on the top face + a random subset of the sides.
-      const lichen = (pp.getY(i) > PERCH_POS.y - 0.5 && lrng() < 0.4) || lrng() < 0.08;
-      const t = lichen ? 0.55 + lrng() * 0.3 : 0;
-      pcols[i * 3] = lerp(1, 0.45, t);
-      pcols[i * 3 + 1] = lerp(1, 0.55, t);
-      pcols[i * 3 + 2] = lerp(1, 0.30, t);
-    }
-    platformGeo.setAttribute('color', new THREE.BufferAttribute(pcols, 3));
-  }
-  const boulders = [platformGeo.toNonIndexed()];
-  const brng2 = mulberry32(808);
-  for (let i = 0; i < 5; i++) {
-    const a = brng2() * Math.PI * 2, r = 6.5 + brng2() * 3;
-    const g = new THREE.DodecahedronGeometry(0.9 + brng2() * 1.1, 0);
-    xform(g, PERCH_POS.x + Math.cos(a) * r, PERCH_POS.y - 0.4, PERCH_POS.z + Math.sin(a) * r,
-      brng2(), brng2() * 3, brng2(), 1, 0.7, 1);
-    // Phase 5: DodecahedronGeometry (a PolyhedronGeometry) is already
-    // non-indexed in r160 — toNonIndexed() on it only logs a warning.
-    boulders.push(paintWhite(g.index ? g.toNonIndexed() : g));
-  }
-  const perchMesh = new THREE.Mesh(mergeGeos(boulders), perchMat);
-  scene.add(perchMesh);
-  regionDef('valley').detail.push(perchMesh);
+  // Realism rebuild (R6): the perch outcrop is the landmarks GLB now
+  // (Sunspire Perch rock, top at exactly the old platform top — the
+  // landing geometry is unchanged). The procedural platform + boulders
+  // were REMOVED, not kept as a fallback: the GLB outcrop and the
+  // platform share the same top surface, so keeping both would
+  // z-fight on coincident faces. If the landmarks GLB fails to load,
+  // the perch is bare terrain (the landing itself is positional and
+  // still works).
 }
 // All waterfall mist in the world is ONE Points cloud (valley + canyon
 // falls push positions into worldAnim.mistPts during their builds).
@@ -2039,6 +2038,7 @@ function buildCanyon() {
     new THREE.MeshStandardMaterial({ map: worldAnim.riverTex, color: 0x7fc4b8, roughness: 0.18, metalness: 0.1, transparent: true, opacity: 0.94 }));
   scene.add(cRiverMesh);
   regionDef('canyon').silhouette.push(cRiverMesh);
+  worldAnim.cRiverProc = cRiverMesh; // Realism rebuild (R5): stashed for the GLB water swap — the ValleyWater GLB carries the Emberwash ribbon too
 
   // --- Waterfalls: three rim falls + the Embermouth Falls at the sea ---
   const cFallGeos = [];
@@ -2121,14 +2121,11 @@ function buildCanyon() {
   regionDef('canyon').detail.push(canyonMist);
 
   // --- Mesas: distant flat-top buttes around the canyon (silhouettes) ---
-  const mesaDefs = [
-    { x: -900, z: -1200, r: 130, h: 180 }, { x: 850, z: -1400, r: 100, h: 150 },
-    { x: -1000, z: -1900, r: 150, h: 220 }, { x: 950, z: -2100, r: 120, h: 190 },
-    { x: -850, z: -2400, r: 110, h: 160 }, { x: 1100, z: -950, r: 90, h: 130 },
-  ];
+  // MESA_DEFS is top-level (next to the other world placement defs): the
+  // procedural build and the R1 GLB placement share the one table.
   const mesaGeos = [];
   const cTmpM = new THREE.Color();
-  for (const md of mesaDefs) {
+  for (const md of MESA_DEFS) {
     const g = new THREE.CylinderGeometry(md.r * 0.72, md.r, md.h, 8, 3);
     const mp = g.attributes.position;
     const mCols = new Float32Array(mp.count * 3);
@@ -2148,6 +2145,7 @@ function buildCanyon() {
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }));
   scene.add(mesasMesh);
   regionDef('canyon').silhouette.push(mesasMesh);
+  worldAnim.mesasProc = mesasMesh; // Realism rebuild (R1): stashed for the GLB mountains swap (loadGlbWorld)
 }
 
 // ============================== The Azurine Sea (Phase 2, Scene 4 region) ==============================
@@ -2206,6 +2204,7 @@ function buildOcean() {
   waterMesh.position.set(0, SEA_Y, -3760);
   scene.add(waterMesh);
   regionDef('ocean').silhouette.push(waterMesh);
+  oceanAnim.waterProc = waterMesh; // Realism rebuild (R5): stashed for the GLB water swap (loadGlbWorld)
 
   // --- Sun glitter path: a soft additive sheen on the water toward the sun ---
   const glitter = new THREE.Mesh(new THREE.PlaneGeometry(900, 320),
@@ -2410,6 +2409,10 @@ function updateOcean(dt) {
   // Water motion runs whenever the sea is visible (even from the canyon).
   oceanAnim.waterUniforms.uTime.value = worldTime;
   if (oceanAnim.waterTex) { oceanAnim.waterTex.offset.x += dt * 0.008; oceanAnim.waterTex.offset.y -= dt * 0.011; }
+  // R5: scroll the GLB ocean normal map (same drift as the procedural
+  // water texture — the baked swell + scrolling normals carry the motion
+  // now that the vertex waves are gone). Null until the water GLB loads.
+  if (oceanAnim.glbOceanNor) { oceanAnim.glbOceanNor.offset.x += dt * 0.008; oceanAnim.glbOceanNor.offset.y -= dt * 0.011; }
   if (!regionActive.ocean) return;
   // Tidewhales: slow circles + surfacing cycles; spouts while breaching.
   const wp = oceanAnim.whaleParams;
@@ -2473,6 +2476,8 @@ function updateOcean(dt) {
 // Draw calls (code-derived): terrain 1, trunks 1, canopy 1, glowcaps 1,
 // glow plants 1, motes 1, fireflies 1, mist 1 = 8. (Night gliders are part
 // of the merged flock — Round 3 F1 — counted under always-visible.)
+// Realism rebuild (R3): the LumenwoodB second archetype adds 1 more in
+// the GLB world (9 total).
 // Silhouette: terrain.
 const forestAnim = {
   motes: null, motesPos: null, motesBase: null, motesPhase: null, motesN: 0,
@@ -2570,6 +2575,7 @@ function buildForest() {
   scene.add(fTrunk); scene.add(fCanopy);
   regionDef('forest').detail.push(fTrunk, fCanopy);
   forestAnim.lumenProc = { trunk: fTrunk, canopy: fCanopy }; // Blender world (B2): stashed for the GLB tree swap (loadGlbWorld)
+  forestAnim.lumenSpots = treeSpotsF; // Realism rebuild (R3): spot list reused by the LumenwoodB placement (same spots, every 3rd one)
 
   // --- Glowcaps: luminous mushrooms (unlit = they glow in the dark) ---
   const gStem = new THREE.CylinderGeometry(0.06, 0.09, 0.35, 5);
@@ -2756,6 +2762,11 @@ function updateWorld(dt) {
     c.instanceMatrix.needsUpdate = true;
   }
   if (worldAnim.riverTex) worldAnim.riverTex.offset.y -= dt * 0.12;
+  // R5: scroll the GLB river normal map with the water (same rate as the
+  // procedural river texture — the baked ribbon has no vertex waves, so
+  // the scrolling normals carry the motion). Null until the water GLB
+  // loads (and null in the harness, where textures never decode).
+  if (worldAnim.glbRiverNor) worldAnim.glbRiverNor.offset.y -= dt * 0.12;
   if (worldAnim.fallsTex) worldAnim.fallsTex.offset.y -= dt * 0.9;
   // Mist breathes gently (one Points cloud for every fall in the world).
   if (worldAnim.mistPoints) worldAnim.mistPoints.material.size = 16 * (1 + 0.06 * Math.sin(worldTime * 0.9));
@@ -2797,12 +2808,28 @@ function updateRegionState() {
   if (best !== currentRegion && bestD < curD - 150) currentRegion = best;
   if (!moodOverride) setMoodTarget(currentRegion);
   // Visibility: detail within activeR, silhouettes within silR.
+  // Ocean occlusion gate: inside the ring system (r <= OCEAN_GATE_R) the
+  // sea is behind the ridge-ring curtains (proven — see OCEAN_GATE_R), so
+  // the ocean silhouettes + dressing hide. The ocean CLOUD mesh is exempt
+  // (it carries the two southern canyon mist banks, z=-1900/-2300, which
+  // are inside the ring system and visible from the canyon). regionActive
+  // is deliberately NOT gated — it drives the ocean animation, whose cost
+  // is trivial, and its meaning ("player is in the ocean region") stays
+  // a pure distance predicate.
+  const pr = Math.hypot(px, pz); // distance from origin (ring-system centre)
+  const oceanGated = pr <= OCEAN_GATE_R;
   for (const r of regionDefs) {
     const d = Math.hypot(px - r.cx, pz - r.cz);
     const detailOn = d < r.activeR, silOn = d < r.silR;
     regionActive[r.name] = detailOn;
     for (const m of r.detail) m.visible = detailOn;
     for (const m of r.silhouette) m.visible = silOn;
+  }
+  if (oceanGated) {
+    for (const m of regionDef('ocean').silhouette) m.visible = false;
+    for (const m of regionDef('ocean').detail) {
+      if (m !== oceanAnim.clouds) m.visible = false;
+    }
   }
   // E4/E8: valve-sheddable valley dressing — visible only when the valley
   // is active AND the valve is below L2.
@@ -3572,17 +3599,75 @@ function updateCreature(dt) {
 // the game runs exactly as before. The GLB bird parents to the same
 // flightRig, so the seat, perch, and flight behavior are unchanged.
 // Draw calls: 10 (procedural: 17).
-// Clip mapping (existing flight state -> clips): the 64-entry wing-stroke
-// LUT + 70/140/200 ms joint lags are baked into the Flap clip's keyframe
-// timing — the runtime only drives clip speed from flapRate (1.5 takeoff,
-// 1.15 climb, 0.6 cruise). Descending / journey glide legs -> Glide.
-// |roll| -> BankL/BankR held at mid-frame, weight proportional to |roll|.
-// Steep descent (pitch < -0.25) -> Dive held at mid-frame. Landing ->
-// Land once (flare -> fold), held at the folded end frame while perched.
-const GLB_BIRD_URL = 'assets/skybound/aurea-solwing.glb';
-let glbBird = null; // { scene, mixer, actions, base, baseName, bankWL, bankWR, diveW }
+// Clip blending (realism rebuild phase 1, Nov 16, 2026): the six clips
+// blend CONTINUOUSLY by flight state — no hard cuts, no crossFadeTo, no
+// mid-flight clip resets (a reset restarts the clip's phase, which pops).
+// glbBlendTargets() computes a target weight per clip every frame and
+// updateGlbBird eases the live weights toward them (base dt*2.5, pose
+// dt*3 — the largest single-tick step at 72 Hz is ~0.04). Flap/Glide
+// loop with their phases intact; only Land is a one-shot (reset + played
+// once at landing onset, 2.042 s against the 2.5 s settle). Windows:
+// flap<->glide by the eased glide state + a free-flight-only fast-level
+// speed bias; bank by roll (smoothstep 0.06-0.6 rad); dive by DESCENT
+// RATE (-sin(pitch)*speed, 4-10 m/s); land by settle progress (landingT).
+// The 64-entry wing-stroke LUT + joint lags stay baked into the Flap
+// clip's keyframes; the runtime drives its speed from flapRate (1.5
+// takeoff, 1.15 climb, 0.6 cruise). baseName is a discrete label for
+// the dominant base clip (HUD/tests); the weights are what the eye sees.
+const GLB_BIRD_URL = 'assets/skybound/aurea-solwing-v2.glb';
+let glbBird = null; // { scene, mixer, actions, base, baseName, w: {flap, glide, bankL, bankR, dive, land} }
 let glbBirdFailed = false;
 let glbPrevMode = 'perched';
+// Preallocated blend-target scratch — the hot loop allocates nothing.
+const _blendTgt = { flap: 0, glide: 0, bankL: 0, bankR: 0, dive: 0, land: 0 };
+
+// Pure blend targets: every clip's target weight from flight state.
+// `glide` is creatureAnim.glide (0..1, already eased over 0.8 s from the
+// climb/descend logic); `landingT` is flight.landingT (0..1 over the
+// 2.5 s settle). Writes into `out` (preallocated by the caller) and
+// returns it. No game-state reads, no allocation — the blend test runner
+// calls this directly to verify the windows without a headset.
+function glbBlendTargets(out, mode, speed, pitch, roll, glide, landingT) {
+  let flap = 0, glideW = 0, bankL = 0, bankR = 0, dive = 0, land = 0;
+  const flying = mode === 'free' || mode === 'guided' || mode === 'takeoff' || mode === 'journey' || mode === 'landing';
+  if (mode === 'perched' || mode === 'landed') {
+    land = 1;
+  } else if (mode === 'landing') {
+    // Flare window: the weight follows the settle (proximity), full by
+    // landingT 0.45 (~1.1 s in), so the flare reads while Aurea is still
+    // descending; the base clips fade out underneath it. The settle
+    // bleeds speed to zero on its own, so no separate speed term is
+    // needed here — the window IS proximity + the settle's speed bleed.
+    land = smoothstep(0.05, 0.45, landingT);
+    const base = 1 - land;
+    flap = base * (1 - glide);
+    glideW = base * glide;
+  } else if (flying) {
+    // Flap <-> glide: the eased glide state, plus a free-flight-only
+    // fast-level speed bias (24-30 m/s, near level). Journey/guided/
+    // takeoff never take the speed term — the journey driver owns the
+    // flap/glide call there, and the takeoff is always a hard flap.
+    let g = glide;
+    if (mode === 'free') {
+      const level = 1 - smoothstep(0.05, 0.12, Math.abs(pitch));
+      const fast = smoothstep(24, 30, speed);
+      if (fast * level > g) g = fast * level;
+    }
+    flap = 1 - g;
+    glideW = g;
+    // Bank asymmetry: inside wing drops / outside rises via the pose
+    // clip. ~3 deg deadzone so level flight never micro-banks; full
+    // pose at the 0.6 rad roll cap.
+    const bankW = smoothstep(0.06, 0.6, Math.abs(roll));
+    if (roll < 0) bankL = bankW; else if (roll > 0) bankR = bankW;
+    // Dive tuck by DESCENT RATE, not pitch alone: a shallow fast
+    // descent tucks, a steep slow one does not.
+    const descentRate = -Math.sin(pitch) * speed;
+    dive = smoothstep(4, 10, descentRate);
+  }
+  out.flap = flap; out.glide = glideW; out.bankL = bankL; out.bankR = bankR; out.dive = dive; out.land = land;
+  return out;
+}
 
 function loadGlbBird() {
   try {
@@ -3593,7 +3678,13 @@ function loadGlbBird() {
       const actions = {};
       for (const clip of gltf.animations) actions[clip.name] = mixer.clipAction(clip);
       glbBird = { scene, mixer, actions, base: null, baseName: null,
-                  bankWL: 0, bankWR: 0, diveW: 0 };
+                  w: { flap: 0, glide: 0, bankL: 0, bankR: 0, dive: 0, land: 0 } };
+      // Flap + Glide loop forever with their phases intact — the blend
+      // manager only ever moves their weights, never resets them.
+      for (const n of ['Flap', 'Glide']) {
+        const a = actions[n];
+        if (a) { a.setLoop(THREE.LoopRepeat, Infinity); a.play(); a.setEffectiveWeight(0); }
+      }
       // Bank + dive are pose clips: hold each at its mid-frame (max pose)
       // with weight 0; updateGlbBird eases the weights every frame.
       for (const n of ['BankL', 'BankR', 'Dive']) {
@@ -3610,8 +3701,24 @@ function loadGlbBird() {
           land.setEffectiveWeight(1);
           glbBird.base = land; glbBird.baseName = 'Land';
         }
-      } else {
-        setGlbBase('Glide', 0.3);
+      }
+      // Snap the blend weights to the current flight state at load (a
+      // load event, not a runtime cut — the bird appears in the right
+      // pose immediately instead of fading in from the bind pose over
+      // ~1 s). Perched, that is land=1, matching the hold above.
+      glbBlendTargets(_blendTgt, flight.mode, flight.speed, flight.pitch, flight.roll, creatureAnim.glide, flight.landingT);
+      const w = glbBird.w;
+      w.flap = _blendTgt.flap; w.glide = _blendTgt.glide; w.bankL = _blendTgt.bankL;
+      w.bankR = _blendTgt.bankR; w.dive = _blendTgt.dive; w.land = _blendTgt.land;
+      if (actions.Flap) { actions.Flap.setEffectiveWeight(w.flap); actions.Flap.setEffectiveTimeScale(Math.max(0.15, creatureAnim.flapRate)); }
+      if (actions.Glide) actions.Glide.setEffectiveWeight(w.glide);
+      if (actions.BankL) actions.BankL.setEffectiveWeight(w.bankL);
+      if (actions.BankR) actions.BankR.setEffectiveWeight(w.bankR);
+      if (actions.Dive) actions.Dive.setEffectiveWeight(w.dive);
+      if (actions.Land) actions.Land.setEffectiveWeight(w.land);
+      if (!glbBird.baseName) {
+        glbBird.baseName = (flight.mode === 'landing') ? 'Land' : (_blendTgt.glide > 0.5 ? 'Glide' : 'Flap');
+        glbBird.base = actions[glbBird.baseName] || null;
       }
     }, undefined, () => {
       glbBirdFailed = true; // procedural bird stays — the game keeps working
@@ -3625,51 +3732,64 @@ function loadGlbBird() {
   }
 }
 
-function setGlbBase(name, fade = 0.3) {
-  if (!glbBird || glbBird.baseName === name) return;
-  const next = glbBird.actions[name];
-  if (!next) return;
-  next.reset();
-  next.setEffectiveWeight(1);
-  if (name === 'Land') { next.setLoop(THREE.LoopOnce, 1); next.clampWhenFinished = true; }
-  next.play();
-  if (glbBird.base && glbBird.base !== next) glbBird.base.crossFadeTo(next, fade, false);
-  else next.fadeIn(fade);
-  glbBird.base = next;
-  glbBird.baseName = name;
-}
-
 function updateGlbBird(dt) {
   if (!glbBird) return;
   const a = creatureAnim;
   const mode = flight.mode;
-  const flying = mode === 'free' || mode === 'guided' || mode === 'takeoff' || mode === 'journey' || mode === 'landing';
-  // Landing: play the Land clip once at landing onset; it holds the folded
-  // pose after finishing (LoopOnce + clampWhenFinished).
-  if (mode === 'landing' && glbPrevMode !== 'landing') setGlbBase('Land', 0.25);
-  glbPrevMode = mode;
-  // Bank / dive targets (0 while perched, landed, or landing).
-  let bankL = 0, bankR = 0, dive = 0;
-  if (flying && mode !== 'landing') {
-    if (a.glide > 0.5) setGlbBase('Glide', 0.3);
-    else {
-      setGlbBase('Flap', 0.3);
-      const flap = glbBird.actions.Flap;
-      if (flap) flap.setEffectiveTimeScale(Math.max(0.15, a.flapRate));
+  // Landing onset: play the Land clip once (flare -> fold); it holds the
+  // folded pose after finishing (LoopOnce + clampWhenFinished). The
+  // WEIGHT ramps separately, driven by landingT — the clip's own timing
+  // and the blend window are independent by design.
+  if (mode === 'landing' && glbPrevMode !== 'landing') {
+    const land = glbBird.actions.Land;
+    if (land) {
+      land.reset();
+      land.setLoop(THREE.LoopOnce, 1);
+      land.clampWhenFinished = true;
+      land.paused = false;
+      land.play();
     }
-    const rollW = clamp(Math.abs(flight.roll) / 0.6, 0, 1);
-    if (flight.roll < 0) bankL = rollW; else if (flight.roll > 0) bankR = rollW;
-    dive = clamp((-flight.pitch - 0.25) / 0.35, 0, 1);
   }
-  // Ease the pose weights toward their targets (no pops on bank/dive).
-  const k = Math.min(1, dt * 3);
-  glbBird.bankWL += (bankL - glbBird.bankWL) * k;
-  glbBird.bankWR += (bankR - glbBird.bankWR) * k;
-  glbBird.diveW += (dive - glbBird.diveW) * k;
-  const bL = glbBird.actions.BankL, bR = glbBird.actions.BankR, dv = glbBird.actions.Dive;
-  if (bL) bL.setEffectiveWeight(glbBird.bankWL);
-  if (bR) bR.setEffectiveWeight(glbBird.bankWR);
-  if (dv) dv.setEffectiveWeight(glbBird.diveW);
+  // Settled after a landing: hold the folded end frame (the clip normally
+  // finishes during the 2.5 s settle — this only covers a short settle).
+  if ((mode === 'perched' || mode === 'landed') && glbPrevMode === 'landing') {
+    const land = glbBird.actions.Land;
+    if (land && land.time < land.getClip().duration) {
+      land.time = land.getClip().duration;
+      land.paused = true;
+    }
+  }
+  glbPrevMode = mode;
+  // Targets from flight state (pure function — see glbBlendTargets),
+  // then ease the live weights toward them. No crossFadeTo, no resets:
+  // Flap and Glide loop with their phases intact, so a blend never pops.
+  // Base clips ease at dt*2.5, pose clips at dt*3 (unchanged from the
+  // bank/dive ease); at 72 Hz the largest single-tick weight step is
+  // ~0.04. Zero allocation in this block.
+  glbBlendTargets(_blendTgt, mode, flight.speed, flight.pitch, flight.roll, a.glide, flight.landingT);
+  const w = glbBird.w;
+  const kBase = Math.min(1, dt * 2.5);
+  const kPose = Math.min(1, dt * 3);
+  w.flap += (_blendTgt.flap - w.flap) * kBase;
+  w.glide += (_blendTgt.glide - w.glide) * kBase;
+  w.land += (_blendTgt.land - w.land) * kBase;
+  w.bankL += (_blendTgt.bankL - w.bankL) * kPose;
+  w.bankR += (_blendTgt.bankR - w.bankR) * kPose;
+  w.dive += (_blendTgt.dive - w.dive) * kPose;
+  const act = glbBird.actions;
+  if (act.Flap) { act.Flap.setEffectiveWeight(w.flap); act.Flap.setEffectiveTimeScale(Math.max(0.15, a.flapRate)); }
+  if (act.Glide) act.Glide.setEffectiveWeight(w.glide);
+  if (act.BankL) act.BankL.setEffectiveWeight(w.bankL);
+  if (act.BankR) act.BankR.setEffectiveWeight(w.bankR);
+  if (act.Dive) act.Dive.setEffectiveWeight(w.dive);
+  if (act.Land) act.Land.setEffectiveWeight(w.land);
+  // baseName: the discrete dominant-base label (HUD/tests). The weights
+  // above are what the eye sees; the label switches on state, not on a
+  // weight crossing, so it never lags the mode change.
+  const baseName = (mode === 'perched' || mode === 'landed' || mode === 'landing') ? 'Land'
+    : (_blendTgt.glide > 0.5 ? 'Glide' : 'Flap');
+  glbBird.baseName = baseName;
+  glbBird.base = act[baseName] || null;
   // Body bob + sway: updateCreature computes them on the (hidden)
   // procedural group; mirror the same values onto the GLB group so the
   // rider feels the identical stroke-synced motion.
@@ -3678,7 +3798,7 @@ function updateGlbBird(dt) {
   glbBird.scene.rotation.z = creature.rotation.z;
 }
 
-// ============================== Blender world assets (Worker B2) ==============================
+// ============================== Blender world assets (Worker B2 + realism rebuild R1–R7) ==============================
 // Floating islands (W1), canyon cliffs (W2), valley trees (W3/W4),
 // Glimmerwood lumenwoods (W4b), waterfall pool rims (W5) — Blender-built
 // GLBs, loaded async at boot from relative paths. Design:
@@ -3698,13 +3818,29 @@ function updateGlbBird(dt) {
 //    check_world_clearance.mjs (see the world build notes). The islands
 //    and cliffs are also registered as obstacles in the journey-math
 //    harness (extract-pure.mjs), so the gate keeps measuring them.
+// Realism rebuild (R1–R7, Nov 16): mountains (R1), valley terrain (R2),
+// forest B-tree archetypes (R3), clouds + mist banks (R4), water (R5),
+// landmarks (R6), lumenwood v2 (R7). Same swap pattern throughout: the
+// procedural mesh is hidden but kept as the fallback (except the perch
+// platform, which R6 REMOVES — the GLB outcrop shares its top surface,
+// so keeping both would z-fight). The B-trees are second archetypes at
+// every 3rd spot of the existing spot lists (the A-tree instances at
+// those spots are zero-scaled when the forest GLB loads, whichever
+// loads first — see _placeForestB). The new peaks/mesas are gated by
+// check_world_clearance_v2.mjs (measured sculpted-peak profiles).
 const GLB_WORLD_URLS = {
   islands: 'assets/skybound/floating-islands.glb',
   cliffs: 'assets/skybound/canyon-cliff.glb',
   conifer: 'assets/skybound/valley-conifer.glb',
   broadleaf: 'assets/skybound/valley-broadleaf.glb',
-  lumenwood: 'assets/skybound/lumenwood.glb',
+  lumenwood: 'assets/skybound/lumenwood-v2.glb',
   fallframes: 'assets/skybound/fallframe.glb',
+  mountains: 'assets/skybound/mountains-v2.glb',
+  terrain: 'assets/skybound/valley-terrain-v2.glb',
+  forest: 'assets/skybound/forest-v2.glb',
+  clouds: 'assets/skybound/clouds-v2.glb',
+  water: 'assets/skybound/water-v2.glb',
+  landmarks: 'assets/skybound/landmarks-v2.glb',
 };
 // Floating-island placements: {x, y, z} = cap-centre position, s = scale,
 // ry = yaw. Bounding radius ~28*s m around the cap centre, rock hanging
@@ -3738,7 +3874,47 @@ const CLIFF_DEFS = [
   { x: -480, z: 600, s: 1.2, ry: 2.7 },
   { x: 700, z: -550, s: 0.9, ry: 0.2 },
 ];
-let glbWorld = { islands: null, cliffs: null, conifer: null, broadleaf: null, lumenwood: null, fallframes: null };
+// Hero-peak placements (hoisted from buildEnvironment, Nov 16 — the
+// procedural cones and the R1 HeroPeak instances share this one table).
+// {x, z} = base centre, r = base radius, h = height; the base sits at
+// y = -70 (the procedural cones and the GLB instances agree).
+const PEAK_DEFS = [
+  { x: 950, z: -680, r: 260, h: 420 }, { x: 1500, z: -1650, r: 220, h: 380 },
+  { x: 820, z: 920, r: 280, h: 460 }, { x: -250, z: 1280, r: 240, h: 400 },
+  { x: -1250, z: -350, r: 260, h: 430 },
+];
+// Mesa placements (hoisted from buildCanyon, Nov 16 — same sharing as
+// PEAK_DEFS). Base at y = -70.
+const MESA_DEFS = [
+  { x: -900, z: -1200, r: 130, h: 180 }, { x: 850, z: -1400, r: 100, h: 150 },
+  { x: -1000, z: -1900, r: 150, h: 220 }, { x: 950, z: -2100, r: 120, h: 190 },
+  { x: -850, z: -2400, r: 110, h: 160 }, { x: 1100, z: -950, r: 90, h: 130 },
+];
+// Mist banks (R4): flattened CloudPuff instances pooling on the valley
+// floor and the canyon floor (mulberry32(99) in the build script).
+// `mesh` is which cloud InstancedMesh carries the bank: the valley mesh
+// for the valley banks + the two northern canyon banks (z -1100/-1500,
+// inside the valley detail radius), the ocean mesh for the two southern
+// canyon banks (z -1900/-2300, inside the ocean detail radius). No
+// single region covers the whole canyon leg, and a third cloud mesh
+// would cost a draw call — the split follows the region overlap instead.
+// The banks are ground-locked: they ride the cloud meshes, NOT the
+// drifting cloudGroup (the group slide would drag them off the channel).
+const MIST_BANK_DEFS = [
+  { x: -95.1, y: -48.3, z: -700, sx: 64.1, sy: 5.1, sz: 35.4, ry: 0.00, mesh: 'valley' },
+  { x: -32.9, y: -43.3, z: -500, sx: 40.3, sy: 4.2, sz: 30.9, ry: 2.11, mesh: 'valley' },
+  { x: -21.4, y: -47.2, z: -300, sx: 41.9, sy: 4.7, sz: 35.9, ry: 0.79, mesh: 'valley' },
+  { x: 0.6, y: -41.6, z: -100, sx: 53.7, sy: 5.5, sz: 32.4, ry: 0.86, mesh: 'valley' },
+  { x: 38.9, y: -49.2, z: 100, sx: 62.9, sy: 4.8, sz: 36.6, ry: 3.05, mesh: 'valley' },
+  { x: 36.0, y: -50.5, z: 300, sx: 47.8, sy: 5.9, sz: 28.1, ry: 1.43, mesh: 'valley' },
+  { x: 38.4, y: -47.1, z: 500, sx: 51.7, sy: 4.6, sz: 28.6, ry: 2.17, mesh: 'valley' },
+  { x: 39.2, y: -59.4, z: -1100, sx: 57.6, sy: 4.4, sz: 31.8, ry: 1.53, mesh: 'valley' },
+  { x: 63.6, y: -59.2, z: -1500, sx: 52.5, sy: 5.5, sz: 25.3, ry: 1.86, mesh: 'valley' },
+  { x: 59.0, y: -60.6, z: -1900, sx: 46.4, sy: 4.3, sz: 22.3, ry: 2.03, mesh: 'ocean' },
+  { x: -3.7, y: -61.9, z: -2300, sx: 48.6, sy: 4.6, sz: 30.7, ry: 2.58, mesh: 'ocean' },
+];
+let glbWorld = { islands: null, cliffs: null, conifer: null, broadleaf: null, lumenwood: null, fallframes: null,
+  mountains: null, terrain: null, forest: null, clouds: null, water: null, landmarks: null };
 let glbWorldFailed = {}; // per-asset failure flags (a failed asset is simply absent)
 
 function _glbMeshByName(gltf, name) {
@@ -3889,6 +4065,297 @@ function _placeFallframes(gltf) {
   worldAnim.fallframes = mesh;
 }
 
+// Swap one procedural mesh for its GLB replacement inside a region
+// list: the GLB mesh takes the procedural mesh's slot (same visibility
+// rules), the procedural mesh is hidden but kept as the fallback.
+// (Same pattern as _swapTrees, for single meshes.)
+function _swapRegistryEntry(list, oldM, newM) {
+  const idx = list.indexOf(oldM);
+  if (idx >= 0) list[idx] = newM;
+  else list.push(newM);
+  const wasVisible = oldM.visible;
+  oldM.visible = false;
+  newM.visible = wasVisible;
+  scene.add(newM);
+}
+
+// R1 — mountains-v2: sculpted hero peaks (5 instances), the ridge-ring
+// curtains (1 world-locked mesh, DoubleSide — the route flies through
+// the curtains on the canyon leg, unchanged behaviour), and mesas
+// (6 instances). The procedural meshes are hidden but kept as fallback.
+// Master frames: HeroPeak base y=0 / apex 420 / radius 260, Mesa base
+// y=0 / top 180 / radius 130; instances sit at y=-70 like the cones.
+function _placeMountains(gltf) {
+  const peak = _glbMeshByName(gltf, 'HeroPeak');
+  const ring = _glbMeshByName(gltf, 'RangeRing');
+  const mesa = _glbMeshByName(gltf, 'Mesa');
+  if (!peak || !ring || !mesa || !worldAnim.peaksProc || !worldAnim.ringsProc || !worldAnim.mesasProc) { glbWorldFailed.mountains = true; return; }
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const col = new THREE.Color();
+  const peaksMesh = new THREE.InstancedMesh(peak.geometry, peak.material, PEAK_DEFS.length);
+  peaksMesh.frustumCulled = false; // instances span the whole horizon
+  for (let i = 0; i < PEAK_DEFS.length; i++) {
+    const d = PEAK_DEFS[i];
+    e.set(0, 0, 0); q.setFromEuler(e); // no rotation — the sculpt is asymmetric already
+    v.set(d.x, -70, d.z); sc.set(d.r / 260, d.h / 420, d.r / 260);
+    m.compose(v, q, sc);
+    peaksMesh.setMatrixAt(i, m);
+    col.setHSL(0.08, 0.05, 0.86 + ((i * 29) % 10) / 10 * 0.14);
+    peaksMesh.setColorAt(i, col);
+  }
+  peaksMesh.instanceMatrix.needsUpdate = true;
+  if (peaksMesh.instanceColor) peaksMesh.instanceColor.needsUpdate = true;
+  _swapRegistryEntry(regionDef('valley').silhouette, worldAnim.peaksProc, peaksMesh);
+  const ringMesh = new THREE.Mesh(ring.geometry, ring.material);
+  // DoubleSide is load-bearing (the route passes through the curtains);
+  // the GLB already sets it — re-assert defensively in case a future
+  // rebuild drops the flag.
+  if (ringMesh.material.side !== THREE.DoubleSide) {
+    ringMesh.material.side = THREE.DoubleSide;
+    ringMesh.material.needsUpdate = true;
+  }
+  _swapRegistryEntry(regionDef('valley').silhouette, worldAnim.ringsProc, ringMesh);
+  const mesasMesh = new THREE.InstancedMesh(mesa.geometry, mesa.material, MESA_DEFS.length);
+  mesasMesh.frustumCulled = false; // instances span the canyon
+  for (let i = 0; i < MESA_DEFS.length; i++) {
+    const d = MESA_DEFS[i];
+    e.set(0, 0, 0); q.setFromEuler(e);
+    v.set(d.x, -70, d.z); sc.set(d.r / 130, d.h / 180, d.r / 130);
+    m.compose(v, q, sc);
+    mesasMesh.setMatrixAt(i, m);
+    col.setHSL(0.08, 0.05, 0.86 + ((i * 31) % 10) / 10 * 0.14);
+    mesasMesh.setColorAt(i, col);
+  }
+  mesasMesh.instanceMatrix.needsUpdate = true;
+  if (mesasMesh.instanceColor) mesasMesh.instanceColor.needsUpdate = true;
+  _swapRegistryEntry(regionDef('canyon').silhouette, worldAnim.mesasProc, mesasMesh);
+  glbWorld.mountains = { peaks: peaksMesh, ring: ringMesh, mesas: mesasMesh };
+  worldAnim.mountains = glbWorld.mountains;
+}
+
+// R2 — valley-terrain-v2: the displaced valley ground (1700x1700, same
+// extent as the procedural plane), position identity. The procedural
+// terrain is hidden but kept as fallback.
+function _placeTerrain(gltf) {
+  const terrain = _glbMeshByName(gltf, 'ValleyTerrain');
+  if (!terrain || !worldAnim.terrainProc) { glbWorldFailed.terrain = true; return; }
+  const mesh = new THREE.Mesh(terrain.geometry, terrain.material);
+  _swapRegistryEntry(regionDef('valley').silhouette, worldAnim.terrainProc, mesh);
+  glbWorld.terrain = mesh;
+  worldAnim.terrain = mesh;
+}
+
+// Zero-scale the A-tree instances at the B spots (i % 3 == 2) of one
+// tree pair ({ trunk, canopy }, blobsPerTree canopy instances per tree).
+// A zero-scale instance renders nothing (degenerate triangles), so the
+// B-trees own those spots without a visible double.
+const _zeroM = new THREE.Matrix4().makeScale(0, 0, 0);
+function _zeroBSpots(pair, blobsPerTree) {
+  if (!pair || !pair.trunk || !pair.canopy) return;
+  for (let i = 0; i < pair.trunk.count; i++) {
+    if (i % 3 !== 2) continue;
+    pair.trunk.setMatrixAt(i, _zeroM);
+    for (let b = 0; b < blobsPerTree; b++) pair.canopy.setMatrixAt(i * blobsPerTree + b, _zeroM);
+  }
+  pair.trunk.instanceMatrix.needsUpdate = true;
+  pair.canopy.instanceMatrix.needsUpdate = true;
+}
+
+// R3 — forest-v2: B-variant second archetypes (ConiferB, BroadleafB,
+// LumenwoodB) at every 3rd spot of the EXISTING spot lists. The B trees
+// are single ground-origin meshes (base at local y=0), so they use
+// their own matrices — NOT the A-tree trunk/canopy matrices. The A
+// instances at the B spots are zero-scaled in BOTH the procedural
+// meshes and the already-swapped GLB meshes: whichever GLB loads first,
+// the B spots end up with exactly one tree (a later A swap inherits
+// the zeroes through the matrix copy in _swapTrees).
+function _placeForestB(gltf) {
+  const coniferB = _glbMeshByName(gltf, 'ConiferB');
+  const broadleafB = _glbMeshByName(gltf, 'BroadleafB');
+  const lumenwoodB = _glbMeshByName(gltf, 'LumenwoodB');
+  if (!coniferB || !broadleafB || !lumenwoodB ||
+      !worldAnim.coniferSpots || !worldAnim.broadleafSpots || !forestAnim.lumenSpots) {
+    glbWorldFailed.forest = true; return;
+  }
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const col = new THREE.Color();
+  // ConiferB + BroadleafB share one atlas material in the GLB; the sway
+  // shader needs DISTINCT cache keys per type (different local heights),
+  // so the broadleaf gets a clone (same texture, its own program).
+  let broadleafMat = broadleafB.material;
+  if (broadleafMat === coniferB.material) broadleafMat = broadleafMat.clone();
+  const placed = {};
+  const jobs = [
+    { key: 'coniferB', glbMesh: coniferB, mat: coniferB.material, spots: worldAnim.coniferSpots, region: 'valley', swayKey: 'skybound-sway-conifer-b', swayAmp: 0.12, swaySpan: 8.3, tintHue: 0.29, isLumen: false, proc: worldAnim.coniferProc, glb: glbWorld.conifer, blobs: 1 },
+    { key: 'broadleafB', glbMesh: broadleafB, mat: broadleafMat, spots: worldAnim.broadleafSpots, region: 'valley', swayKey: 'skybound-sway-broadleaf-b', swayAmp: 0.10, swaySpan: 7.5, tintHue: 0.24, isLumen: false, proc: worldAnim.broadleafProc, glb: glbWorld.broadleaf, blobs: 1 },
+    { key: 'lumenwoodB', glbMesh: lumenwoodB, mat: lumenwoodB.material, spots: forestAnim.lumenSpots, region: 'forest', swayKey: 'skybound-sway-lumenwood-b', swayAmp: 0.10, swaySpan: 31.0, tintHue: 0.45, isLumen: true, proc: forestAnim.lumenProc, glb: glbWorld.lumenwood, blobs: 3 },
+  ];
+  for (const job of jobs) {
+    const bSpots = [];
+    for (let i = 0; i < job.spots.length; i++) if (i % 3 === 2) bSpots.push(job.spots[i]);
+    const mesh = new THREE.InstancedMesh(job.glbMesh.geometry, job.mat, bSpots.length);
+    mesh.frustumCulled = false; // instances span the region
+    for (let j = 0; j < bSpots.length; j++) {
+      const t = bSpots[j];
+      e.set(0, t.ry, 0); q.setFromEuler(e);
+      // Ground-origin: the base sits at the spot height. LumenwoodB
+      // uses the A lumenwood's trunk scale (1.4, th/30, 1.4).
+      if (job.isLumen) { v.set(t.x, t.h, t.z); sc.set(1.4, t.th / 30, 1.4); }
+      else { v.set(t.x, t.h, t.z); sc.set(t.s, t.s, t.s); }
+      m.compose(v, q, sc);
+      mesh.setMatrixAt(j, m);
+      // Light tints only (the B meshes are vertex-colored — a dark
+      // instance color would double-darken).
+      col.setHSL(job.tintHue + t.tint * 0.06, 0.12, 0.86 + t.tint * 0.14);
+      mesh.setColorAt(j, col);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    // Sway: ground-origin, so the base is y=0 and the span is the
+    // measured local height (conifer 8.3, broadleaf 7.5, lumenwood
+    // 31.0). Distinct cache keys per type.
+    addSway(job.mat, job.swayKey, job.swayAmp, 0, job.swaySpan);
+    job.mat.needsUpdate = true;
+    scene.add(mesh);
+    regionDef(job.region).detail.push(mesh);
+    placed[job.key] = mesh;
+    // The A trees vacate the B spots (procedural + already-swapped GLB).
+    _zeroBSpots(job.proc, job.blobs);
+    if (job.glb) _zeroBSpots(job.glb, job.blobs);
+  }
+  glbWorld.forest = placed;
+  worldAnim.forestB = placed;
+}
+
+// R4 — clouds-v2: the 5-lobe CloudPuff replaces the procedural
+// icosahedron puffs. Two InstancedMeshes (valley+deck / ocean), same as
+// the procedural split. The game's soft cloud texture stays as the map
+// on the GLB material (the GLB carries no texture of its own — the
+// texture is what makes the flattened puffs read as clouds). The 11
+// mist banks are appended AFTER the puffs in each mesh (the drift loop
+// only rewrites the first N puff matrices, so the banks stay put; the
+// valve sheds them first under pressure). The valley mesh goes in the
+// SCENE, not the drifting cloudGroup — the group slide would drag the
+// ground-locked mist banks off the river channel.
+function _placeClouds(gltf) {
+  const puff = _glbMeshByName(gltf, 'CloudPuff');
+  if (!puff || !worldAnim.clouds || !worldAnim.cloudDrift || !oceanAnim.clouds) { glbWorldFailed.clouds = true; return; }
+  const cloudMat = puff.material;
+  if (!cloudMat.map) { cloudMat.map = cloudTex; cloudMat.needsUpdate = true; }
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const col = new THREE.Color();
+  // Valley mesh: the procedural puffs (matrices + colors copied verbatim)
+  // + the valley mist banks appended after them.
+  const procClouds = worldAnim.clouds;
+  const nPuffs = worldAnim.cloudDrift.length;
+  const valleyBanks = MIST_BANK_DEFS.filter((d) => d.mesh === 'valley');
+  const valleyMesh = new THREE.InstancedMesh(puff.geometry, cloudMat, nPuffs + valleyBanks.length);
+  valleyMesh.frustumCulled = false; // puffs span the valley + deck
+  valleyMesh.instanceMatrix.array.set(procClouds.instanceMatrix.array);
+  for (let i = 0; i < nPuffs; i++) {
+    procClouds.getColorAt(i, col);
+    valleyMesh.setColorAt(i, col);
+  }
+  for (let j = 0; j < valleyBanks.length; j++) {
+    const b = valleyBanks[j];
+    e.set(0, b.ry, 0); q.setFromEuler(e);
+    v.set(b.x, b.y, b.z); sc.set(b.sx, b.sy, b.sz);
+    m.compose(v, q, sc);
+    valleyMesh.setMatrixAt(nPuffs + j, m);
+    col.setHSL(0.58, 0.06, 0.88 + ((j * 37) % 10) / 10 * 0.12);
+    valleyMesh.setColorAt(nPuffs + j, col);
+  }
+  valleyMesh.instanceMatrix.needsUpdate = true;
+  if (valleyMesh.instanceColor) valleyMesh.instanceColor.needsUpdate = true;
+  valleyMesh.userData.full = nPuffs + valleyBanks.length;
+  _swapRegistryEntry(regionDef('valley').detail, procClouds, valleyMesh);
+  worldAnim.clouds = valleyMesh;
+  // Ocean mesh: the 40 ocean puffs + the two southern canyon banks.
+  const procOcean = oceanAnim.clouds;
+  const nOcean = procOcean.userData.full || procOcean.count;
+  const oceanBanks = MIST_BANK_DEFS.filter((d) => d.mesh === 'ocean');
+  const oceanMesh = new THREE.InstancedMesh(puff.geometry, cloudMat, nOcean + oceanBanks.length);
+  oceanMesh.frustumCulled = false;
+  oceanMesh.instanceMatrix.array.set(procOcean.instanceMatrix.array);
+  for (let i = 0; i < nOcean; i++) {
+    procOcean.getColorAt(i, col);
+    oceanMesh.setColorAt(i, col);
+  }
+  for (let j = 0; j < oceanBanks.length; j++) {
+    const b = oceanBanks[j];
+    e.set(0, b.ry, 0); q.setFromEuler(e);
+    v.set(b.x, b.y, b.z); sc.set(b.sx, b.sy, b.sz);
+    m.compose(v, q, sc);
+    oceanMesh.setMatrixAt(nOcean + j, m);
+    col.setHSL(0.58, 0.06, 0.88 + ((j * 53) % 10) / 10 * 0.12);
+    oceanMesh.setColorAt(nOcean + j, col);
+  }
+  oceanMesh.instanceMatrix.needsUpdate = true;
+  if (oceanMesh.instanceColor) oceanMesh.instanceColor.needsUpdate = true;
+  oceanMesh.userData.full = nOcean + oceanBanks.length;
+  _swapRegistryEntry(regionDef('ocean').detail, procOcean, oceanMesh);
+  oceanAnim.clouds = oceanMesh;
+  // Re-apply the valve level to the new meshes (their userData.full
+  // counts the mist banks now, so the shed counts change).
+  applyValveLevel();
+  glbWorld.clouds = { valley: valleyMesh, ocean: oceanMesh };
+  worldAnim.cloudsGLB = glbWorld.clouds;
+}
+
+// R5 — water-v2: the baked-swell ocean (world-locked at SEA_Y, position
+// identity) replaces the vertex-wave water; the ValleyWater ribbons
+// (Solmere + Emberwash + pool) replace BOTH river ribbons. The
+// procedural meshes are hidden but kept as fallback. The GLB's swell
+// is baked, so the water motion comes from scrolling the normal maps
+// (see updateWorld / updateOcean). The two materials share ONE normal
+// map texture in the GLB (same image + sampler — r160's loader caches
+// by image+sampler), so the river gets a clone to scroll independently.
+function _placeWater(gltf) {
+  const ocean = _glbMeshByName(gltf, 'Ocean');
+  const valleyWater = _glbMeshByName(gltf, 'ValleyWater');
+  if (!ocean || !valleyWater || !oceanAnim.waterProc || !worldAnim.riverProc || !worldAnim.cRiverProc) { glbWorldFailed.water = true; return; }
+  const oceanMesh = new THREE.Mesh(ocean.geometry, ocean.material);
+  _swapRegistryEntry(regionDef('ocean').silhouette, oceanAnim.waterProc, oceanMesh);
+  const riverMesh = new THREE.Mesh(valleyWater.geometry, valleyWater.material);
+  // The ribbons span the valley AND the canyon: the one mesh is
+  // registered in both silhouette lists (in place of the two procedural
+  // ribbons). The visibility loop sets it twice per tick (last write
+  // wins = the canyon's silhouette state); the canyon radius (3200 m)
+  // covers the whole valley terrain, so the river is visible from
+  // everywhere it can be seen — the only off-zone is past the terrain
+  // edge, where there is no ground mesh anyway.
+  _swapRegistryEntry(regionDef('valley').silhouette, worldAnim.riverProc, riverMesh);
+  _swapRegistryEntry(regionDef('canyon').silhouette, worldAnim.cRiverProc, riverMesh);
+  // Normal-map scroll setup (null in the harness — textures never
+  // decode there — so every access is guarded).
+  const oceanNor = ocean.material.normalMap || null;
+  let riverNor = valleyWater.material.normalMap || null;
+  if (riverNor && riverNor === oceanNor) {
+    riverNor = riverNor.clone();
+    riverNor.needsUpdate = true;
+    valleyWater.material.normalMap = riverNor;
+  }
+  oceanAnim.glbOceanNor = oceanNor;
+  worldAnim.glbRiverNor = riverNor;
+  glbWorld.water = { ocean: oceanMesh, valley: riverMesh };
+  oceanAnim.waterGLB = glbWorld.water;
+}
+
+// R6 — landmarks-v2: one world-locked mesh (Gullspire sea-stack, Veil
+// Falls lip, Sunspire Perch outcrop), position identity. Always
+// visible — it spans the valley AND the ocean, and no single region
+// list covers both (registering it in two lists would let the later
+// region's state hide the perch). The procedural perch platform was
+// REMOVED from the file (not kept as fallback — see buildEnvironment).
+function _placeLandmarks(gltf) {
+  const landmarks = _glbMeshByName(gltf, 'Landmarks');
+  if (!landmarks) { glbWorldFailed.landmarks = true; return; }
+  const mesh = new THREE.Mesh(landmarks.geometry, landmarks.material);
+  scene.add(mesh);
+  glbWorld.landmarks = mesh;
+  worldAnim.landmarks = mesh;
+}
+
 function _loadWorldGlb(url, name, onOk) {
   try {
     new GLTFLoader().load(url, (gltf) => {
@@ -3927,6 +4394,12 @@ function loadGlbWorld() {
     if (swapped) glbWorld.lumenwood = swapped; else glbWorldFailed.lumenwood = true;
   });
   _loadWorldGlb(GLB_WORLD_URLS.fallframes, 'fallframes', (gltf) => _placeFallframes(gltf));
+  _loadWorldGlb(GLB_WORLD_URLS.mountains, 'mountains', (gltf) => _placeMountains(gltf));
+  _loadWorldGlb(GLB_WORLD_URLS.terrain, 'terrain', (gltf) => _placeTerrain(gltf));
+  _loadWorldGlb(GLB_WORLD_URLS.forest, 'forest', (gltf) => _placeForestB(gltf));
+  _loadWorldGlb(GLB_WORLD_URLS.clouds, 'clouds', (gltf) => _placeClouds(gltf));
+  _loadWorldGlb(GLB_WORLD_URLS.water, 'water', (gltf) => _placeWater(gltf));
+  _loadWorldGlb(GLB_WORLD_URLS.landmarks, 'landmarks', (gltf) => _placeLandmarks(gltf));
 }
 
 // ============================== flight state + core ==============================
@@ -5681,6 +6154,7 @@ function drawDiag() {
     'L stick raw (' + f2(diagState.lxRaw) + ',' + f2(diagState.lyRaw) + ') dz (' + f2(diagState.lx) + ',' + f2(diagState.ly) + ') trig ' + diagState.lt.toFixed(2) + '\n' +
     'R stick raw (' + f2(diagState.rxRaw) + ',' + f2(diagState.ryRaw) + ') dz (' + f2(diagState.rx) + ',' + f2(diagState.ry) + ') trig ' + diagState.rt.toFixed(2) + '\n' +
     'rollTgt ' + flight.rollTarget.toFixed(3) + ' (bank x' + prefs.bankIntensity.toFixed(1) + ') · pitchTgt ' + flight.pitchTarget.toFixed(3) + '\n' +
+    'blend ' + (glbBird ? ('base=' + glbBird.baseName + ' F' + glbBird.w.flap.toFixed(2) + ' G' + glbBird.w.glide.toFixed(2) + ' bL' + glbBird.w.bankL.toFixed(2) + ' bR' + glbBird.w.bankR.toFixed(2) + ' D' + glbBird.w.dive.toFixed(2) + ' L' + glbBird.w.land.toFixed(2) + ' glide' + creatureAnim.glide.toFixed(2) + ' rate' + creatureAnim.flapRate.toFixed(2)) : 'procedural fallback') + '\n' +
     'menu hit (' + diagState.hitCx.toFixed(0) + ',' + diagState.hitCy.toFixed(0) + ') btn=' + diagState.hitBtn + '\n' +
     'rig frame: ctl parent=' + diagState.ctlParent + ' · ray-menu ' + (diagState.rayMenuDist < 0 ? 'n/a' : diagState.rayMenuDist.toFixed(1) + ' m') + ' · frame ' + (diagState.frameOk ? 'OK' : 'MISMATCH') + ' · tracking ' + (diagState.trackingLost ? 'LOST' : 'ok') + '\n' +
     'aimO (' + _aimO.x.toFixed(2) + ',' + _aimO.y.toFixed(2) + ',' + _aimO.z.toFixed(2) + ') aimD (' + f2(_aimD.x) + ',' + f2(_aimD.y) + ',' + f2(_aimD.z) + ')';
@@ -5995,7 +6469,7 @@ buildForest();
 buildMistPoints();
 buildCreature();
 loadGlbBird(); // Blender rebuild: async GLB load; the procedural bird above is the fallback
-loadGlbWorld(); // Blender world (B2): async GLB load; islands/cliffs are new, trees swap the procedural ones
+loadGlbWorld(); // Blender world (B2 + realism rebuild R1–R7): async GLB loads; islands/cliffs/landmarks are new, trees + mountains + terrain + clouds + water swap the procedural ones
 resetToPerch();
 applyMood(); // guarantee lights/fog/exposure match the valley mood at boot
 updateEnvMap(); // bake the first env map from the valley sky (one-time)
