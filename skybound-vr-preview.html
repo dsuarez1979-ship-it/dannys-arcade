@@ -239,6 +239,42 @@ function xform(geo, px, py, pz, rx, ry, rz, sx, sy, sz) {
   geo.applyMatrix4(m);
   return geo;
 }
+// Paint a solid vertex color onto a geometry (for vertexColors materials).
+// NOTE: a material with vertexColors:true renders BLACK on any geometry that
+// lacks a color attribute — every mesh sharing such a material must be
+// painted (white = texture unchanged). mergeGeos carries the attribute.
+function paintColor(geo, r, g, b) {
+  const n = geo.attributes.position.count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { arr[i * 3] = r; arr[i * 3 + 1] = g; arr[i * 3 + 2] = b; }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return geo;
+}
+function paintWhite(geo) { return paintColor(geo, 1, 1, 1); }
+// One pointed feather quad (5 verts, 3 tris): base pair, mid pair (60% out,
+// 80% width), pointed tip. root = base center, dir = length axis, wAxis =
+// width axis (both normalized, perpendicular). uvTile = [u0, v0, u1, v1]
+// into a feather-atlas region. Used for Aurea's crest + primaries (Round 3
+// B3/B5); the membrane coverts (B2) need per-vertex camber and are built
+// inside membraneGeo instead.
+function featherGeo(root, dir, wAxis, w, len, uvTile) {
+  const [u0, v0, u1, v1] = uvTile;
+  const pos = [], uv = [];
+  const v = [
+    [root.x - wAxis.x * w / 2, root.y - wAxis.y * w / 2, root.z - wAxis.z * w / 2, u0, v0],
+    [root.x + wAxis.x * w / 2, root.y + wAxis.y * w / 2, root.z + wAxis.z * w / 2, u1, v0],
+    [root.x + dir.x * len * 0.6 - wAxis.x * w * 0.4, root.y + dir.y * len * 0.6 - wAxis.y * w * 0.4, root.z + dir.z * len * 0.6 - wAxis.z * w * 0.4, u0 + (u1 - u0) * 0.1, v0 + (v1 - v0) * 0.6],
+    [root.x + dir.x * len * 0.6 + wAxis.x * w * 0.4, root.y + dir.y * len * 0.6 + wAxis.y * w * 0.4, root.z + dir.z * len * 0.6 + wAxis.z * w * 0.4, u1 - (u1 - u0) * 0.1, v0 + (v1 - v0) * 0.6],
+    [root.x + dir.x * len, root.y + dir.y * len, root.z + dir.z * len, (u0 + u1) / 2, v1],
+  ];
+  for (const p of v) { pos.push(p[0], p[1], p[2]); uv.push(p[3], p[4]); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uv), 2));
+  g.setIndex([0, 1, 3, 0, 3, 2, 2, 3, 4]);
+  g.computeVertexNormals();
+  return g;
+}
 
 // ============================== world layout (shared) ==============================
 // The valley runs along Z. Its winding center line is the river's path and
@@ -406,6 +442,10 @@ const diagState = {
   rxRaw: 0, ryRaw: 0, rx: 0, ry: 0, // right stick: raw + deadzoned
   lt: 0, rt: 0, // trigger values
   hitCx: -1, hitCy: -1, hitBtn: '—', // menu-ray hit (canvas px + button id)
+  ctlParent: '—', // Round 3 R2: aim controller's parent (headComp = fixed; scene = the S1 bug)
+  rayMenuDist: -1, // Round 3 R2: ray-origin to menu-plane distance (m); <10 = same frame
+  frameOk: false, // Round 3 R2: ray and menu share a frame
+  trackingLost: false, // Round 3 S3: aim controller pose is null (r160 .visible=false)
 };
 
 // --- Frame-time valve (Rhythm Slicer pattern, Bible §2/§4) ---
@@ -421,7 +461,8 @@ const diagState = {
 // textures, or gameplay feedback. Skybound's registry (applied in
 // applyValveLevel): foveation steps, cloud instance counts (valley + ocean),
 // bird counts, waterfall mist + sun-glow sprites + whale spouts, whitecap
-// count, spore-mote + firefly draw ranges.
+// count, spore-mote + firefly draw ranges, blob shadows + light shafts
+// (Round 3 E4/E8 — hidden at L2).
 const perfValve = {
   ema: 13.9, level: 0, overMs: 0, underMs: 0, dwell: 0,
   foveation: [0.0, 0.25, 0.5],
@@ -579,7 +620,7 @@ const fillLight = new THREE.DirectionalLight(0xffd9b0, 0.5);
 fillLight.position.set(300, 200, 400);
 scene.add(fillLight);
 
-// Shared radial glow texture (sun glow, waterfall mist, wingtip glints)
+// Shared radial glow texture (sun halo, waterfall mist, blob shadows)
 function makeGlowTexture() {
   const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
   const g = cv.getContext('2d');
@@ -594,6 +635,23 @@ function makeGlowTexture() {
   return tex;
 }
 const glowTex = makeGlowTexture();
+// Two-zone sun texture (F2): a flat bright core (the disc) + a wide halo
+// fading out — one sprite does the work the old core + glow pair did.
+function makeSunTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.22, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.30, 'rgba(255,255,255,0.6)');
+  gr.addColorStop(0.6, 'rgba(255,255,255,0.15)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const sunTex = makeSunTexture();
 function glowSprite(color, scale, opacity) {
   const m = new THREE.SpriteMaterial({
     map: glowTex, color, transparent: true, opacity,
@@ -692,6 +750,55 @@ function makeWaterTexture() {
 }
 const leafTex = makeLeafTexture();
 const mistTex = makeMistTexture();
+// Soft cloud puffs (E1): bright top, shaded grey-blue base, blobby
+// variation — the icosahedron UVs are spherical, which is fine for a soft
+// blobby texture. Shared by the valley + ocean cloud meshes.
+function makeCloudTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, 128);
+  grd.addColorStop(0, '#ffffff'); grd.addColorStop(0.55, '#f2f5f8'); grd.addColorStop(1, '#c9d4de');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  const rng = mulberry32(4242);
+  for (let i = 0; i < 26; i++) {
+    const x = rng() * 128, y = rng() * 128, r = 10 + rng() * 26;
+    const b = g.createRadialGradient(x, y, 0, x, y, r);
+    const bright = rng() < 0.5;
+    b.addColorStop(0, bright ? 'rgba(255,255,255,0.35)' : 'rgba(180,195,210,0.3)');
+    b.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = b; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const cloudTex = makeCloudTexture();
+// Shared tree-sway clock (E9): one uniform, driven by updateWorld.
+const swayUniforms = { uTime: { value: 0 } };
+// Tree sway (E9): a vertex-shader sway on a canopy material — vertices
+// displace by their local height above the trunk base (0 at the base, full
+// amplitude at the crown), with a per-instance phase hashed from the
+// instance translation. Amplitude is in LOCAL units (the instance scale
+// multiplies it — keep it small for the big lumenwoods). Chunk name
+// verified against the pinned r160 source.
+function addSway(mat, key, amp, yBase, ySpan) {
+  const f = n => (Number.isInteger(n) ? n + '.0' : String(n)); // GLSL needs float literals
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = swayUniforms.uTime;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          float swayPh = instanceMatrix[3][0] * 0.37 + instanceMatrix[3][2] * 0.53;
+        #else
+          float swayPh = 0.0;
+        #endif
+        float swayH = clamp((position.y - (${f(yBase)})) / (${f(ySpan)}), 0.0, 1.0);
+        transformed.x += sin(uTime * 0.8 + swayPh) * ${f(amp)} * swayH * swayH;
+        transformed.z += cos(uTime * 0.6 + swayPh * 1.3) * ${f(amp * 0.7)} * swayH * swayH;`);
+  };
+  mat.customProgramCacheKey = () => key;
+}
 
 // --- Licensed CC0 textures (Poly Haven, Standard v1.1 §3) ---
 // Embedded as data URIs (the single-file constraint stands). Full record:
@@ -790,18 +897,14 @@ function applyMood() {
   scene.fog.near = moodCur.fogNear;
   scene.fog.far = moodCur.fogFar;
   renderer.toneMappingExposure = moodCur.exposure;
-  // Sun disc / moon + glow follow the mood.
+  // Sun disc / moon + halo follow the mood (F2: ONE sprite with a two-zone
+  // texture — hot core + wide halo — instead of a core + a separate glow).
   if (skySys.core) {
     _sunPosA.copy(SUN_DIR).multiplyScalar(2600);
     _sunPosB.copy(MOON_DIR).multiplyScalar(2600);
     skySys.core.position.lerpVectors(_sunPosA, _sunPosB, moodCur.moonAmt);
-    skySys.core.material.color.copy(moodCur.disc);
-    skySys.core.scale.set(moodCur.discScale, moodCur.discScale, 1);
-  }
-  if (skySys.glow) {
-    skySys.glow.position.copy(skySys.core.position);
-    skySys.glow.material.color.copy(moodCur.glow);
-    skySys.glow.scale.set(moodCur.glowScale, moodCur.glowScale, 1);
+    skySys.core.material.color.copy(moodCur.glow);
+    skySys.core.scale.set(moodCur.glowScale, moodCur.glowScale, 1);
   }
   if (skySys.stars) {
     skySys.stars.visible = moodCur.stars > 0.01;
@@ -851,8 +954,8 @@ function updateMood(dt) {
   paintSky();
 }
 
-const sunGlowSprites = [];
-const skySys = { geo: null, core: null, glow: null, stars: null, starsMat: null };
+const sunGlowSprites = []; // F2: the sun sprite is NOT sheddable (it is the sun); the registry is kept for the valve loop (now a no-op) + mist/spouts, which are handled directly in applyValveLevel.
+const skySys = { geo: null, core: null, stars: null, starsMat: null };
 const _skyAz = new THREE.Vector3();
 function paintSky() {
   // Repaint the dome's vertex colors from the CURRENT (lerped) mood palette.
@@ -887,19 +990,20 @@ function paintSky() {
     new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
   skyGroup.add(sky);
   paintSky();
-  // Sun: bright core (always on — it IS the sun; in the forest mood it
-  // becomes the moon: recolored, shrunk, moved to the moon's azimuth) +
-  // wide glow (valve-gated). Both live in skyGroup so they follow the player.
+  // Sun (F2): ONE sprite with a two-zone canvas texture (a flat bright core
+  // ~28% of the radius + a wide warm halo) instead of a core + a separate
+  // glow sprite. In the forest mood it becomes the moon: recolored, shrunk,
+  // moved to the moon's azimuth. It lives in skyGroup so it follows the
+  // player, and it is NOT valve-sheddable.
   const sunPos = SUN_DIR.clone().multiplyScalar(2600);
-  const core = glowSprite(0xfff3c4, 150, 0.95);
+  const core = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: sunTex, color: 0xffc46b, transparent: true, opacity: 0.95,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false,
+  }));
+  core.scale.set(520, 520, 1);
   core.position.copy(sunPos);
   skyGroup.add(core);
   skySys.core = core;
-  const glow = glowSprite(0xffc46b, 520, 0.5);
-  glow.position.copy(sunPos);
-  skyGroup.add(glow);
-  skySys.glow = glow;
-  sunGlowSprites.push(glow);
   // Stars: one Points cloud on the dome, visible only in the night mood.
   const starN = 700;
   const sPos = new Float32Array(starN * 3);
@@ -926,10 +1030,13 @@ function paintSky() {
 
 // ============================== environment ==============================
 // Scene 1 — the mountain valley: Sunspire Perch overlooking Solmere Vale.
-// Draw-call budget (code-derived, Phase 2): terrain 1, river 1, ridge
+// Draw-call budget (code-derived, Round 3): terrain 1, river 1, ridge
 // rings 1 (5 rings merged), clouds 1, conifers 2, broadleafs 2,
 // undergrowth 1, rocks 1, waterfalls 1, mist 1 (all falls, one Points
-// cloud), birds 1, hero peaks 1, perch 1 = 15 meshes for the valley.
+// cloud), birds 1 (merged flock — valley/canyon/seabirds/moongliders),
+// hero peaks 1, perch 1, blob shadows 1 (E4), valley mist 1 (E7),
+// light shafts 1 (E8) = 18 meshes for the valley. Foam (E7) is
+// always-visible (1 call, counted under always-visible).
 // The canyon / ocean / forest add their own (see their builders); region
 // culling keeps only the nearby ones visible (see updateRegionVisibility).
 const worldAnim = { clouds: null, cloudGroup: null, riverTex: null, fallsTex: null, mistPts: [], mistPoints: null, fallsPos: [] };
@@ -940,7 +1047,7 @@ const worldAnim = { clouds: null, cloudGroup: null, riverTex: null, fallsTex: nu
 const regionDefs = [
   { name: 'valley', cx: 0, cz: 0, activeR: 1600, silR: 3000, detail: [], silhouette: [] },
   { name: 'canyon', cx: 0, cz: -1700, activeR: 1300, silR: 3200, detail: [], silhouette: [] },
-  { name: 'ocean', cx: 0, cz: -3700, activeR: 1900, silR: 4500, detail: [], silhouette: [] },
+  { name: 'ocean', cx: 0, cz: -3700, activeR: 1900, silR: 3200, detail: [], silhouette: [] }, // T2: 4500 -> 3200 (the sea horizon is kept from the canyon mouth northward; from the south valley the ocean sits behind the canyon walls anyway)
   { name: 'forest', cx: 2100, cz: -300, activeR: 1500, silR: 2600, detail: [], silhouette: [] },
 ];
 const regionActive = { valley: true, canyon: false, ocean: false, forest: false };
@@ -950,12 +1057,27 @@ let worldTime = 0;
 // distant skywings + 12 canyon cliffwings), all vertices updated on CPU
 // each frame. 1 draw call. ---
 const BIRD_N = 33;
-const birdPos = new Float32Array(BIRD_N * 15 * 3);
+// F1: all three flocks share ONE geometry + ONE mesh (61 birds: 33 valley/
+// canyon + 16 seabirds + 12 moongliders), with a per-vertex color attribute
+// carrying each flock's color. Regional flocks register into the shared
+// arrays at per-flock offsets via makeBirdFlock.
+const FLOCK_TOTAL = 61;
+const birdPos = new Float32Array(FLOCK_TOTAL * 15 * 3);
+const birdCol = new Float32Array(FLOCK_TOTAL * 15 * 3);
 const birdGeo = new THREE.BufferGeometry();
 birdGeo.setAttribute('position', new THREE.BufferAttribute(birdPos, 3));
+birdGeo.setAttribute('color', new THREE.BufferAttribute(birdCol, 3));
 const birdMesh = new THREE.Mesh(birdGeo,
-  new THREE.MeshBasicMaterial({ color: 0x232a33, side: THREE.DoubleSide }));
+  new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 birdMesh.frustumCulled = false;
+let flockOffset = BIRD_N; // next free bird slot in the shared arrays
+function paintFlockColor(firstBird, count, hex) {
+  const c = new THREE.Color(hex);
+  for (let i = firstBird * 15; i < (firstBird + count) * 15; i++) {
+    birdCol[i * 3] = c.r; birdCol[i * 3 + 1] = c.g; birdCol[i * 3 + 2] = c.b;
+  }
+}
+paintFlockColor(0, BIRD_N, 0x232a33);
 const birds = [];
 {
   const flocks = [
@@ -1055,16 +1177,15 @@ function updateBirds(dt) {
   }
   birdGeo.attributes.position.needsUpdate = true;
 }
-// Regional bird flocks (Phase 2): same vertex writer, separate meshes so
-// each region's birds can have their own color and flock centers.
+// Regional bird flocks (Phase 2, merged in Round 3 F1): same vertex
+// writer, but all flocks share the ONE merged bird mesh — each flock writes
+// into the shared position array at its own offset, and the vertex colors
+// (set at registration) carry each flock's color.
 function makeBirdFlock(opts) {
   const N = opts.count;
-  const pos = new Float32Array(N * 45);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: opts.color, side: THREE.DoubleSide }));
-  mesh.frustumCulled = false;
-  scene.add(mesh);
+  const offset = flockOffset;
+  flockOffset += N;
+  paintFlockColor(offset, N, opts.color);
   const list = [];
   const rng = mulberry32(opts.seed);
   for (let i = 0; i < N; i++) {
@@ -1082,7 +1203,7 @@ function makeBirdFlock(opts) {
   }
   const dist = [];
   for (let i = 0; i < N; i++) dist.push([0, i]);
-  return { N, pos, geo, mesh, list, dist, hidden: new Set(), minActive: opts.minActive || 4 };
+  return { N, offset, pos: birdPos, geo: birdGeo, list, dist, hidden: new Set(), minActive: opts.minActive || 4 };
 }
 function updateBirdFlock(sys, dt) {
   const active = Math.max(sys.minActive, Math.floor(sys.N * perfValve.particleScale));
@@ -1097,7 +1218,7 @@ function updateBirdFlock(sys, dt) {
   for (let k = 0; k < sys.N - active; k++) sys.hidden.add(sys.dist[k][1]);
   for (let i = 0; i < sys.N; i++) {
     const b = sys.list[i];
-    const o = i * 45;
+    const o = (sys.offset + i) * 45; // F1: shared array, per-flock offset
     if (sys.hidden.has(i)) { for (let v = 0; v < 15; v++) { sys.pos[o + v * 3 + 1] = -999; } continue; }
     b.angle += dt * b.angSpeed;
     writeBirdVerts(b, sys.pos, o, worldTime);
@@ -1109,20 +1230,22 @@ function updateBirdFlock(sys, dt) {
 // segments). Fog does the rest. Returns GEOMETRY — the caller merges all
 // rings into one mesh (Phase 2: 5 rings, 1 draw call).
 function makeRidgeRing(radius, peakMin, peakMax, seed, topColor, botColor) {
-  const SEG = 96, ROWS = 4;
+  const SEG = 96, ROWS = 6; // E2: 6 rows for a smoother haze-to-peak gradient
   const posArr = new Float32Array((SEG + 1) * ROWS * 3);
   const colArr = new Float32Array((SEG + 1) * ROWS * 3);
   const idx = [];
   const top = new THREE.Color(topColor), bot = new THREE.Color(botColor);
   const mid = new THREE.Color().copy(bot).lerp(top, 0.45);
+  const botMid = new THREE.Color().copy(bot).lerp(mid, 0.5);
+  const midTop = new THREE.Color().copy(mid).lerp(top, 0.5);
   const snow = new THREE.Color(0xeef2f5);
   for (let i = 0; i <= SEG; i++) {
     const a = (i / SEG) * Math.PI * 2;
     const n = fbm(Math.cos(a) * 2.5 + seed, Math.sin(a) * 2.5 + seed * 1.7);
     const peak = peakMin + (peakMax - peakMin) * (0.25 + 0.75 * n);
     const x = Math.cos(a) * radius, z = Math.sin(a) * radius;
-    const ys = [-70, peak * 0.45, peak * 0.8, peak];
-    const cs = [bot, mid, top, peak > 220 ? snow : top];
+    const ys = [-70, peak * 0.3, peak * 0.55, peak * 0.75, peak * 0.9, peak];
+    const cs = [bot, botMid, mid, midTop, top, peak > 220 ? snow : top];
     for (let r = 0; r < ROWS; r++) {
       const o = (i * ROWS + r) * 3;
       posArr[o] = x; posArr[o + 1] = ys[r]; posArr[o + 2] = z;
@@ -1140,6 +1263,7 @@ function makeRidgeRing(radius, peakMin, peakMax, seed, topColor, botColor) {
   g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
   g.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
   g.setIndex(idx);
+  g.computeVertexNormals(); // E2: Lambert needs normals (indexed geo -> smooth)
   return g;
 }
 // Builds a waterfall strip that HUGS the slope (Phase 2 fix): Phase 1 hung
@@ -1183,7 +1307,7 @@ function buildEnvironment() {
   const cSnow = new THREE.Color(0xeef2f5), cRock = new THREE.Color(0x8a7d6b),
         cRockD = new THREE.Color(0x6b5f4f), cGrass = new THREE.Color(0x5a7d3c),
         cGrassD = new THREE.Color(0x42602c), cMeadow = new THREE.Color(0x7d9a4a),
-        cSand = new THREE.Color(0xc9b183), cTmp = new THREE.Color();
+        cSand = new THREE.Color(0xc9b183), cTmp = new THREE.Color(), cTmp2 = new THREE.Color();
   for (let i = 0; i < tp.count; i++) {
     const x = tp.getX(i), z = tp.getZ(i);
     const h = terrainHeight(x, z);
@@ -1194,10 +1318,18 @@ function buildEnvironment() {
     const slope = Math.hypot(sx, sz);
     const d = Math.abs(x - valleyCenterX(z));
     const n = fbm(x * 0.02 + 3.1, z * 0.02 + 9.4);
-    if (h > 100) cTmp.copy(cSnow).lerp(cRock, clamp((115 - h) / 15, 0, 1) * 0.4);
-    else if (slope > 0.85) cTmp.copy(cRock).lerp(cRockD, n);
-    else if (d < 22 && h < -30) cTmp.copy(cSand);
-    else cTmp.copy(cGrass).lerp(n > 0.55 ? cMeadow : cGrassD, Math.abs(n - 0.5) * 1.6);
+    // E3: smoothstep band transitions (no hard snow/rock edges) + a
+    // low-frequency patchiness term that shifts large blotches toward
+    // meadow or rock tints, so the valley floor stops reading as flat
+    // green carpet.
+    const patch = fbm(x * 0.002 + 5.5, z * 0.002 + 1.2);
+    cTmp.copy(cGrass).lerp(n > 0.55 ? cMeadow : cGrassD, Math.abs(n - 0.5) * 1.6);
+    if (patch > 0.62) cTmp.lerp(cMeadow, (patch - 0.62) * 1.5);
+    else if (patch < 0.38) cTmp.lerp(cRock, (0.38 - patch) * 1.2);
+    if (d < 22 && h < -30) cTmp.copy(cSand);
+    cTmp2.copy(cRock).lerp(cRockD, n);
+    cTmp.lerp(cTmp2, smoothstep(0.75, 0.95, slope));
+    cTmp.lerp(cSnow, smoothstep(95, 115, h));
     // Crevice darkening + gentle variation.
     const shade = 0.82 + 0.18 * fbm(x * 0.008 + 11, z * 0.008 + 5);
     tColors[i * 3] = cTmp.r * shade; tColors[i * 3 + 1] = cTmp.g * shade; tColors[i * 3 + 2] = cTmp.b * shade;
@@ -1248,27 +1380,34 @@ function buildEnvironment() {
   riverGeo.setIndex(rIdx);
   riverGeo.computeVertexNormals();
   const riverMesh = new THREE.Mesh(riverGeo,
-    new THREE.MeshStandardMaterial({ map: riverTex, color: 0x9fd4e8, roughness: 0.18, metalness: 0.35, transparent: true, opacity: 0.94 }));
+    new THREE.MeshStandardMaterial({ map: riverTex, color: 0x9fd4e8, roughness: 0.18, metalness: 0.1, transparent: true, opacity: 0.94 }));
   scene.add(riverMesh);
   regionDef('valley').silhouette.push(riverMesh);
 
   // --- Distant mountain ranges: five layered ridge rings, ONE merged mesh ---
+  // E2: MeshLambertMaterial (cheap, responds to the sun/hemi) instead of
+  // unlit Basic — the rings warm at sunset and cool at night instead of
+  // glowing flat like cardboard cutouts.
   const ringsMesh = new THREE.Mesh(mergeGeos([
     makeRidgeRing(950, 140, 260, 3.7, 0x5a6b8a, 0xd9c9a4),
     makeRidgeRing(1250, 200, 340, 8.2, 0x6b7d9e, 0xe0d0ae),
     makeRidgeRing(1600, 260, 420, 13.9, 0x7d8db0, 0xe6d3ac),
     makeRidgeRing(1900, 320, 520, 21.4, 0x8a9ab8, 0xe6d3ac),
     makeRidgeRing(2300, 380, 600, 27.1, 0x93a3c0, 0xe6d3ac),
-  ]), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true }));
+  ]), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true }));
   scene.add(ringsMesh);
   regionDef('valley').silhouette.push(ringsMesh);
 
   // --- Clouds: instanced flattened puffs, mostly BELOW the perch ---
+  // E1: smooth shading (the icosahedron's built-in radial normals — no
+  // computeVertexNormals: on non-indexed geometry that would give flat face
+  // normals) + a soft cloud texture + per-instance color variation + slow
+  // per-instance drift, so the clouds stop being identical white lumps.
   const cloudGroup = new THREE.Group();
   scene.add(cloudGroup);
   worldAnim.cloudGroup = cloudGroup;
   const cloudGeo = new THREE.IcosahedronGeometry(1, 1);
-  const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, flatShading: true, transparent: true, opacity: 0.92 });
+  const cloudMat = new THREE.MeshStandardMaterial({ map: cloudTex, color: 0xffffff, roughness: 1, metalness: 0, transparent: true, opacity: 0.92 });
   const crng = mulberry32(2026);
   const puffXf = [];
   for (let c = 0; c < 26; c++) {
@@ -1281,6 +1420,7 @@ function buildEnvironment() {
         x: cx + (crng() - 0.5) * 50, y: cy + (crng() - 0.5) * 8, z: cz + (crng() - 0.5) * 30,
         sx: 14 + crng() * 20, sy: 5 + crng() * 4, sz: 10 + crng() * 10,
         ry: crng() * Math.PI,
+        dx: (crng() - 0.5) * 12, dz: (crng() - 0.5) * 12, dp: crng() * Math.PI * 2,
       });
     }
   }
@@ -1297,6 +1437,7 @@ function buildEnvironment() {
         x: cx + (crng() - 0.5) * 60, y: cy + (crng() - 0.5) * 8, z: cz + (crng() - 0.5) * 40,
         sx: 18 + crng() * 22, sy: 6 + crng() * 4, sz: 12 + crng() * 12,
         ry: crng() * Math.PI,
+        dx: (crng() - 0.5) * 12, dz: (crng() - 0.5) * 12, dp: crng() * Math.PI * 2,
       });
     }
   }
@@ -1304,17 +1445,23 @@ function buildEnvironment() {
   clouds.userData.full = puffXf.length;
   {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    const col = new THREE.Color();
     for (let i = 0; i < puffXf.length; i++) {
       const p = puffXf[i];
       e.set(0, p.ry, 0); q.setFromEuler(e);
       v.set(p.x, p.y, p.z); sc.set(p.sx, p.sy, p.sz);
       m.compose(v, q, sc);
       clouds.setMatrixAt(i, m);
+      // Per-instance color: brightness 0.85-1.0, slight warm/cool tint.
+      col.setHSL(crng() < 0.5 ? 0.08 : 0.58, 0.06, 0.88 + crng() * 0.12);
+      clouds.setColorAt(i, col);
     }
   }
   clouds.instanceMatrix.needsUpdate = true;
+  if (clouds.instanceColor) clouds.instanceColor.needsUpdate = true;
   cloudGroup.add(clouds);
   worldAnim.clouds = clouds;
+  worldAnim.cloudDrift = puffXf; // E1: per-instance drift params (updateWorld)
   regionDef('valley').detail.push(clouds);
 
   // --- Trees: instanced trunks + conifer canopies on the valley slopes ---
@@ -1336,9 +1483,10 @@ function buildEnvironment() {
   const trunkMesh = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.18, 0.3, 2.2, 5),
     new THREE.MeshStandardMaterial({ map: barkTex, color: 0xffffff, roughness: 0.9 }), treeSpots.length);
+  const canopyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true });
+  addSway(canopyMat, 'skybound-sway-conifer', 0.12, -3.0, 6.0); // E9: cone local y -3..3
   const canopyMesh = new THREE.InstancedMesh(
-    new THREE.ConeGeometry(2.2, 6, 7),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true }), treeSpots.length);
+    new THREE.ConeGeometry(2.2, 6, 7), canopyMat, treeSpots.length);
   {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
     const col = new THREE.Color();
@@ -1360,21 +1508,28 @@ function buildEnvironment() {
   regionDef('valley').detail.push(trunkMesh, canopyMesh);
 
   // --- Rocks: instanced boulders on the slopes (licensed rock texture, Phase 2) ---
+  // E3: 130 -> 200 instances; the extra 70 are outcrops placed on steep
+  // slopes (slope > 0.6), same mesh, same draw call.
   const rkRng = mulberry32(555);
   const rockMesh = new THREE.InstancedMesh(
     new THREE.DodecahedronGeometry(1, 0),
-    new THREE.MeshStandardMaterial({ map: rockTex, color: 0xffffff, roughness: 0.95, flatShading: true }), 130);
+    new THREE.MeshStandardMaterial({ map: rockTex, color: 0xffffff, roughness: 0.95, flatShading: true }), 200);
   {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
     const col = new THREE.Color();
     let placed = 0, rt = 0;
-    while (placed < 130 && rt < 3000) {
+    while (placed < 200 && rt < 6000) {
       rt++;
       const x = (rkRng() - 0.5) * 1500, z = (rkRng() - 0.5) * 1500;
       const h = terrainHeight(x, z);
       const d = Math.abs(x - valleyCenterX(z));
       if (h < -30 || d < 16) continue;
       if (Math.hypot(x - PERCH_POS.x, z - PERCH_POS.z) < 20) continue;
+      if (placed >= 130) { // outcrops only on steep slopes
+        const sx = (terrainHeight(x + 4, z) - terrainHeight(x - 4, z)) / 8;
+        const sz = (terrainHeight(x, z + 4) - terrainHeight(x, z - 4)) / 8;
+        if (Math.hypot(sx, sz) < 0.6) continue;
+      }
       const s = 0.6 + rkRng() * 2.9;
       e.set(rkRng() * 0.6, rkRng() * Math.PI * 2, rkRng() * 0.6); q.setFromEuler(e);
       v.set(x, h + 0.25 * s, z); sc.set(s, s * (0.6 + rkRng() * 0.5), s);
@@ -1450,9 +1605,10 @@ function buildEnvironment() {
   const blTrunk = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.22, 0.38, 3.0, 5),
     new THREE.MeshStandardMaterial({ map: barkTex, color: 0xffffff, roughness: 0.9 }), blSpots.length);
+  const blCanopyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true });
+  addSway(blCanopyMat, 'skybound-sway-broadleaf', 0.10, -2.8, 5.6); // E9: icosahedron local y -2.8..2.8
   const blCanopy = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(2.8, 1),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true }), blSpots.length);
+    new THREE.IcosahedronGeometry(2.8, 1), blCanopyMat, blSpots.length);
   {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
     const col = new THREE.Color();
@@ -1473,6 +1629,35 @@ function buildEnvironment() {
   scene.add(blTrunk); scene.add(blCanopy);
   regionDef('valley').detail.push(blTrunk, blCanopy);
 
+  // --- Blob shadows (E4): one instanced mesh of soft dark discs under every
+  // valley tree — the grounding that real shadow maps would give, for 1
+  // draw call. Reuses glowTex (radial falloff) with a dark color. Discs are
+  // kept smallish: on steep slopes a flat disc clips into the uphill
+  // terrain, so a suggestive patch beats an exact footprint. Valve-sheddable
+  // (hidden at L2 — see applyValveLevel / updateRegionState).
+  const blobGeo = new THREE.PlaneGeometry(2, 2);
+  blobGeo.rotateX(-Math.PI / 2);
+  const blobMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x14100a, transparent: true, opacity: 0.32, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const blobShadows = new THREE.InstancedMesh(blobGeo, blobMat, treeSpots.length + blSpots.length);
+  {
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    let bi = 0;
+    for (const t of treeSpots) {
+      e.set(0, t.ry, 0); q.setFromEuler(e);
+      v.set(t.x, t.h + 0.05, t.z); sc.set(2.6 * t.s, 1, 2.6 * t.s);
+      m.compose(v, q, sc); blobShadows.setMatrixAt(bi++, m);
+    }
+    for (const t of blSpots) {
+      e.set(0, t.ry, 0); q.setFromEuler(e);
+      v.set(t.x, t.h + 0.05, t.z); sc.set(3.4 * t.s, 1, 3.4 * t.s);
+      m.compose(v, q, sc); blobShadows.setMatrixAt(bi++, m);
+    }
+  }
+  blobShadows.instanceMatrix.needsUpdate = true;
+  scene.add(blobShadows);
+  worldAnim.blobShadows = blobShadows;
+  regionDef('valley').detail.push(blobShadows);
+
   // --- Undergrowth billboards (Phase 2): crossed-plane ferns on the
   // valley floor and lower slopes — one instanced mesh, alphaTest cutout ---
   const ugGeoA = new THREE.PlaneGeometry(1.7, 1.3);
@@ -1482,7 +1667,7 @@ function buildEnvironment() {
   ugGeo.translate(0, 0.6, 0); // pivot at the base
   const ugRng = mulberry32(1357);
   const ugMesh = new THREE.InstancedMesh(ugGeo,
-    new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 }), 500);
+    new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 }), 508);
   {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
     const col = new THREE.Color();
@@ -1497,6 +1682,19 @@ function buildEnvironment() {
       const s = 0.7 + ugRng() * 1.3;
       e.set(0, ugRng() * Math.PI, 0); q.setFromEuler(e);
       v.set(x, h, z); sc.set(s, s, s);
+      m.compose(v, q, sc); ugMesh.setMatrixAt(placed, m);
+      col.setHSL(0.26 + ugRng() * 0.06, 0.45, 0.75 + ugRng() * 0.25);
+      ugMesh.setColorAt(placed, col);
+      placed++;
+    }
+    // E10: 8 grass tufts around the perch ring (the opening shot's foreground).
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + ugRng() * 0.5;
+      const r = 5 + ugRng() * 2.5;
+      const s = 0.8 + ugRng() * 0.8;
+      e.set(0, ugRng() * Math.PI, 0); q.setFromEuler(e);
+      v.set(PERCH_POS.x + Math.cos(a) * r, PERCH_POS.y - 0.35, PERCH_POS.z + Math.sin(a) * r);
+      sc.set(s, s, s);
       m.compose(v, q, sc); ugMesh.setMatrixAt(placed, m);
       col.setHSL(0.26 + ugRng() * 0.06, 0.45, 0.75 + ugRng() * 0.25);
       ugMesh.setColorAt(placed, col);
@@ -1551,11 +1749,79 @@ function buildEnvironment() {
   scene.add(fallsMesh);
   regionDef('valley').detail.push(fallsMesh);
 
+  // --- Valley mist layers (E7): low soft planes across the valley floor —
+  // the layered depth the valley lacked. Same pattern as the canyon mist.
+  const vMistGeos = [];
+  for (let i = 0; i < 6; i++) {
+    const z = -700 + i * 280 + (frng() - 0.5) * 60;
+    const cx = valleyCenterX(z);
+    const g = new THREE.PlaneGeometry(220 + frng() * 80, 40 + frng() * 16);
+    xform(g, cx + (frng() - 0.5) * 80, -34 + frng() * 14, z, -Math.PI / 2 + (frng() - 0.5) * 0.15, 0, (frng() - 0.5) * 0.4);
+    vMistGeos.push(g.toNonIndexed());
+  }
+  const valleyMist = new THREE.Mesh(mergeGeometries(vMistGeos),
+    new THREE.MeshBasicMaterial({ map: mistTex, color: 0xe8e0c8, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }));
+  scene.add(valleyMist);
+  worldAnim.valleyMist = valleyMist;
+  regionDef('valley').detail.push(valleyMist);
+
+  // --- Golden-hour light shafts (E8): three large additive gradient quads
+  // near the sun's azimuth over the valley. Opacity follows the mood (full
+  // in valley/sunset light, gone at night — see updateWorld). Valve-
+  // sheddable (hidden at L2 — see applyValveLevel / updateRegionState).
+  const shaftCv = document.createElement('canvas'); shaftCv.width = 64; shaftCv.height = 256;
+  const sg = shaftCv.getContext('2d');
+  const sGrad = sg.createLinearGradient(0, 0, 0, 256);
+  sGrad.addColorStop(0, 'rgba(255,240,200,0.9)');
+  sGrad.addColorStop(0.5, 'rgba(255,230,180,0.35)');
+  sGrad.addColorStop(1, 'rgba(255,230,180,0)');
+  sg.fillStyle = sGrad; sg.fillRect(0, 0, 64, 256);
+  sg.globalCompositeOperation = 'destination-out';
+  const sSide = sg.createLinearGradient(0, 0, 64, 0);
+  sSide.addColorStop(0, 'rgba(0,0,0,1)'); sSide.addColorStop(0.3, 'rgba(0,0,0,0)');
+  sSide.addColorStop(0.7, 'rgba(0,0,0,0)'); sSide.addColorStop(1, 'rgba(0,0,0,1)');
+  sg.fillStyle = sSide; sg.fillRect(0, 0, 64, 256);
+  const shaftTex = new THREE.CanvasTexture(shaftCv);
+  shaftTex.colorSpace = THREE.SRGBColorSpace;
+  const shaftGeos = [];
+  const shaftDefs = [
+    { x: -180, y: 120, z: -200, w: 130, h: 340 },
+    { x: 60, y: 140, z: -420, w: 170, h: 400 },
+    { x: -320, y: 100, z: 150, w: 110, h: 300 },
+  ];
+  for (const sd of shaftDefs) {
+    const g = new THREE.PlaneGeometry(sd.w, sd.h);
+    xform(g, sd.x, sd.y, sd.z, 0.35, 0.5, 0.12); // tilt toward the sun's azimuth
+    shaftGeos.push(g.toNonIndexed());
+  }
+  const shaftMat = new THREE.MeshBasicMaterial({ map: shaftTex, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const shafts = new THREE.Mesh(mergeGeometries(shaftGeos), shaftMat);
+  scene.add(shafts);
+  worldAnim.shafts = shafts;
+  worldAnim.shaftMat = shaftMat;
+  regionDef('valley').detail.push(shafts);
+
   // --- Birds (one draw call) + the perch outcrop (one merged mesh) ---
   scene.add(birdMesh);
-  const perchMat = new THREE.MeshStandardMaterial({ map: rockTex, color: 0xffffff, roughness: 0.95, flatShading: true });
+  // E10: the platform carries lichen/moss patches (vertex colors on the
+  // rock map) so the opening shot's foreground is not bare grey stone.
+  const perchMat = new THREE.MeshStandardMaterial({ map: rockTex, color: 0xffffff, roughness: 0.95, flatShading: true, vertexColors: true });
   const platformGeo = new THREE.CylinderGeometry(7, 8.5, 2.5, 10);
   xform(platformGeo, PERCH_POS.x, PERCH_POS.y - 1.6, PERCH_POS.z, 0, 0, 0);
+  {
+    const pp = platformGeo.attributes.position;
+    const pcols = new Float32Array(pp.count * 3);
+    const lrng = mulberry32(808);
+    for (let i = 0; i < pp.count; i++) {
+      // Lichen/moss on the top face + a random subset of the sides.
+      const lichen = (pp.getY(i) > PERCH_POS.y - 0.5 && lrng() < 0.4) || lrng() < 0.08;
+      const t = lichen ? 0.55 + lrng() * 0.3 : 0;
+      pcols[i * 3] = lerp(1, 0.45, t);
+      pcols[i * 3 + 1] = lerp(1, 0.55, t);
+      pcols[i * 3 + 2] = lerp(1, 0.30, t);
+    }
+    platformGeo.setAttribute('color', new THREE.BufferAttribute(pcols, 3));
+  }
   const boulders = [platformGeo.toNonIndexed()];
   const brng2 = mulberry32(808);
   for (let i = 0; i < 5; i++) {
@@ -1565,9 +1831,9 @@ function buildEnvironment() {
       brng2(), brng2() * 3, brng2(), 1, 0.7, 1);
     // Phase 5: DodecahedronGeometry (a PolyhedronGeometry) is already
     // non-indexed in r160 — toNonIndexed() on it only logs a warning.
-    boulders.push(g.index ? g.toNonIndexed() : g);
+    boulders.push(paintWhite(g.index ? g.toNonIndexed() : g));
   }
-  const perchMesh = new THREE.Mesh(mergeGeometries(boulders), perchMat);
+  const perchMesh = new THREE.Mesh(mergeGeos(boulders), perchMat);
   scene.add(perchMesh);
   regionDef('valley').detail.push(perchMesh);
 }
@@ -1592,6 +1858,24 @@ function buildMistPoints() {
   points.frustumCulled = false;
   scene.add(points);
   worldAnim.mistPoints = points;
+  // Waterfall foam (E7): one merged mesh of soft white discs at every fall
+  // base in the world (valley 7 + canyon 3 + Embermouth 1 = 11). Always
+  // visible — fog handles distance, like the mist Points cloud. Opacity
+  // pulses in phase with the mist breath (see updateWorld).
+  const foamGeos = [];
+  const foamRng = mulberry32(515);
+  for (const f of worldAnim.fallsPos) {
+    const fg2 = new THREE.CircleGeometry(5, 12);
+    fg2.rotateX(-Math.PI / 2);
+    const fs = 0.8 + foamRng() * 0.7;
+    xform(fg2, f.x, f.y - 1.7, f.z, 0, 0, 0, fs, 1, fs);
+    foamGeos.push(fg2);
+  }
+  const foamMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0xffffff, transparent: true, opacity: 0.6, depthWrite: false });
+  const foamMesh = new THREE.Mesh(mergeGeos(foamGeos), foamMat);
+  scene.add(foamMesh);
+  worldAnim.foam = foamMesh;
+  worldAnim.foamMat = foamMat;
 }
 
 // ============================== The Emberdeep Canyon (Phase 2, Scene 3 region) ==============================
@@ -1660,7 +1944,7 @@ function buildCanyon() {
   cRiverGeo.setIndex(cIdx);
   cRiverGeo.computeVertexNormals();
   const cRiverMesh = new THREE.Mesh(cRiverGeo,
-    new THREE.MeshStandardMaterial({ map: worldAnim.riverTex, color: 0x7fc4b8, roughness: 0.18, metalness: 0.35, transparent: true, opacity: 0.94 }));
+    new THREE.MeshStandardMaterial({ map: worldAnim.riverTex, color: 0x7fc4b8, roughness: 0.18, metalness: 0.1, transparent: true, opacity: 0.94 }));
   scene.add(cRiverMesh);
   regionDef('canyon').silhouette.push(cRiverMesh);
 
@@ -1780,7 +2064,8 @@ function buildCanyon() {
 // seabirds, and high cirrus cloud puffs. The horizon reads as endless:
 // the water plane runs to the fog (4500 m in the ocean mood).
 // Draw calls (code-derived): water 1, islands 1, beach skirts 1, whitecaps 1,
-// whales 1, spouts 1, dolphins 1, seabirds 1, ocean clouds 1, glitter 1 = 10.
+// whales 1, spouts 1, dolphins 1, ocean clouds 1, glitter 1 = 9. (Seabirds
+// are part of the merged flock — Round 3 F1 — counted under always-visible.)
 // Silhouette: water, islands, skirts, glitter.
 const oceanAnim = {
   waterUniforms: { uTime: { value: 0 } }, waterTex: null,
@@ -1804,10 +2089,24 @@ function buildOcean() {
     shader.uniforms.uTime = oceanAnim.waterUniforms.uTime;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      // Analytic normals (E5): the vertex waves never recomputed normals,
+      // so the Phong specular never broke up across wave faces and the sea
+      // read as a flat sheet. The sine waves have closed-form partial
+      // derivatives — the normal is (-dy/dx, 1, -dy/dz), normalized.
+      // Chunk name verified against the pinned r160 source.
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        float dydx = 0.02475 * cos(position.x * 0.045 + uTime * 0.9)
+          + 0.0125 * cos((position.x + position.z) * 0.025 + uTime * 0.45)
+          + 0.0132 * cos((position.x * 0.11 - position.z * 0.09) + uTime * 1.3);
+        float dydz = 0.024 * cos(position.z * 0.06 - uTime * 0.7)
+          + 0.0125 * cos((position.x + position.z) * 0.025 + uTime * 0.45)
+          - 0.0108 * cos((position.x * 0.11 - position.z * 0.09) + uTime * 1.3);
+        objectNormal = normalize(vec3(-dydx, 1.0, -dydz));`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         transformed.y += sin(position.x * 0.045 + uTime * 0.9) * 0.55
           + sin(position.z * 0.06 - uTime * 0.7) * 0.4
-          + sin((position.x + position.z) * 0.025 + uTime * 0.45) * 0.5;`);
+          + sin((position.x + position.z) * 0.025 + uTime * 0.45) * 0.5
+          + sin((position.x * 0.11 - position.z * 0.09) + uTime * 1.3) * 0.12;`);
   };
   waterMat.customProgramCacheKey = () => 'skybound-ocean-water';
   const waterMesh = new THREE.Mesh(waterGeo, waterMat);
@@ -1977,7 +2276,7 @@ function buildOcean() {
   oceanAnim.dolphins = dolphins;
   regionDef('ocean').detail.push(dolphins);
 
-  // --- Seabirds over the open water (white flock, 1 draw call) ---
+  // --- Seabirds over the open water (white flock, merged — F1) ---
   oceanAnim.seabirds = makeBirdFlock({
     count: 16,
     flocks: [
@@ -1989,20 +2288,26 @@ function buildOcean() {
   });
 
   // --- Ocean clouds: high cirrus puffs (instanced, valve-shed) ---
+  // E1: same soft treatment as the valley clouds (smooth shading + cloud
+  // texture + per-instance color); no per-instance drift (they are far).
   const oCloudGeo = new THREE.IcosahedronGeometry(1, 1);
-  const oCloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, flatShading: true, transparent: true, opacity: 0.9 });
+  const oCloudMat = new THREE.MeshStandardMaterial({ map: cloudTex, color: 0xffffff, roughness: 1, metalness: 0, transparent: true, opacity: 0.9 });
   const oClouds = new THREE.InstancedMesh(oCloudGeo, oCloudMat, 40);
   oClouds.userData.full = 40;
   {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    const col = new THREE.Color();
     for (let i = 0; i < 40; i++) {
       const cx = -2000 + orng() * 4000, cz = -2800 - orng() * 1900, cy = 120 + orng() * 140;
       e.set(0, orng() * Math.PI, 0); q.setFromEuler(e);
       v.set(cx, cy, cz); sc.set(20 + orng() * 30, 5 + orng() * 4, 12 + orng() * 12);
       m.compose(v, q, sc); oClouds.setMatrixAt(i, m);
+      col.setHSL(orng() < 0.5 ? 0.08 : 0.58, 0.06, 0.88 + orng() * 0.12);
+      oClouds.setColorAt(i, col);
     }
   }
   oClouds.instanceMatrix.needsUpdate = true;
+  if (oClouds.instanceColor) oClouds.instanceColor.needsUpdate = true;
   scene.add(oClouds);
   oceanAnim.clouds = oClouds;
   regionDef('ocean').detail.push(oClouds);
@@ -2073,7 +2378,8 @@ function updateOcean(dt) {
 // lights — the glow is emissive + additive sprites only (light count stays
 // at 3). The moonlight mood (see MOODS.forest) does the rest.
 // Draw calls (code-derived): terrain 1, trunks 1, canopy 1, glowcaps 1,
-// glow plants 1, motes 1, fireflies 1, gliders 1, mist 1 = 9.
+// glow plants 1, motes 1, fireflies 1, mist 1 = 8. (Night gliders are part
+// of the merged flock — Round 3 F1 — counted under always-visible.)
 // Silhouette: terrain.
 const forestAnim = {
   motes: null, motesPos: null, motesBase: null, motesPhase: null, motesN: 0,
@@ -2113,7 +2419,7 @@ function buildForest() {
   scene.add(forMesh);
   regionDef('forest').silhouette.push(forMesh);
 
-  // --- Lumenwood trees: 90 giants (trunks + 2 canopy blobs each) ---
+  // --- Lumenwood trees: 90 giants (trunks + 3 canopy blobs each) ---
   const treeSpotsF = [];
   let ft = 0;
   while (treeSpotsF.length < 90 && ft < 6000) {
@@ -2129,10 +2435,11 @@ function buildForest() {
   const fTrunk = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.5, 1.1, 30, 6),
     new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 }), treeSpotsF.length);
+  const fCanopyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true, emissive: 0x06231f, emissiveIntensity: 0.7 });
+  addSway(fCanopyMat, 'skybound-sway-lumenwood', 0.012, -1.0, 2.0); // E9: tiny LOCAL amp — the x10-16 instance scale multiplies it
   const fCanopy = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(1, 1),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true, emissive: 0x06231f, emissiveIntensity: 0.7 }),
-    treeSpotsF.length * 2);
+    new THREE.IcosahedronGeometry(1, 1), fCanopyMat,
+    treeSpotsF.length * 3); // E10: 3 blobs per tree (was 2) — a darker under-blob for canopy depth
   {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
     const col = new THREE.Color();
@@ -2144,17 +2451,23 @@ function buildForest() {
       m.compose(v, q, sc); fTrunk.setMatrixAt(i, m);
       col.setHSL(0.7, 0.15, 0.13 + t.tint * 0.08);
       fTrunk.setColorAt(i, col);
-      // Two canopy blobs per tree: a wide crown + a smaller high crown.
+      // Three canopy blobs per tree: a wide crown + a smaller high crown +
+      // a darker under-blob for depth (E10).
       v.set(t.x, t.h + t.th * 0.82, t.z);
       sc.set(10 + frng() * 6, 5 + frng() * 2, 10 + frng() * 6);
-      m.compose(v, q, sc); fCanopy.setMatrixAt(i * 2, m);
+      m.compose(v, q, sc); fCanopy.setMatrixAt(i * 3, m);
       col.setHSL(0.42 + t.tint * 0.08, 0.42, 0.16 + t.tint * 0.1);
-      fCanopy.setColorAt(i * 2, col);
+      fCanopy.setColorAt(i * 3, col);
       v.set(t.x + (frng() - 0.5) * 10, t.h + t.th * 0.98, t.z + (frng() - 0.5) * 10);
       sc.set(7 + frng() * 4, 4 + frng() * 2, 7 + frng() * 4);
-      m.compose(v, q, sc); fCanopy.setMatrixAt(i * 2 + 1, m);
+      m.compose(v, q, sc); fCanopy.setMatrixAt(i * 3 + 1, m);
       col.setHSL(0.44 + t.tint * 0.06, 0.4, 0.18 + t.tint * 0.1);
-      fCanopy.setColorAt(i * 2 + 1, col);
+      fCanopy.setColorAt(i * 3 + 1, col);
+      v.set(t.x + (frng() - 0.5) * 8, t.h + t.th * 0.62, t.z + (frng() - 0.5) * 8);
+      sc.set(6 + frng() * 4, 3 + frng() * 2, 6 + frng() * 4);
+      m.compose(v, q, sc); fCanopy.setMatrixAt(i * 3 + 2, m);
+      col.setHSL(0.42 + t.tint * 0.08, 0.4, 0.10 + t.tint * 0.05);
+      fCanopy.setColorAt(i * 3 + 2, col);
     }
   }
   fTrunk.instanceMatrix.needsUpdate = true;
@@ -2276,7 +2589,7 @@ function buildForest() {
   forestAnim.ffPhase = fPhase; forestAnim.ffN = FF_N;
   regionDef('forest').detail.push(fireflies);
 
-  // --- Night gliders (moongliders) circling the canopy (1 draw call) ---
+  // --- Night gliders (moongliders) circling the canopy (merged flock, F1) ---
   forestAnim.gliders = makeBirdFlock({
     count: 12,
     flocks: [
@@ -2322,18 +2635,40 @@ function updateForest(dt) {
   }
   forestAnim.fireflies.geometry.attributes.position.needsUpdate = true;
 }
+const _cM = new THREE.Matrix4(), _cQ = new THREE.Quaternion(), _cE = new THREE.Euler(), _cV = new THREE.Vector3(), _cS = new THREE.Vector3(); // E1 cloud-drift scratch
 function updateWorld(dt) {
   worldTime += dt;
   // The sky follows the rider (sun/moon/stars stay "at infinity").
   skyGroup.position.copy(flightRig.position);
   updateMood(dt);
   updateRegionState();
+  swayUniforms.uTime.value = worldTime; // E9: tree-sway clock
   // Clouds drift slowly and breathe back (oscillation — no visible wrap pop).
   if (worldAnim.cloudGroup) worldAnim.cloudGroup.position.x = Math.sin(worldTime * 0.004) * 120;
+  // E1: slow per-instance cloud drift (±6 m over ~60 s) while the valley is
+  // active. ~122 matrix composes/frame — the whitecaps already do 64/frame.
+  if (regionActive.valley && worldAnim.clouds && worldAnim.cloudDrift) {
+    const c = worldAnim.clouds, d = worldAnim.cloudDrift;
+    for (let i = 0; i < d.length; i++) {
+      const p = d[i];
+      const ox = Math.sin(worldTime * 0.105 + p.dp) * p.dx;
+      const oz = Math.cos(worldTime * 0.087 + p.dp * 1.3) * p.dz;
+      _cE.set(0, p.ry, 0); _cQ.setFromEuler(_cE);
+      _cV.set(p.x + ox, p.y, p.z + oz); _cS.set(p.sx, p.sy, p.sz);
+      _cM.compose(_cV, _cQ, _cS);
+      c.setMatrixAt(i, _cM);
+    }
+    c.instanceMatrix.needsUpdate = true;
+  }
   if (worldAnim.riverTex) worldAnim.riverTex.offset.y -= dt * 0.12;
   if (worldAnim.fallsTex) worldAnim.fallsTex.offset.y -= dt * 0.9;
   // Mist breathes gently (one Points cloud for every fall in the world).
   if (worldAnim.mistPoints) worldAnim.mistPoints.material.size = 16 * (1 + 0.06 * Math.sin(worldTime * 0.9));
+  // E7: waterfall foam pulses in phase with the mist breath.
+  if (worldAnim.foamMat) worldAnim.foamMat.opacity = 0.6 + 0.1 * Math.sin(worldTime * 0.9);
+  // E8: light shafts follow the mood — full in valley/sunset light, gone
+  // at night (sunI 0.7 + moonAmt 1 in the forest mood).
+  if (worldAnim.shaftMat) worldAnim.shaftMat.opacity = 0.16 * clamp((moodCur.sunI - 0.7) / 1.9, 0, 1) * (1 - moodCur.moonAmt);
   updateBirds(dt);
   if (oceanAnim.seabirds) updateBirdFlock(oceanAnim.seabirds, dt);
   if (forestAnim.gliders) updateBirdFlock(forestAnim.gliders, dt);
@@ -2342,6 +2677,7 @@ function updateWorld(dt) {
   // Mist layers drift slowly (whole-layer oscillation — no wrap pop).
   if (worldAnim.canyonMist) worldAnim.canyonMist.position.x = Math.sin(worldTime * 0.006) * 30;
   if (forestAnim.mist) forestAnim.mist.position.z = Math.sin(worldTime * 0.005) * 25;
+  if (worldAnim.valleyMist) worldAnim.valleyMist.position.x = Math.sin(worldTime * 0.004) * 40;
 }
 // Region state (Phase 2): every 0.5 s, pick the nearest region (mood
 // target, unless Phase 3 holds an override) and toggle detail/silhouette
@@ -2373,12 +2709,17 @@ function updateRegionState() {
     for (const m of r.detail) m.visible = detailOn;
     for (const m of r.silhouette) m.visible = silOn;
   }
+  // E4/E8: valve-sheddable valley dressing — visible only when the valley
+  // is active AND the valve is below L2.
+  if (worldAnim.blobShadows) worldAnim.blobShadows.visible = regionActive.valley && perfValve.level < 2;
+  if (worldAnim.shafts) worldAnim.shafts.visible = regionActive.valley && perfValve.level < 2;
 }
 function applyValveLevel() {
   // Registry items only (Bible §2): foveation is set by the valve itself;
   // here we shed cloud instances, bird counts, glow sprites, and the
   // Phase 2 particle systems (spore motes, fireflies, whitecaps, ocean
-  // clouds). Never lighting, geometry, textures, or gameplay feedback.
+  // clouds) + the Round 3 dressing (blob shadows, light shafts).
+  // Never lighting, geometry, textures, or gameplay feedback.
   if (worldAnim.clouds) worldAnim.clouds.count = Math.max(12, Math.floor(worldAnim.clouds.userData.full * perfValve.particleScale));
   if (oceanAnim.clouds) oceanAnim.clouds.count = Math.max(6, Math.floor(oceanAnim.clouds.userData.full * perfValve.particleScale));
   if (oceanAnim.whitecaps) oceanAnim.whitecaps.count = Math.max(8, Math.floor(oceanAnim.whitecaps.userData.full * perfValve.particleScale));
@@ -2387,64 +2728,191 @@ function applyValveLevel() {
   for (const s of sunGlowSprites) s.visible = perfValve.glowsOn;
   if (worldAnim.mistPoints) worldAnim.mistPoints.visible = perfValve.glowsOn;
   if (oceanAnim.spouts) oceanAnim.spouts.visible = perfValve.glowsOn;
+  // E4/E8: blob shadows + light shafts hide at L2 (the same combined
+  // condition is re-applied in updateRegionState — the region loop alone
+  // would re-show them within 0.5 s).
+  if (worldAnim.blobShadows) worldAnim.blobShadows.visible = regionActive.valley && perfValve.level < 2;
+  if (worldAnim.shafts) worldAnim.shafts.visible = regionActive.valley && perfValve.level < 2;
 }
 
 // ============================== creature ==============================
 // Aurea, a golden solwing — built entirely from procedural geometry.
-// Anatomy: lathe body, tube neck, merged head (skull + crest + beak),
-// tube tail with a fan, tucked legs, and the star — two wings, each with
-// an upper arm, a forearm, finger bones, and a two-piece cambered membrane
-// (inner + outer) with a feather-streak canvas texture.
-// Draw calls (code-derived): body 1, chest 1, neck 1, head 3, tail 2,
-// legs 2, wings 5 per side = 10, wingtip glints 2 = 20 meshes.
+// Anatomy (Round 3 rebuild): reshaped lathe body merged with the neck +
+// chest into ONE mesh with vertex-color zones (cream belly, gold back,
+// darker tail stock and wing roots); rebuilt head (brow, eyelids, layered
+// crest feathers, two-part beak + cere, textured eyes); tube tail with a
+// fanning fan; gripping perch feet; and the star — two wings, each with an
+// upper arm, a forearm merged with its finger struts, a wrist joint, a
+// feathered membrane (primary slots + layered covert quads), and five
+// articulated primaries. The wings beat on a shaped stroke (fast
+// downstroke, slow upstroke, hold at the bottom) with joint phase lags,
+// lock into a true glide when descending, and articulate into turns.
+// Draw calls (code-derived): body 1, head 3, tail 2, legs 1 (both sides
+// merged), wings 5 per side = 10 (arm, inner membrane, forearm+fingers,
+// outer membrane, primaries) = 17 meshes. Wingtip glints removed (B11).
 const creatureAnim = {
-  flapPhase: 0, flapRate: 0, flapAmp: 0, prevFlapMod: 0,
+  flapPhase: 0, flapRate: 0, flapAmp: 0, prevStroke: 1,
   fold: 1, breathPhase: 0, breathRate: 1, // breathRate dips after landing (settling breaths)
+  glide: 0, // 0 = flapping, 1 = locked glide (B9; eased over 0.8 s)
   shoulderL: null, shoulderR: null, elbowL: null, elbowR: null,
-  chest: null, headGroup: null, tailGroup: null, wingGlints: [],
+  wristL: null, wristR: null, primL: null, primR: null,
+  bodyMesh: null, fan: null, headGroup: null, tailGroup: null,
 };
+// Shaped wing stroke (Round 3 B8): a real bird beats DOWN fast and hard,
+// recovers UP slowly with folded wings, and holds briefly at the bottom of
+// the downstroke. A pure sine has no power stroke, no recovery, no phrasing
+// — it reads as a metronome. The curve is precomputed once into a 64-entry
+// LUT (0 per-frame allocation). stroke = +1 wings fully up, -1 fully down.
+const STROKE_LUT_N = 64;
+const strokeLUT = new Float32Array(STROKE_LUT_N);
+{
+  const easeOut = t => 1 - Math.pow(1 - t, 3);
+  const easeInOut = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+  for (let i = 0; i < STROKE_LUT_N; i++) {
+    const u = i / STROKE_LUT_N; // 0..1 across one wingbeat
+    let s;
+    if (u < 0.30) s = 1 - 2 * easeOut(u / 0.30); // fast downstroke (+1 -> -1)
+    else if (u < 0.35) s = -1; // 5% hold at the bottom
+    else s = -1 + 2 * easeInOut((u - 0.35) / 0.65); // slow upstroke (-1 -> +1)
+    strokeLUT[i] = s;
+  }
+}
+function strokeAt(phase) {
+  let u = phase / (Math.PI * 2);
+  u -= Math.floor(u);
+  return strokeLUT[Math.floor(u * STROKE_LUT_N) % STROKE_LUT_N];
+}
 function buildCreature() {
-  // Plumage texture (Phase 2, v1.3 bar): Aurea IS the rider's "cockpit" —
-  // the near field where the eye rests — so the body carries soft feather
-  // scallops instead of a flat color. Base matches the Phase 1 gold
-  // (#d9a441) exactly; the scallops are low-contrast value shifts only.
-  // Every plumage part (lathe body, tube neck/tail, sphere/cone head) has
-  // UVs, so the map is safe on all of them.
-  const plCv = document.createElement('canvas'); plCv.width = 256; plCv.height = 256;
+  // Plumage texture (Round 3 B6): 512x512 atlas. Aurea IS the rider's
+  // "cockpit" — the near field where the eye rests — so the body carries
+  // higher-contrast feather scallops with barb streaks, large-scale
+  // mottling for body zones, and a feather tile in the corner (u 0.875-1,
+  // v 0-0.125) for the crest quads. Base matches the Phase 1 gold
+  // (#d9a441) exactly. Every plumage part has UVs, so the map is safe on
+  // all of them.
+  const plCv = document.createElement('canvas'); plCv.width = 512; plCv.height = 512;
   const pg = plCv.getContext('2d');
-  pg.fillStyle = '#d9a441'; pg.fillRect(0, 0, 256, 256);
+  pg.fillStyle = '#d9a441'; pg.fillRect(0, 0, 512, 512);
   const prng = mulberry32(2024);
+  // Large-scale mottling: soft darker gold blotches for body zones.
+  for (let i = 0; i < 5; i++) {
+    const mx = prng() * 512, my = prng() * 512, mr = 90 + prng() * 130;
+    const mGrad = pg.createRadialGradient(mx, my, 0, mx, my, mr);
+    mGrad.addColorStop(0, 'rgba(150,100,30,0.08)');
+    mGrad.addColorStop(1, 'rgba(150,100,30,0)');
+    pg.fillStyle = mGrad;
+    pg.beginPath(); pg.arc(mx, my, mr, 0, Math.PI * 2); pg.fill();
+  }
   for (let row = 0; row < 8; row++) {
-    const y = row * 32 + 16;
-    const off = (row % 2) * 21;
+    const y = row * 64 + 32;
+    const off = (row % 2) * 42;
     for (let col = -1; col < 7; col++) {
-      const x = col * 42 + off;
-      pg.strokeStyle = 'rgba(140,90,25,' + (0.10 + prng() * 0.10) + ')';
-      pg.lineWidth = 2;
-      pg.beginPath(); pg.arc(x, y, 19, 0.15 * Math.PI, 0.85 * Math.PI); pg.stroke();
-      pg.fillStyle = 'rgba(255,225,150,' + (0.05 + prng() * 0.07) + ')';
-      pg.beginPath(); pg.arc(x, y - 6, 15, 0.15 * Math.PI, 0.85 * Math.PI); pg.fill();
+      const x = col * 84 + off;
+      pg.strokeStyle = 'rgba(140,90,25,' + (0.18 + prng() * 0.12) + ')';
+      pg.lineWidth = 3;
+      pg.beginPath(); pg.arc(x, y, 38, 0.15 * Math.PI, 0.85 * Math.PI); pg.stroke();
+      pg.fillStyle = 'rgba(255,225,150,' + (0.10 + prng() * 0.08) + ')';
+      pg.beginPath(); pg.arc(x, y - 12, 30, 0.15 * Math.PI, 0.85 * Math.PI); pg.fill();
+      // Barb streaks inside each scallop (short diagonal strokes).
+      pg.strokeStyle = 'rgba(120,74,20,' + (0.10 + prng() * 0.08) + ')';
+      pg.lineWidth = 1;
+      for (let k = 0; k < 5; k++) {
+        const bx = x - 24 + k * 12;
+        pg.beginPath(); pg.moveTo(bx, y - 18); pg.lineTo(bx + 4, y + 8); pg.stroke();
+      }
     }
   }
-  for (let i = 0; i < 26; i++) {
-    const x = prng() * 256;
+  for (let i = 0; i < 52; i++) {
+    const x = prng() * 512;
     pg.strokeStyle = 'rgba(120,74,20,' + (0.05 + prng() * 0.08) + ')';
     pg.lineWidth = 1;
     pg.beginPath(); pg.moveTo(x, 0);
-    pg.bezierCurveTo(x + (prng() - 0.5) * 10, 90, x + (prng() - 0.5) * 10, 170, x + (prng() - 0.5) * 8, 256);
+    pg.bezierCurveTo(x + (prng() - 0.5) * 20, 180, x + (prng() - 0.5) * 20, 340, x + (prng() - 0.5) * 16, 512);
     pg.stroke();
+  }
+  // Feather tile (B5 crest quads): one feather with shaft + barbs + pale
+  // edge. UV region u 0.875-1, v 0-0.125 = canvas x 448-512, y 448-512
+  // (CanvasTexture flipY: v 0 is the canvas bottom).
+  pg.strokeStyle = 'rgba(255,235,180,0.55)'; pg.lineWidth = 2;
+  pg.beginPath(); pg.moveTo(480, 506); pg.quadraticCurveTo(452, 480, 480, 452);
+  pg.quadraticCurveTo(508, 480, 480, 506); pg.stroke();
+  pg.strokeStyle = 'rgba(255,240,200,0.8)'; pg.lineWidth = 2;
+  pg.beginPath(); pg.moveTo(480, 504); pg.lineTo(480, 454); pg.stroke();
+  pg.strokeStyle = 'rgba(120,74,20,0.35)'; pg.lineWidth = 1;
+  for (let k = 0; k < 6; k++) {
+    const fy = 500 - k * 8;
+    pg.beginPath(); pg.moveTo(480, fy); pg.lineTo(466, fy - 6); pg.stroke();
+    pg.beginPath(); pg.moveTo(480, fy); pg.lineTo(494, fy - 6); pg.stroke();
   }
   const plumageTex = new THREE.CanvasTexture(plCv);
   plumageTex.colorSpace = THREE.SRGBColorSpace;
   plumageTex.wrapS = plumageTex.wrapT = THREE.RepeatWrapping;
-  const plumage = new THREE.MeshStandardMaterial({ map: plumageTex, color: 0xffffff, roughness: 0.7, metalness: 0.05 });
+  // Roughness map (B6): mid-grey base (~0.7) with darker = smoother streaks
+  // along feather tips, so the sun plays across the plumage instead of
+  // shading it as flat plastic. Linear (no sRGB) — it is data, not color.
+  const rgCv = document.createElement('canvas'); rgCv.width = 256; rgCv.height = 256;
+  const rg = rgCv.getContext('2d');
+  rg.fillStyle = '#b4b4b4'; rg.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 120; i++) {
+    const x = prng() * 256, y = prng() * 256;
+    rg.strokeStyle = 'rgba(110,110,110,' + (0.25 + prng() * 0.35) + ')';
+    rg.lineWidth = 1 + prng() * 2;
+    rg.beginPath(); rg.moveTo(x, y);
+    rg.lineTo(x + (prng() - 0.5) * 8, y + 14 + prng() * 22); rg.stroke();
+  }
+  for (let i = 0; i < 10; i++) {
+    const x = prng() * 256, y = prng() * 256, r = 20 + prng() * 40;
+    const grd = rg.createRadialGradient(x, y, 0, x, y, r);
+    grd.addColorStop(0, 'rgba(210,210,210,0.5)'); grd.addColorStop(1, 'rgba(210,210,210,0)');
+    rg.fillStyle = grd; rg.beginPath(); rg.arc(x, y, r, 0, Math.PI * 2); rg.fill();
+  }
+  const roughTex = new THREE.CanvasTexture(rgCv);
+  roughTex.wrapS = roughTex.wrapT = THREE.RepeatWrapping;
+  // Plumage material (B6): roughnessMap + bumpMap (the scallops catch the
+  // sun with real relief) + a faint warm emissive so the shadow side never
+  // goes dead black in the night forest. vertexColors carries the body
+  // zones (B4) — every mesh sharing this material is painted (see
+  // paintColor: unpainted geometry would render black).
+  const plumage = new THREE.MeshStandardMaterial({
+    map: plumageTex, roughnessMap: roughTex, bumpMap: plumageTex, bumpScale: 0.015,
+    color: 0xffffff, roughness: 1.0, metalness: 0.05,
+    emissive: 0x1a0e02, emissiveIntensity: 1.0, vertexColors: true,
+  });
   const plumageDark = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, roughness: 0.75 });
-  const bellyMat = new THREE.MeshStandardMaterial({ color: 0xf3e2c2, roughness: 0.8 });
   const boneMat = new THREE.MeshStandardMaterial({ color: 0x6e5636, roughness: 0.6 });
-  const beakMat = new THREE.MeshStandardMaterial({ color: 0x2e2620, roughness: 0.4, metalness: 0.15 });
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffc46b, toneMapped: false });
-  // Membrane texture: warm amber with chordwise feather streaks + a dark
-  // tip band. UV: u = span, v = chord (0 leading edge, 1 trailing edge).
+  const beakMat = new THREE.MeshStandardMaterial({ color: 0x2e2620, roughness: 0.4, metalness: 0.15, vertexColors: true });
+  // Textured eyes (B5): dark pupil, amber iris ring with striations, white
+  // specular dot. The old flat glowing discs read as LEDs — these read as
+  // eyes, and they stop glowing at full brightness in the night forest.
+  const eyeCv = document.createElement('canvas'); eyeCv.width = 64; eyeCv.height = 64;
+  const eg = eyeCv.getContext('2d');
+  eg.fillStyle = '#3a2408'; eg.fillRect(0, 0, 64, 64);
+  const iris = eg.createRadialGradient(32, 32, 4, 32, 32, 26);
+  iris.addColorStop(0, '#1a0e02');
+  iris.addColorStop(0.35, '#1a0e02');
+  iris.addColorStop(0.45, '#c8862a');
+  iris.addColorStop(0.8, '#e8a83a');
+  iris.addColorStop(1, '#5a3a10');
+  eg.fillStyle = iris; eg.beginPath(); eg.arc(32, 32, 26, 0, Math.PI * 2); eg.fill();
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    eg.strokeStyle = 'rgba(60,35,5,0.5)'; eg.lineWidth = 1;
+    eg.beginPath(); eg.moveTo(32 + Math.cos(a) * 10, 32 + Math.sin(a) * 10);
+    eg.lineTo(32 + Math.cos(a) * 24, 32 + Math.sin(a) * 24); eg.stroke();
+  }
+  eg.fillStyle = 'rgba(255,255,255,0.95)';
+  eg.beginPath(); eg.arc(24, 22, 4, 0, Math.PI * 2); eg.fill();
+  const eyeTex = new THREE.CanvasTexture(eyeCv);
+  eyeTex.colorSpace = THREE.SRGBColorSpace;
+  const eyeMat = new THREE.MeshBasicMaterial({ map: eyeTex, color: 0xd89a3a, toneMapped: false });
+  // Membrane texture (B1): a feather atlas. The existing amber gradient +
+  // chordwise streaks, plus in the tip region (u > 0.6) dark separation
+  // lines between the five primaries, a pale rachis (shaft) line down each
+  // primary, and transparent gaps between the primaries (alphaTest cutout,
+  // NOT transparent — avoids DoubleSide sort/overdraw issues). The corner
+  // region u 0-0.14, v 0-0.5 holds one covert-feather tile for the B2 quads.
+  // UV: u = span, v = chord (0 leading edge, 1 trailing edge). Canvas y is
+  // flipped vs v (flipY): v 1 = canvas y 0 (top), v 0 = canvas y 256.
   const memCv = document.createElement('canvas'); memCv.width = 256; memCv.height = 256;
   const mg = memCv.getContext('2d');
   const mGrad = mg.createLinearGradient(0, 0, 0, 256);
@@ -2462,53 +2930,174 @@ function buildCreature() {
   const tipGrad = mg.createLinearGradient(200, 0, 256, 0);
   tipGrad.addColorStop(0, 'rgba(58,42,24,0)'); tipGrad.addColorStop(1, 'rgba(58,42,24,0.55)');
   mg.fillStyle = tipGrad; mg.fillRect(0, 0, 256, 256);
+  // Primary slots: 5 slots over u 0.6-1.0 (canvas x 154-256). Separation
+  // lines + rachis lines run from mid-chord to the trailing edge.
+  for (let s = 0; s < 5; s++) {
+    const x0 = 154 + s * 20.4, x1 = x0 + 20.4, xc = (x0 + x1) / 2;
+    mg.strokeStyle = 'rgba(58,36,14,0.4)'; mg.lineWidth = 2;
+    mg.beginPath(); mg.moveTo(x0, 0); mg.lineTo(x0, 150); mg.stroke();
+    mg.strokeStyle = 'rgba(255,232,180,0.5)'; mg.lineWidth = 2;
+    mg.beginPath(); mg.moveTo(xc, 8); mg.lineTo(xc, 140); mg.stroke();
+  }
+  // Transparent gaps between primaries at the trailing edge (v 0.6-1,
+  // canvas y 0-102): soft wedges, widening toward the edge.
+  mg.globalCompositeOperation = 'destination-out';
+  for (let s = 1; s < 5; s++) {
+    const x = 154 + s * 20.4;
+    mg.fillStyle = 'rgba(0,0,0,0.4)';
+    mg.beginPath(); mg.moveTo(x - 1, 102); mg.lineTo(x + 1, 102); mg.lineTo(x + 5, 0); mg.lineTo(x - 5, 0); mg.closePath(); mg.fill();
+    mg.fillStyle = 'rgba(0,0,0,0.9)';
+    mg.beginPath(); mg.moveTo(x - 0.5, 102); mg.lineTo(x + 0.5, 102); mg.lineTo(x + 2.5, 0); mg.lineTo(x - 2.5, 0); mg.closePath(); mg.fill();
+  }
+  mg.globalCompositeOperation = 'source-over';
+  // Covert feather tile (B2): u 0-0.14, v 0-0.5 = canvas x 0-36, y 128-256.
+  // One feather with shaft + barbs + pale edge, pointing toward v 0.5.
+  mg.fillStyle = '#eec27a'; mg.fillRect(0, 128, 36, 128);
+  mg.strokeStyle = 'rgba(255,238,190,0.7)'; mg.lineWidth = 2;
+  mg.beginPath(); mg.moveTo(18, 252); mg.quadraticCurveTo(4, 200, 18, 134);
+  mg.quadraticCurveTo(32, 200, 18, 252); mg.stroke();
+  mg.strokeStyle = 'rgba(255,244,210,0.85)'; mg.lineWidth = 2;
+  mg.beginPath(); mg.moveTo(18, 250); mg.lineTo(18, 138); mg.stroke();
+  mg.strokeStyle = 'rgba(120,74,20,0.4)'; mg.lineWidth = 1;
+  for (let k = 0; k < 9; k++) {
+    const fy = 244 - k * 12;
+    mg.beginPath(); mg.moveTo(18, fy); mg.lineTo(7, fy - 8); mg.stroke();
+    mg.beginPath(); mg.moveTo(18, fy); mg.lineTo(29, fy - 8); mg.stroke();
+  }
   const memTex = new THREE.CanvasTexture(memCv);
   memTex.colorSpace = THREE.SRGBColorSpace;
-  const membraneMat = new THREE.MeshStandardMaterial({ map: memTex, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
+  const membraneMat = new THREE.MeshStandardMaterial({ map: memTex, roughness: 0.55, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.35 });
 
-  // --- Body: lathe profile, tail tip -> chest -> neck base ---
+  // --- Body (B4): reshaped 14-point lathe — deeper keel chest, raised
+  // shoulder/wing-root bulges, tapered tail stock — merged with the neck
+  // tube + chest into ONE mesh with vertex-color zones (cream belly, gold
+  // back, darker tail stock and wing roots, pale throat). The tail tube
+  // stays in the swaying tailGroup (it must move with the fan), so the
+  // merge is body+neck+chest (was 3 meshes, now 1); the legs merge (B10)
+  // recovers the remaining call to reach the 17-call bird budget.
   const profile = [
-    [0.02, -2.8], [0.16, -2.2], [0.30, -1.4], [0.48, -0.6],
-    [0.58, 0.1], [0.52, 0.7], [0.34, 1.1], [0.24, 1.35],
+    [0.02, -2.8], [0.10, -2.6], [0.18, -2.2], [0.28, -1.6], [0.40, -1.0],
+    [0.52, -0.4], [0.60, 0.1], [0.60, 0.5], [0.62, 0.9], [0.55, 1.05],
+    [0.45, 1.18], [0.35, 1.28], [0.28, 1.33], [0.24, 1.35],
   ].map(p => new THREE.Vector2(p[0], p[1]));
-  const bodyGeo = new THREE.LatheGeometry(profile, 14);
+  const bodyGeo = new THREE.LatheGeometry(profile, 20);
   bodyGeo.rotateX(-Math.PI / 2); // lathe +Y -> -Z (front); tail lands at +Z
-  creature.add(new THREE.Mesh(bodyGeo, plumage));
-  // Chest (breathing scale) — cream-gold, under the neck base.
-  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), bellyMat);
-  chest.position.set(0, -0.08, -0.95);
-  chest.scale.set(1.0, 0.95, 1.35);
-  creature.add(chest);
-  creatureAnim.chest = chest;
-  // Neck: curved tube rising forward from the chest.
+  {
+    // Saddle dip: gently flatten the back under the seat (z -0.2..1.2).
+    const bp = bodyGeo.attributes.position;
+    for (let i = 0; i < bp.count; i++) {
+      const y = bp.getY(i), z = bp.getZ(i);
+      if (y > 0.3 && z > -0.2 && z < 1.2) bp.setY(i, 0.3 + (y - 0.3) * 0.85);
+    }
+    bodyGeo.computeVertexNormals();
+    // Vertex-color zones (multipliers on the plumage map; white = unchanged).
+    const n = bp.count;
+    const cols = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i);
+      let r = 1, g = 1, b = 1;
+      if (y < -0.15) { // cream belly (countershading)
+        const t = clamp((-y - 0.15) / 0.35, 0, 1) * 0.9;
+        r = lerp(r, 1.0, t); g = lerp(g, 0.92, t); b = lerp(b, 0.76, t);
+      }
+      if (z > 2.0) { // darker tail stock
+        const t = clamp((z - 2.0) / 0.8, 0, 1) * 0.8;
+        r = lerp(r, 0.78, t); g = lerp(g, 0.62, t); b = lerp(b, 0.42, t);
+      }
+      if (Math.abs(x) > 0.35 && y > 0.1 && z > -0.7 && z < 0.3) { // wing roots
+        const t = clamp((Math.abs(x) - 0.35) / 0.25, 0, 1) * 0.7;
+        r = lerp(r, 0.82, t); g = lerp(g, 0.66, t); b = lerp(b, 0.45, t);
+      }
+      cols[i * 3] = r; cols[i * 3 + 1] = g; cols[i * 3 + 2] = b;
+    }
+    bodyGeo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  }
+  // Neck: curved tube rising forward from the chest (pale throat near the
+  // top). Rigidly attached to the body — it needs no own group; the head
+  // group pivots at the neck top.
   const neckCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(0, 0.15, -1.3),
     new THREE.Vector3(0, 0.55, -1.8),
     new THREE.Vector3(0, 0.95, -2.2),
   ]);
-  creature.add(new THREE.Mesh(new THREE.TubeGeometry(neckCurve, 10, 0.16, 8), plumage));
-  // Head: skull + swept crest (merged), beak, glowing amber eyes.
+  const neckGeo = new THREE.TubeGeometry(neckCurve, 10, 0.16, 8);
+  {
+    const np = neckGeo.attributes.position;
+    const ncols = new Float32Array(np.count * 3);
+    for (let i = 0; i < np.count; i++) {
+      const y = np.getY(i), z = np.getZ(i);
+      const t = (y > 0.6 && z < -1.8) ? 0.8 : 0; // pale throat
+      ncols[i * 3] = 1; ncols[i * 3 + 1] = lerp(1, 0.95, t); ncols[i * 3 + 2] = lerp(1, 0.85, t);
+    }
+    neckGeo.setAttribute('color', new THREE.BufferAttribute(ncols, 3));
+  }
+  // Chest: the keel mass under the neck base (cream — the belly zone).
+  const chestGeo = new THREE.SphereGeometry(0.5, 14, 10);
+  xform(chestGeo, 0, -0.08, -0.95, 0, 0, 0, 1.0, 0.95, 1.35);
+  paintColor(chestGeo, 0.96, 0.89, 0.74);
+  const bodyMesh = new THREE.Mesh(mergeGeos([bodyGeo, neckGeo, chestGeo]), plumage);
+  creature.add(bodyMesh);
+  creatureAnim.bodyMesh = bodyMesh;
+  // Head (B5): larger skull with a brow ridge + eyelid ridges, a layered
+  // 3-feather crest (replacing the straight cone), a two-part beak (upper
+  // with a down-turned tip + lower) with a pale cere, and textured eyes
+  // (pupil/iris/highlight) rotated so the pupil faces forward-outward.
+  // Same 3 head meshes, rebuilt contents. Beak tip reaches z ≈ -2.94 in
+  // creature space — still ~1.3 m behind the menu plane (rig z -1.65), so
+  // the Phase D clearance holds (verified numerically in the Round 3 tests).
   const headGroup = new THREE.Group();
   headGroup.position.set(0, 1.02, -2.32);
   headGroup.userData.baseY = 1.02;
   creature.add(headGroup);
   creatureAnim.headGroup = headGroup;
-  const skull = new THREE.SphereGeometry(0.22, 12, 10);
-  xform(skull, 0, 0, 0, 0, 0, 0, 1, 0.9, 1.4);
-  const crest = new THREE.ConeGeometry(0.09, 0.5, 6);
-  xform(crest, 0, 0.16, 0.12, 2.2, 0, 0, 1, 1, 1);
-  headGroup.add(new THREE.Mesh(mergeGeometries([skull.toNonIndexed(), crest.toNonIndexed()]), plumage));
-  const beak = new THREE.ConeGeometry(0.085, 0.46, 8);
-  beak.rotateX(-Math.PI / 2 - 0.12); // point forward (-Z), slightly down
-  const beakMesh = new THREE.Mesh(beak, beakMat);
+  const skull = new THREE.SphereGeometry(0.26, 12, 10);
+  xform(skull, 0, 0, 0, 0, 0, 0, 1, 0.85, 1.5);
+  const brow = new THREE.SphereGeometry(0.09, 8, 6);
+  xform(brow, 0, 0.17, -0.17, 0, 0, 0, 1.6, 0.5, 0.9);
+  const lidL = new THREE.SphereGeometry(0.05, 8, 6);
+  xform(lidL, 0.17, 0.13, -0.20, 0, 0, 0, 1, 0.45, 1.1);
+  const lidR = new THREE.SphereGeometry(0.05, 8, 6);
+  xform(lidR, -0.17, 0.13, -0.20, 0, 0, 0, 1, 0.45, 1.1);
+  const crestDir = new THREE.Vector3(0, 0.45, 0.89).normalize();
+  const crestX = new THREE.Vector3(1, 0, 0);
+  const crest1 = featherGeo(new THREE.Vector3(0, 0.16, 0.02), crestDir, crestX, 0.11, 0.40, [0.875, 0.0, 1.0, 0.125]);
+  const crest2 = featherGeo(new THREE.Vector3(0, 0.17, 0.08), crestDir, crestX, 0.10, 0.34, [0.875, 0.0, 1.0, 0.125]);
+  const crest3 = featherGeo(new THREE.Vector3(0, 0.18, 0.14), crestDir, crestX, 0.09, 0.28, [0.875, 0.0, 1.0, 0.125]);
+  headGroup.add(new THREE.Mesh(mergeGeos([
+    paintWhite(skull), paintWhite(brow), paintWhite(lidL), paintWhite(lidR),
+    paintWhite(crest1), paintWhite(crest2), paintWhite(crest3),
+  ]), plumage));
+  // Two-part beak: upper beak + down-turned hooked tip (its base sits deep
+  // inside the upper beak where the cone is fat, so the joint has no step)
+  // + a shorter lower beak, with a pale cere band where the beak exits the
+  // skull (beak-local z 0 = the skull's front pole — the ring pokes out
+  // past the skull surface there). Vertex-colored; beakMat is
+  // vertexColors:true.
+  const upperBeak = new THREE.ConeGeometry(0.085, 0.40, 8);
+  upperBeak.rotateX(-Math.PI / 2 - 0.10);
+  const beakTip = new THREE.ConeGeometry(0.032, 0.26, 8);
+  beakTip.rotateX(-Math.PI / 2 - 0.55); // hooked down at the tip
+  xform(beakTip, 0, -0.078, -0.131, 0, 0, 0);
+  const lowerBeak = new THREE.ConeGeometry(0.055, 0.24, 8);
+  lowerBeak.rotateX(-Math.PI / 2 - 0.02);
+  xform(lowerBeak, 0, -0.05, -0.10, 0, 0, 0);
+  const cere = new THREE.CylinderGeometry(0.088, 0.095, 0.07, 8);
+  cere.rotateX(Math.PI / 2);
+  xform(cere, 0, -0.005, 0.0, 0, 0, 0);
+  const beakMesh = new THREE.Mesh(mergeGeos([
+    paintWhite(upperBeak), paintWhite(beakTip), paintWhite(lowerBeak),
+    paintColor(cere, 1.0, 0.9, 0.7),
+  ]), beakMat);
   beakMesh.position.set(0, -0.04, -0.38);
   headGroup.add(beakMesh);
-  const eyeL = new THREE.SphereGeometry(0.038, 8, 6);
-  xform(eyeL, 0.14, 0.05, -0.16, 0, 0, 0);
-  const eyeR = new THREE.SphereGeometry(0.038, 8, 6);
-  xform(eyeR, -0.14, 0.05, -0.16, 0, 0, 0);
+  const eyeL = new THREE.SphereGeometry(0.045, 8, 6);
+  xform(eyeL, 0.185, 0.07, -0.21, 0, Math.PI / 4, 0);
+  const eyeR = new THREE.SphereGeometry(0.045, 8, 6);
+  xform(eyeR, -0.185, 0.07, -0.21, 0, Math.PI * 3 / 4, 0);
   headGroup.add(new THREE.Mesh(mergeGeometries([eyeL.toNonIndexed(), eyeR.toNonIndexed()]), eyeMat));
-  // Tail: tube + flattened fan, in a sway group.
+  // Tail: tube + flattened fan, in a sway group. The tube stays here (it
+  // must sway with the fan — see B4) and the fan mesh is registered so
+  // applyWingPose can spread it with the stroke and in glide (B8/B9).
   const tailGroup = new THREE.Group();
   tailGroup.position.set(0, 0.02, 2.3);
   creature.add(tailGroup);
@@ -2518,49 +3107,138 @@ function buildCreature() {
     new THREE.Vector3(0, 0.08, 0.7),
     new THREE.Vector3(0, 0.2, 1.3),
   ]);
-  tailGroup.add(new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 8, 0.085, 7), plumage));
+  tailGroup.add(new THREE.Mesh(paintWhite(new THREE.TubeGeometry(tailCurve, 8, 0.085, 7)), plumage));
   const fan = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6), plumageDark);
   fan.position.set(0, 0.24, 1.55);
   fan.scale.set(1.15, 0.14, 1.7);
   tailGroup.add(fan);
-  // Legs: tucked, one merged mesh per side.
-  for (const side of [1, -1]) {
-    const leg = new THREE.CylinderGeometry(0.055, 0.04, 0.55, 6);
-    xform(leg, side * 0.28, -0.42, 0.45, 0.9, 0, side * 0.25);
-    const foot = new THREE.ConeGeometry(0.07, 0.22, 6);
-    xform(foot, side * 0.3, -0.62, 0.68, 2.4, 0, 0);
-    creature.add(new THREE.Mesh(mergeGeometries([leg.toNonIndexed(), foot.toNonIndexed()]), boneMat));
+  creatureAnim.fan = fan;
+  // Legs + perch feet (B10): upper leg + a foot with 3 forward toes + 1
+  // rear toe, splayed to grip the rock. Both sides merged into ONE mesh
+  // (boneMat) — the legs are static children of the creature, so the merge
+  // is free and recovers the call B4 could not (see the B4 note).
+  {
+    const legGeos = [];
+    const toe = (ax, ay, az, bx, by, bz) => {
+      const dir = new THREE.Vector3(bx - ax, by - ay, bz - az);
+      const len = dir.length();
+      const g = new THREE.ConeGeometry(0.032, len, 6);
+      const mid = new THREE.Vector3((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+      g.applyMatrix4(new THREE.Matrix4().compose(mid, quat, new THREE.Vector3(1, 1, 1)));
+      return g.toNonIndexed();
+    };
+    for (const side of [1, -1]) {
+      const leg = new THREE.CylinderGeometry(0.055, 0.04, 0.55, 6);
+      xform(leg, side * 0.28, -0.42, 0.45, 0.9, 0, side * 0.25);
+      legGeos.push(leg.toNonIndexed());
+      const fx = side * 0.3, fy = -0.62, fz = 0.68;
+      legGeos.push(toe(fx, fy, fz, fx - 0.09, -0.74, fz + 0.17));
+      legGeos.push(toe(fx, fy, fz, fx, -0.75, fz + 0.20));
+      legGeos.push(toe(fx, fy, fz, fx + 0.09, -0.74, fz + 0.17));
+      legGeos.push(toe(fx, fy, fz, fx, -0.72, fz - 0.14));
+    }
+    creature.add(new THREE.Mesh(mergeGeometries(legGeos), boneMat));
   }
   // --- Wings ---
   // Cambered membrane strip: stations of [x, leadZ, trailZ]; 3 verts per
   // station (leading, mid with camber dip, trailing). Side mirrors x.
-  function membraneGeo(stations, side) {
+  // B1: the outer membrane's stations shape a genuinely feathered trailing
+  // edge (5 primary slots at the tip). B2: layered covert feather quads
+  // (coverts: {x, v, dx, dz, w, len} — root at span x / chord fraction v,
+  // pointing (dx, dz) toward the tip) are merged into the SAME geometry
+  // (0 new draw calls), each vertex's height taken from the membrane's
+  // camber surface so the quads lie on the membrane, not through it.
+  function membraneGeo(stations, side, coverts) {
     const n = stations.length;
-    const posArr = new Float32Array(n * 3 * 3);
-    const uvArr = new Float32Array(n * 3 * 2);
-    const idx = [];
+    const pos = [], uvA = [], idx = [];
     const x0 = stations[0][0], x1 = stations[n - 1][0];
     for (let i = 0; i < n; i++) {
       const [x, lz, tz] = stations[i];
-      const o = i * 9;
-      posArr[o] = x * side; posArr[o + 1] = 0; posArr[o + 2] = lz;
-      posArr[o + 3] = x * side; posArr[o + 4] = -0.09; posArr[o + 5] = (lz + tz) / 2;
-      posArr[o + 6] = x * side; posArr[o + 7] = 0; posArr[o + 8] = tz;
       const u = (x - x0) / (x1 - x0);
-      uvArr[i * 6] = u; uvArr[i * 6 + 1] = 0;
-      uvArr[i * 6 + 2] = u; uvArr[i * 6 + 3] = 0.5;
-      uvArr[i * 6 + 4] = u; uvArr[i * 6 + 5] = 1;
+      pos.push(x * side, 0, lz, x * side, -0.09, (lz + tz) / 2, x * side, 0, tz);
+      uvA.push(u, 0, u, 0.5, u, 1);
       if (i < n - 1) {
         const a = i * 3, b = i * 3 + 3;
         idx.push(a, a + 1, b, a + 1, b + 1, b, a + 1, a + 2, b + 1, a + 2, b + 2, b + 1);
       }
     }
+    // Leading/trailing edge at span x (linear between stations).
+    function edgeAt(x) {
+      for (let i = 0; i < n - 1; i++) {
+        if (x >= stations[i][0] && x <= stations[i + 1][0]) {
+          const t = (x - stations[i][0]) / (stations[i + 1][0] - stations[i][0]);
+          return { lz: lerp(stations[i][1], stations[i + 1][1], t), tz: lerp(stations[i][2], stations[i + 1][2], t) };
+        }
+      }
+      return { lz: stations[n - 1][1], tz: stations[n - 1][2] };
+    }
+    // Membrane surface height at span x / chord z (+ a small lift so the
+    // covert quads never z-fight the membrane).
+    function surfY(x, z) {
+      const e = edgeAt(x);
+      const v = clamp((z - e.lz) / (e.tz - e.lz), 0, 1);
+      return -0.09 * (1 - Math.abs(2 * v - 1)) + 0.008;
+    }
+    if (coverts) {
+      for (const cv of coverts) {
+        const e = edgeAt(cv.x);
+        const rz = lerp(e.lz, e.tz, cv.v);
+        const dl = Math.hypot(cv.dx, cv.dz);
+        const dxn = cv.dx / dl, dzn = cv.dz / dl; // length axis (unit)
+        const rx = cv.x * side, dxs = dxn * side; // toward the tip (sided)
+        const pxs = -dzn, pzs = dxs; // width axis = perpendicular of (dxs, dzn)
+        const base = pos.length / 3;
+        const verts = [
+          [rx - pxs * cv.w / 2, rz - pzs * cv.w / 2, 0.01, 0.03],
+          [rx + pxs * cv.w / 2, rz + pzs * cv.w / 2, 0.13, 0.03],
+          [rx + dxs * cv.len * 0.6 - pxs * cv.w * 0.4, rz + dzn * cv.len * 0.6 - pzs * cv.w * 0.4, 0.02, 0.30],
+          [rx + dxs * cv.len * 0.6 + pxs * cv.w * 0.4, rz + dzn * cv.len * 0.6 + pzs * cv.w * 0.4, 0.12, 0.30],
+          [rx + dxs * cv.len, rz + dzn * cv.len, 0.07, 0.47],
+        ];
+        for (const vt of verts) {
+          pos.push(vt[0], surfY(Math.abs(vt[0]), vt[1]), vt[1]);
+          uvA.push(vt[2], vt[3]);
+        }
+        idx.push(base, base + 1, base + 3, base, base + 3, base + 2, base + 2, base + 3, base + 4);
+      }
+    }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2));
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvA), 2));
     g.setIndex(idx);
     g.computeVertexNormals();
     return g;
+  }
+  // Articulated primaries (B3): 5 individual primary feathers at the outer
+  // tip, merged into ONE mesh per side. Each is ~0.7-0.8 m long, pointed,
+  // swept back, with per-feather fan baked into the geometry; UVs map each
+  // primary to its own slot band of the feather atlas (u 0.6-1.0).
+  function primariesGeo(side) {
+    const geos = [];
+    for (let i = 0; i < 5; i++) {
+      const f = i / 4; // 0 = innermost primary, 1 = outermost
+      const root = new THREE.Vector3((1.95 + f * 0.55) * side, 0, 0.55 - f * 0.15);
+      const tip = new THREE.Vector3((2.55 + f * 0.45) * side, 0, 0.90 + f * 0.25);
+      const dir = new THREE.Vector3().subVectors(tip, root);
+      const len = dir.length();
+      dir.normalize();
+      const wAxis = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+      const u0 = 0.60 + i * 0.08, u1 = u0 + 0.08;
+      geos.push(featherGeo(root, dir, wAxis, 0.16 - f * 0.03, len, [u0, 0.45, u1, 0.95]));
+    }
+    return mergeGeos(geos);
+  }
+  // Covert rows (B2): 2 shingled rows per membrane (v 0.22 + 0.58), angled
+  // toward the tip, staggered so the rear row tucks under the front row.
+  const innerCoverts = [];
+  const outerCoverts = [];
+  for (let r = 0; r < 2; r++) {
+    const v = r === 0 ? 0.22 : 0.58;
+    for (let i = 0; i < 5; i++) {
+      innerCoverts.push({ x: 0.30 + i * 0.30 + r * 0.15, v, dx: 0.30, dz: 0.20, w: 0.26, len: 0.34 });
+      outerCoverts.push({ x: 0.35 + i * 0.42 + r * 0.20, v, dx: 0.30, dz: 0.20, w: 0.26, len: 0.34 });
+    }
   }
   // Thin cylinder between two local points (for finger bones).
   function boneBetween(ax, ay, az, bx, by, bz, r) {
@@ -2577,69 +3255,134 @@ function buildCreature() {
     const shoulder = new THREE.Group();
     shoulder.position.set(side * 0.5, 0.32, -0.35);
     creature.add(shoulder);
-    // Upper arm: shoulder ball + tapered cylinder, merged.
+    // Upper arm: shoulder ball + tapered cylinder, merged (white vertex
+    // colors — the plumage material is vertexColors:true).
     const ball = new THREE.SphereGeometry(0.14, 8, 6);
     const arm = new THREE.CylinderGeometry(0.09, 0.06, 1.7, 8);
     arm.rotateZ(side * -Math.PI / 2); // lie along ±X
     xform(arm, side * 0.85, 0, 0, 0, 0, 0);
-    shoulder.add(new THREE.Mesh(mergeGeometries([ball.toNonIndexed(), arm.toNonIndexed()]), plumage));
-    // Inner membrane (body -> elbow), parented to the shoulder.
+    shoulder.add(new THREE.Mesh(mergeGeos([paintWhite(ball), paintWhite(arm)]), plumage));
+    // Inner membrane (body -> elbow) + covert rows, parented to the shoulder.
     shoulder.add(new THREE.Mesh(membraneGeo([
       [0.12, -0.05, 0.95], [0.6, -0.05, 0.85], [1.15, -0.05, 0.7], [1.7, -0.05, 0.55],
-    ], side), membraneMat));
+    ], side, innerCoverts), membraneMat));
     // Elbow group at the end of the upper arm.
     const elbow = new THREE.Group();
     elbow.position.set(side * 1.7, 0, 0);
     shoulder.add(elbow);
-    // Forearm: wrist ball + tapered cylinder, merged.
-    const wrist = new THREE.SphereGeometry(0.09, 8, 6);
+    // Forearm + finger struts merged (B12): one mesh on the elbow, plumage
+    // material with vertex colors (forearm white, fingers bone-brown — the
+    // brown multiplies the plumage map into a brownish-gold strut). The
+    // fingers stay on the elbow (they fan from the wrist point, which is
+    // the elbow-group origin, so they render identically from either group);
+    // only the outer membrane + primaries move to the wrist.
+    const wristBall = new THREE.SphereGeometry(0.09, 8, 6);
     const fore = new THREE.CylinderGeometry(0.06, 0.04, 1.9, 8);
     fore.rotateZ(side * -Math.PI / 2);
     xform(fore, side * 0.95, 0, 0, 0, 0, 0);
-    elbow.add(new THREE.Mesh(mergeGeometries([wrist.toNonIndexed(), fore.toNonIndexed()]), plumage));
-    // Outer membrane (elbow -> tip) with a scalloped trailing edge.
-    elbow.add(new THREE.Mesh(membraneGeo([
-      [0, -0.05, 0.55], [0.65, -0.05, 0.85], [1.3, -0.05, 0.95],
-      [1.95, -0.05, 0.8], [2.6, -0.05, 0.45],
-    ], side), membraneMat));
-    // Finger bones: visible struts from the wrist fanning to the trailing
-    // edge + the primary finger along the leading edge to the tip.
     const fingers = [
       boneBetween(0, 0, 0, side * 0.65, 0, 0.85, 0.022),
       boneBetween(0, 0, 0, side * 1.3, 0, 0.95, 0.02),
       boneBetween(0, 0, 0, side * 1.95, 0, 0.8, 0.018),
       boneBetween(0, 0, 0, side * 2.6, 0, 0, 0.02),
     ];
-    elbow.add(new THREE.Mesh(mergeGeometries(fingers), boneMat));
-    // Wingtip glint: a faint gold glow so the rider can read the wingtips
-    // in peripheral vision (valve-gated with the other glows).
-    const glint = glowSprite(0xffd27a, 0.9, 0.28);
-    glint.position.set(side * 2.6, 0, 0);
-    elbow.add(glint);
-    creatureAnim.wingGlints.push(glint);
-    if (side === 1) { creatureAnim.shoulderR = shoulder; creatureAnim.elbowR = elbow; }
-    else { creatureAnim.shoulderL = shoulder; creatureAnim.elbowL = elbow; }
+    elbow.add(new THREE.Mesh(mergeGeos([
+      paintWhite(wristBall), paintWhite(fore),
+      ...fingers.map(g => paintColor(g, 0.43, 0.34, 0.21)),
+    ]), plumage));
+    // Wrist joint (B7): the outer wing + primaries twist and fold here.
+    // The pivot sits at the elbow-group origin (the forearm tip), so the
+    // outer membrane stations keep their coordinates unchanged.
+    const wrist = new THREE.Group();
+    elbow.add(wrist);
+    // Outer membrane (elbow -> tip) with a genuinely feathered trailing
+    // edge: 5 primary slots at the tip (B1) + covert rows (B2).
+    wrist.add(new THREE.Mesh(membraneGeo([
+      [0, -0.05, 0.55], [0.5, -0.05, 0.78], [1.0, -0.05, 0.92], [1.4, -0.05, 0.95],
+      [1.6, -0.05, 0.86], [1.78, -0.05, 0.97], [1.96, -0.05, 0.80], [2.14, -0.05, 0.96],
+      [2.32, -0.05, 0.78], [2.48, -0.05, 0.88], [2.6, -0.05, 0.45],
+    ], side, outerCoverts), membraneMat));
+    // Articulated primaries (B3) — the wingtip silhouette. (B11: the
+    // wingtip glint sprites are gone; the feathered primaries do that job
+    // honestly now, and a glowing dot on a realistic wing reads as a toy.)
+    const prim = new THREE.Mesh(primariesGeo(side), membraneMat);
+    wrist.add(prim);
+    if (side === 1) { creatureAnim.shoulderR = shoulder; creatureAnim.elbowR = elbow; creatureAnim.wristR = wrist; creatureAnim.primR = prim; }
+    else { creatureAnim.shoulderL = shoulder; creatureAnim.elbowL = elbow; creatureAnim.wristL = wrist; creatureAnim.primL = prim; }
   }
   // Start folded (perched).
   creatureAnim.fold = 1;
-  applyWingPose(0);
+  applyWingPose();
 }
-// Applies the wing pose for a flap value in [-1, 1] (1 = wings fully up).
-function applyWingPose(flap) {
+// Applies the wing pose for the current flap state (Round 3 B7/B8/B9).
+// Shoulder follows the shaped stroke directly; elbow, wrist, and primaries
+// trail it with phase lags (70/140/200 ms) — the whip that reads as living
+// tissue. In a glide the wings lock at a slight dihedral with slow
+// micro-adjustments instead of flapping. Turn articulation: the inside wing
+// drops, the outside wing rises, the tail steers into the turn. Speed
+// sweeps the wings back slightly. All motion is creature-local — the rig
+// (and the rider's head) never moves.
+function applyWingPose() {
   const a = creatureAnim;
   if (!a.shoulderR) return;
-  const fold = a.fold;
-  const flapAngle = 0.12 + flap * a.flapAmp - fold * 0.5;
-  a.shoulderR.rotation.z = flapAngle;
-  a.shoulderL.rotation.z = -flapAngle;
-  // Elbow folds on the upstroke (cos > 0 while the wings are rising) and
-  // sweeps back when folded (perched).
-  const foldAngle = 0.15 + 0.35 * Math.max(0, Math.cos(a.flapPhase)) + fold * 0.9;
-  a.elbowR.rotation.z = foldAngle;
-  a.elbowL.rotation.z = -foldAngle;
-  const sweep = 0.08 + fold * 0.85;
+  const fold = a.fold, glide = a.glide;
+  const ph = a.flapPhase, rate = a.flapRate;
+  // Phase lags in radians (lag seconds x flap rate x 2π).
+  const lagE = 0.07 * rate * Math.PI * 2;
+  const lagW = 0.14 * rate * Math.PI * 2;
+  const lagP = 0.20 * rate * Math.PI * 2;
+  const sS = strokeAt(ph); // shoulder: direct
+  const sE = strokeAt(ph - lagE); // elbow trails
+  const sW = strokeAt(ph - lagW); // wrist trails further
+  const sP = strokeAt(ph - lagP); // primaries trail most
+  const amp = a.flapAmp * (1 - glide);
+  // Glide micro-adjustments: slow dihedral breathing + a gust term.
+  const micro = glide * (0.03 * Math.sin(worldTime * Math.PI * 2 * 0.4)
+    + 0.02 * Math.sin(worldTime * 0.13 + 1.7) * Math.sin(worldTime * 0.071));
+  // Turn articulation (B9): inside wing drops, outside wing rises.
+  // roll > 0 = right bank, so the right wing is the inside wing.
+  const roll = clamp(flight.roll, -0.6, 0.6);
+  const inside = -0.18 * Math.abs(roll), outside = 0.12 * Math.abs(roll);
+  const turnR = roll >= 0 ? inside : outside;
+  const turnL = roll >= 0 ? outside : inside;
+  const base = 0.12 + sS * amp - fold * 0.5;
+  const glidePose = 0.10 + micro; // locked dihedral in glide
+  const angR = lerp(base + turnR, glidePose + turnR * 0.5, glide);
+  const angL = lerp(base + turnL, glidePose + turnL * 0.5, glide);
+  a.shoulderR.rotation.z = angR;
+  a.shoulderL.rotation.z = -angL;
+  // Elbow: folds on the upstroke (stroke near +1), extends on the
+  // downstroke; folds slightly deeper on the inside wing in a turn.
+  const foldBase = 0.15 + 0.35 * Math.max(0, sE) + fold * 0.9;
+  const foldR = foldBase + (roll >= 0 ? 0.10 : 0.04) * Math.abs(roll);
+  const foldL = foldBase + (roll >= 0 ? 0.04 : 0.10) * Math.abs(roll);
+  a.elbowR.rotation.z = lerp(foldR, 0.12 + micro * 0.5, glide);
+  a.elbowL.rotation.z = -lerp(foldL, 0.12 + micro * 0.5, glide);
+  // Sweep: folded at perch, slightly swept back with speed (B9).
+  const speedNorm = clamp(flight.speed / 30, 0, 1);
+  const sweep = 0.08 + fold * 0.85 + speedNorm * 0.12;
   a.elbowR.rotation.y = -sweep;
   a.elbowL.rotation.y = sweep;
+  // Wrist (B7): twist from the shoulder/wrist lag difference — the outer
+  // wing pronates (leading edge down) on the downstroke and feathers flat
+  // on the upstroke; folds back on the upstroke.
+  const twist = clamp((sS - sW) * 0.6, -0.35, 0.35);
+  const wristTwist = lerp(twist, 0.08, glide); // slight stability twist in glide
+  a.wristR.rotation.x = wristTwist;
+  a.wristL.rotation.x = wristTwist;
+  const wristFold = 0.05 + 0.20 * Math.max(0, sW) + fold * 0.5;
+  a.wristR.rotation.z = lerp(wristFold, 0.06, glide);
+  a.wristL.rotation.z = -lerp(wristFold, 0.06, glide);
+  // Primaries (B3): fan open on the downstroke (spread + overshoot from the
+  // lag), close on the upstroke.
+  const spread = 0.06 * (1 - sP) + clamp((sW - sP) * 0.3, 0, 0.08);
+  a.primR.rotation.z = lerp(spread, 0.05, glide);
+  a.primL.rotation.z = -lerp(spread, 0.05, glide);
+  // Tail fan (B8/B9): spreads and pitches with the stroke; fans wide in glide.
+  if (a.fan) {
+    const fanSpread = 1 + 0.25 * (1 - sS) / 2;
+    a.fan.scale.x = 1.15 * lerp(fanSpread, 1.3, glide);
+  }
 }
 function updateCreature(dt) {
   const a = creatureAnim;
@@ -2650,40 +3393,58 @@ function updateCreature(dt) {
   const foldTarget = flying ? 0 : 1;
   a.fold += (foldTarget - a.fold) * Math.min(1, dt * 1.8);
   // Flap rate + amplitude follow flight state: flap hard when climbing or
-  // accelerating, cruise flap in level flight, glide when descending.
+  // accelerating, cruise flap in level flight, TRUE GLIDE when descending
+  // (B9 — the wings lock at a dihedral instead of slow-flapping forever).
   // In journey mode the journey driver sets the targets per scene (launch
-  // burst, ocean glide, forest gentle, finale climb).
-  let rateTarget = 0, ampTarget = 0;
+  // burst, ocean glide, forest gentle, finale climb); the glide legs are
+  // detected from the targets themselves (rate <= 0.35, amp <= 0.15).
+  let rateTarget = 0, ampTarget = 0, glideTarget = false;
   if (flight.mode === 'takeoff') { rateTarget = 1.5; ampTarget = 0.85; }
-  else if (flight.mode === 'journey') { rateTarget = journey.flapRate; ampTarget = journey.flapAmp; }
+  else if (flight.mode === 'journey') {
+    rateTarget = journey.flapRate; ampTarget = journey.flapAmp;
+    glideTarget = rateTarget <= 0.35 && ampTarget <= 0.15;
+  }
   else if (flying) {
     const climbing = flight.pitch > 0.04 || flight.speed < flight.targetSpeed - 3;
     const descending = flight.pitch < -0.06 && flight.speed > 12;
-    if (descending) { rateTarget = 0.25; ampTarget = 0.08; } // glide
+    if (descending) { glideTarget = true; } // true glide: wings lock
     else if (climbing) { rateTarget = 1.15; ampTarget = 0.7; }
     else { rateTarget = 0.6; ampTarget = 0.45; } // cruise
   }
+  if (glideTarget) { rateTarget = 0; ampTarget = 0; }
+  // Glide <-> flap transition eases over 0.8 s so the change of state reads.
+  a.glide += clamp((glideTarget ? 1 : 0) - a.glide, -dt / 0.8, dt / 0.8);
   a.flapRate += (rateTarget - a.flapRate) * Math.min(1, dt * 2);
   a.flapAmp += (ampTarget - a.flapAmp) * Math.min(1, dt * 2);
-  // Advance the flap cycle; detect the mid-downstroke (phase crossing PI)
-  // for the wingbeat whoosh + haptic pulse.
-  const prevMod = a.flapPhase % (Math.PI * 2);
+  // Advance the flap cycle on the shaped stroke (B8); detect the
+  // mid-downstroke (the stroke crossing 0 going down) for the wingbeat
+  // whoosh + haptic pulse — the audio now fires exactly when the wings
+  // drive down, which is what the rider sees.
   a.flapPhase += dt * Math.PI * 2 * a.flapRate;
-  const newMod = a.flapPhase % (Math.PI * 2);
-  const crossedDown = prevMod < Math.PI && (newMod >= Math.PI || newMod < prevMod);
-  if (crossedDown && flying && a.flapAmp > 0.2) {
+  const stroke = strokeAt(a.flapPhase);
+  if (a.prevStroke > 0 && stroke <= 0 && flying && a.flapAmp > 0.2) {
     sfxWingbeat(a.flapAmp);
     pulseHaptics('both', 0.2 + a.flapAmp * 0.15, 45);
   }
-  a.prevFlapMod = newMod;
-  applyWingPose(Math.sin(a.flapPhase));
-  // Breathing: slow chest swell + a faint head bob. After a journey
-  // landing the breath rate dips (settling) and eases back over ~20 s.
+  a.prevStroke = stroke;
+  applyWingPose();
+  // Flap-synced body motion (B8): the body dips as the wings drive down and
+  // rises on the upstroke; a small pitch nod rides the stroke. Scaled by
+  // flap amplitude (zero perched / in glide) and creature-local only — the
+  // rig (and the rider's head) never moves.
+  const bobAmp = clamp(a.flapAmp, 0, 0.85) * 0.06 * (1 - a.glide);
+  creature.position.y = stroke * bobAmp;
+  creature.rotation.x = Math.sin(worldTime * 0.8) * 0.015 + stroke * 0.02 * (1 - a.glide) * clamp(a.flapAmp / 0.45, 0, 1);
+  creature.rotation.z = Math.sin(worldTime * 0.6) * 0.012;
+  // Breathing 2.0 (B10): the chest mesh is merged away (B4), so breathing
+  // moves to the merged body mesh (a subtle whole-body swell) + a throat
+  // swell via the head group's height. After a journey landing the breath
+  // rate dips (settling) and eases back over ~20 s.
   a.breathRate += (1 - a.breathRate) * Math.min(1, dt * 0.05);
   a.breathPhase += dt * 1.4 * a.breathRate;
   const b = Math.sin(a.breathPhase);
-  a.chest.scale.set(1.0 + 0.05 * b, 0.95 + 0.06 * b, 1.35 + 0.03 * b);
-  a.headGroup.position.y = a.headGroup.userData.baseY + 0.02 * Math.sin(a.breathPhase * 0.5);
+  if (a.bodyMesh) a.bodyMesh.scale.set(1.0 + 0.015 * b, 1.0, 1.0 + 0.015 * b);
+  a.headGroup.position.y = a.headGroup.userData.baseY + 0.02 * Math.sin(a.breathPhase * 0.5) + 0.01 * b;
   // Head: looks into turns while flying; looks around curiously perched.
   if (flying) {
     a.headGroup.rotation.y = -flight.roll * 0.35;
@@ -2692,13 +3453,10 @@ function updateCreature(dt) {
     a.headGroup.rotation.y = Math.sin(worldTime * 0.23) * 0.45;
     a.headGroup.rotation.x = Math.sin(worldTime * 0.31) * 0.06;
   }
-  // Tail sway + body sway (subtle life; the rig carries the real motion).
-  a.tailGroup.rotation.y = Math.sin(worldTime * 0.7) * 0.08 + flight.roll * 0.2;
-  a.tailGroup.rotation.x = Math.sin(worldTime * 0.5) * 0.03;
-  creature.rotation.x = Math.sin(worldTime * 0.8) * 0.015;
-  creature.rotation.z = Math.sin(worldTime * 0.6) * 0.012;
-  // Wingtip glints follow the valve's glow registry.
-  for (const g of a.wingGlints) g.visible = perfValve.glowsOn && flying;
+  // Tail sway + steering into turns (B8/B9): the fan yaws into the turn
+  // (strengthened roll coupling) and pitches with the stroke.
+  a.tailGroup.rotation.y = Math.sin(worldTime * 0.7) * 0.08 + flight.roll * 0.35;
+  a.tailGroup.rotation.x = Math.sin(worldTime * 0.5) * 0.03 + stroke * 0.06 * clamp(a.flapAmp / 0.45, 0, 1) * (1 - a.glide);
 }
 
 // ============================== flight state + core ==============================
@@ -3755,7 +4513,24 @@ let rightCtl = null, leftCtl = null;
     if (rightCtl === c) rightCtl = null;
     if (leftCtl === c) leftCtl = null;
   });
-  scene.add(c);
+  // Round 3 S1 (CRITICAL fix): parent the target-ray groups under headComp
+  // — the camera's parent — NOT the scene root (the S1 bug: the ray was
+  // computed in the XR reference-space frame while the menu lives in the
+  // rig frame, 307 m apart, so the VR menu was unclickable and the laser
+  // invisible). WebXRManager overwrites each group's LOCAL matrix from the
+  // reference-space pose every frame; matrixWorld then composes the
+  // headComp chain (flightRig -> seatGroup -> headComp) automatically.
+  // WHY headComp, not flightRig (the audit's suggestion): the seat offset
+  // (0, 0.95, 0.55) and the head-height compensation (headComp.y =
+  // -smoothHeadY) sit between flightRig and the camera. Parenting to
+  // flightRig leaves a ~0.4 m systematic vertical aim error at the menu
+  // (open-loop aim at FREE FLIGHT lands above the menu top edge — proven
+  // by the S1 probe). Parenting to headComp applies the SAME transform to
+  // the eyes, the hands, and the camera-attached menu, so the hand-eye-menu
+  // geometry is exact at any head height (Standard §5: what the player
+  // sees must be what the game hits). The laser stays in the scene (its
+  // endpoints are world coordinates — now correct); diagMarker likewise.
+  headComp.add(c);
 });
 
 // Laser pointer for the in-VR menus (one line, updated from the aim hand).
@@ -3776,6 +4551,30 @@ const diagMarker = new THREE.Mesh(
 diagMarker.visible = false;
 scene.add(diagMarker);
 
+// Round 3 S3: in-VR "controller tracking lost" hint — a small
+// camera-attached plane below the menu panel (the menu's bottom edge is at
+// camera-local y -0.13; this hint's top edge is at -0.355, clear of it).
+// Static text, drawn once. Shown only while the aim controller's pose is
+// null (r160 sets targetRay.visible=false); hidden otherwise.
+const trackHintCanvas = document.createElement('canvas');
+trackHintCanvas.width = 512; trackHintCanvas.height = 72;
+const trackHintCtx = trackHintCanvas.getContext('2d');
+trackHintCtx.fillStyle = 'rgba(8,14,26,0.82)';
+trackHintCtx.beginPath(); trackHintCtx.roundRect(0, 0, 512, 72, 12); trackHintCtx.fill();
+trackHintCtx.strokeStyle = '#ffb347'; trackHintCtx.lineWidth = 3;
+trackHintCtx.beginPath(); trackHintCtx.roundRect(3, 3, 506, 66, 10); trackHintCtx.stroke();
+trackHintCtx.textAlign = 'center'; trackHintCtx.fillStyle = '#ffd27a';
+trackHintCtx.font = '700 28px Arial';
+trackHintCtx.fillText('Controller tracking lost', 256, 46);
+const trackHintTex = new THREE.CanvasTexture(trackHintCanvas);
+trackHintTex.colorSpace = THREE.SRGBColorSpace;
+const trackHint = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.13),
+  new THREE.MeshBasicMaterial({ map: trackHintTex, transparent: true, toneMapped: false, depthWrite: false }));
+trackHint.position.set(0, -0.42, -2.2);
+trackHint.visible = false;
+camera.add(trackHint);
+let trackingLost = false; // Round 3 S3: true while the aim controller pose is null
+
 // ============================== screens / state machine ==============================
 let screen = 'menu'; // 'menu' | 'flying' | 'paused' | 'settings' | 'journeyEnd'
 let settingsReturn = 'menu'; // where BACK in settings goes
@@ -3788,6 +4587,10 @@ function setScreen(s) {
   else if (s === 'journeyEnd') drawJourneyEnd();
   hudEl.style.display = (s === 'flying') ? 'block' : 'none';
   helpEl.style.display = (s === 'flying' && !renderer.xr.isPresenting) ? 'block' : 'none';
+  // Round 3 S5: reset the stick-menu focus for the new screen and paint the
+  // focus ring (repainted after every menu redraw, so it never goes stale).
+  stickNavReset();
+  drawStickFocus();
 }
 function pauseGame() {
   if (screen !== 'flying') return;
@@ -4011,60 +4814,132 @@ function drawSettings() {
 function menuTapFromRay(origin, dir) {
   menuRaycaster.set(origin, dir);
   const hits = menuRaycaster.intersectObject(menuPlane, false);
-  if (!hits.length || hits[0].uv === undefined) return;
+  if (!hits.length || hits[0].uv === undefined) return false;
   const cx = hits[0].uv.x * 1024;
   const cy = (1 - hits[0].uv.y) * 640;
   for (const b of menuButtons) {
     if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
       activateButton(b.id);
-      return;
+      // Round 3 S5: activation may redraw the menu (Settings toggles /
+      // sliders) and wipe the stick-focus ring — repaint it.
+      drawStickFocus();
+      return true;
     }
   }
+  return false;
+}
+
+// ============================== Round 3 S5: stick-navigated menu fallback ==============================
+// The ray is the primary VR menu input, but a ray failure must never again
+// strand the player at the main menu (S1 did exactly that). Either stick
+// navigates the menu rows (up/down, 0.5 threshold, one row per edge —
+// mirroring Rad's pause menu), left/right adjusts a Settings volume row,
+// and trigger or A/X activates the focused row. The focused row carries a
+// bright cyan ring on the menu canvas so the player always sees what the
+// trigger would activate if the ray misses. Rows are derived from
+// menuButtons grouped by canvas y (each Settings volume row is one row
+// with two buttons). Row geometry is computed only on stick edges and
+// activations — never per frame (Bible §2: no per-frame allocations).
+let stickNavRow = 0; // focused row index within menuRows()
+let prevStickNavY = 0, prevStickNavX = 0; // live stick values (S2-style: no stuck edges)
+let prevStickNavA = false; // A/X edge state
+function menuRows() {
+  const sorted = menuButtons.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  const rows = [];
+  for (const b of sorted) {
+    const last = rows[rows.length - 1];
+    if (last && last.y === b.y) last.buttons.push(b);
+    else rows.push({ y: b.y, buttons: [b] });
+  }
+  return rows;
+}
+function stickNavReset() {
+  // Default focus: the first highlighted button's row — except Settings,
+  // where `selected` means toggle state, not focus (row 0 = MASTER VOLUME).
+  stickNavRow = 0;
+  prevStickNavY = 0; prevStickNavX = 0; prevStickNavA = false;
+  if (screen === 'settings') return;
+  const rows = menuRows();
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].buttons.some(b => b.selected)) { stickNavRow = i; return; }
+  }
+}
+function drawStickFocus() {
+  if (!menuPlane.visible) return;
+  const rows = menuRows();
+  if (!rows.length) return;
+  stickNavRow = Math.max(0, Math.min(stickNavRow, rows.length - 1));
+  const row = rows[stickNavRow];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of row.buttons) {
+    x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y);
+    x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
+  }
+  const g = menuCtx;
+  g.strokeStyle = '#7df9ff'; g.lineWidth = 5;
+  g.beginPath(); g.roundRect(x0 - 8, y0 - 8, (x1 - x0) + 16, (y1 - y0) + 16, 16); g.stroke();
+  menuTex.needsUpdate = true;
+}
+function activateStickSelection() {
+  const rows = menuRows();
+  if (!rows.length) return;
+  stickNavRow = Math.max(0, Math.min(stickNavRow, rows.length - 1));
+  const row = rows[stickNavRow];
+  if (row.buttons.length === 1) {
+    activateButton(row.buttons[0].id);
+  } else {
+    // A Settings volume row (minus/plus): trigger/A raises the value;
+    // left/right on the stick lowers/raises it.
+    const plus = row.buttons.find(b => b.id.endsWith('+'));
+    if (plus) activateButton(plus.id);
+  }
+  drawStickFocus(); // activation may have redrawn the menu (wipe) — repaint
+}
+function pollStickMenuNav() {
+  if (screen !== 'menu' && screen !== 'paused' && screen !== 'settings' && screen !== 'journeyEnd') return;
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  let stickY = 0, stickX = 0, aPressed = false;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const ax = gp.axes || [];
+    if (ax.length > 3) {
+      if (Math.abs(ax[3]) > Math.abs(stickY)) stickY = ax[3];
+      if (Math.abs(ax[2]) > Math.abs(stickX)) stickX = ax[2];
+    }
+    const btn = gp.buttons || [];
+    if (btn[4] && btn[4].pressed) aPressed = true;
+  }
+  const downEdge = stickY > 0.5 && prevStickNavY <= 0.5;
+  const upEdge = stickY < -0.5 && prevStickNavY >= -0.5;
+  const rightEdge = stickX > 0.5 && prevStickNavX <= 0.5;
+  const leftEdge = stickX < -0.5 && prevStickNavX >= -0.5;
+  const aEdge = aPressed && !prevStickNavA;
+  prevStickNavY = stickY; prevStickNavX = stickX; prevStickNavA = aPressed;
+  if (!downEdge && !upEdge && !rightEdge && !leftEdge && !aEdge) return;
+  const rows = menuRows();
+  if (!rows.length) return;
+  stickNavRow = Math.max(0, Math.min(stickNavRow, rows.length - 1));
+  if (downEdge) { stickNavRow = (stickNavRow + 1) % rows.length; drawStickFocus(); }
+  else if (upEdge) { stickNavRow = (stickNavRow - 1 + rows.length) % rows.length; drawStickFocus(); }
+  // Left/right adjusts a Settings volume row (no-op on single-button rows).
+  if (rightEdge) {
+    const plus = rows[stickNavRow].buttons.find(b => b.id.endsWith('+'));
+    if (plus) { activateButton(plus.id); drawStickFocus(); }
+  } else if (leftEdge) {
+    const minus = rows[stickNavRow].buttons.find(b => b.id.endsWith('-'));
+    if (minus) { activateButton(minus.id); drawStickFocus(); }
+  }
+  if (aEdge) activateStickSelection();
 }
 let prevMenuTrigger = false;
 const _aimO = new THREE.Vector3(), _aimD = new THREE.Vector3(), _aimQ = new THREE.Quaternion();
+const _diagV = new THREE.Vector3(); // Round 3 R2: scratch for the ray-menu distance
 function pollMenuInput() {
-  if (!renderer.xr.isPresenting || (screen !== 'menu' && screen !== 'paused' && screen !== 'settings' && screen !== 'journeyEnd')) {
-    laser.visible = false; diagMarker.visible = false; prevMenuTrigger = false; return;
-  }
-  const aimCtl = rightCtl || leftCtl;
-  if (!aimCtl) { laser.visible = false; diagMarker.visible = false; return; }
-  // §5: the aim pose is the controller's TARGET-RAY pose — three.js
-  // getController() returns the targetRaySpace object (verified against
-  // the r160 source: getController -> getTargetRaySpace, posed from
-  // frame.getPose(inputSource.targetRaySpace)). The grip pose
-  // (getControllerGrip) is never used here. getWorldQuaternion refreshes
-  // the matrix chain, so the origin below is current, not a frame stale.
-  aimCtl.getWorldQuaternion(_aimQ);
-  _aimO.setFromMatrixPosition(aimCtl.matrixWorld);
-  _aimD.set(0, 0, -1).applyQuaternion(_aimQ);
-  const lp = laserGeo.attributes.position.array;
-  lp[0] = _aimO.x; lp[1] = _aimO.y; lp[2] = _aimO.z;
-  lp[3] = _aimO.x + _aimD.x * 6; lp[4] = _aimO.y + _aimD.y * 6; lp[5] = _aimO.z + _aimD.z * 6;
-  laserGeo.attributes.position.needsUpdate = true;
-  laser.visible = true;
-  // §5 diagnostic (?sbdiag=1 only): raycast every frame and park the
-  // marker on the true hit point, so the ray, the laser, and the button
-  // under the laser can be compared by eye. One extra raycast per frame,
-  // diagnostic mode only — zero cost in normal play.
-  if (DIAG) {
-    menuRaycaster.set(_aimO, _aimD);
-    const dhits = menuRaycaster.intersectObject(menuPlane, false);
-    if (dhits.length && dhits[0].uv !== undefined) {
-      diagMarker.visible = true;
-      diagMarker.position.copy(dhits[0].point);
-      diagState.hitCx = dhits[0].uv.x * 1024;
-      diagState.hitCy = (1 - dhits[0].uv.y) * 640;
-      diagState.hitBtn = '—';
-      for (const b of menuButtons) {
-        if (diagState.hitCx >= b.x && diagState.hitCx <= b.x + b.w && diagState.hitCy >= b.y && diagState.hitCy <= b.y + b.h) { diagState.hitBtn = b.id; break; }
-      }
-    } else {
-      diagMarker.visible = false;
-      diagState.hitCx = -1; diagState.hitCy = -1; diagState.hitBtn = 'none';
-    }
-  }
-  // Trigger edge (xr-standard buttons[0]) -> menu tap.
+  // Round 3 S2: read the trigger state FIRST, every frame, and keep
+  // prevMenuTrigger live even off-menu. Resetting it to false off-menu
+  // fired a phantom tap when pausing with B while holding the trigger.
   let pressed = false;
   const session = renderer.xr.getSession();
   if (session) {
@@ -4073,8 +4948,75 @@ function pollMenuInput() {
       if (gp && gp.buttons && gp.buttons[0] && gp.buttons[0].pressed) { pressed = true; break; }
     }
   }
-  if (pressed && !prevMenuTrigger) menuTapFromRay(_aimO, _aimD);
+  if (!renderer.xr.isPresenting || (screen !== 'menu' && screen !== 'paused' && screen !== 'settings' && screen !== 'journeyEnd')) {
+    laser.visible = false; diagMarker.visible = false; trackHint.visible = false; trackingLost = false;
+    prevMenuTrigger = pressed;
+    return;
+  }
+  const aimCtl = rightCtl || leftCtl;
+  // Round 3 S3: r160 sets targetRay.visible=false when getPose returns null
+  // (tracking lost). Hide the laser instead of freezing it at the last pose
+  // and show a brief in-VR hint; the stick fallback (S5) still works.
+  trackingLost = !!aimCtl && !aimCtl.visible;
+  trackHint.visible = trackingLost;
+  if (DIAG) diagState.trackingLost = trackingLost;
+  if (aimCtl && !trackingLost) {
+    // §5: the aim pose is the controller's TARGET-RAY pose — three.js
+    // getController() returns the targetRaySpace object (verified against
+    // the r160 source: getController -> getTargetRaySpace, posed from
+    // frame.getPose(inputSource.targetRaySpace)). The grip pose
+    // (getControllerGrip) is never used here. getWorldQuaternion refreshes
+    // the matrix chain, so the origin below is current, not a frame stale.
+    aimCtl.getWorldQuaternion(_aimQ);
+    _aimO.setFromMatrixPosition(aimCtl.matrixWorld);
+    _aimD.set(0, 0, -1).applyQuaternion(_aimQ);
+    const lp = laserGeo.attributes.position.array;
+    lp[0] = _aimO.x; lp[1] = _aimO.y; lp[2] = _aimO.z;
+    lp[3] = _aimO.x + _aimD.x * 6; lp[4] = _aimO.y + _aimD.y * 6; lp[5] = _aimO.z + _aimD.z * 6;
+    laserGeo.attributes.position.needsUpdate = true;
+    laser.visible = true;
+    // §5 diagnostic (?sbdiag=1 only): raycast every frame and park the
+    // marker on the true hit point, so the ray, the laser, and the button
+    // under the laser can be compared by eye. One extra raycast per frame,
+    // diagnostic mode only — zero cost in normal play.
+    if (DIAG) {
+      menuRaycaster.set(_aimO, _aimD);
+      const dhits = menuRaycaster.intersectObject(menuPlane, false);
+      if (dhits.length && dhits[0].uv !== undefined) {
+        diagMarker.visible = true;
+        diagMarker.position.copy(dhits[0].point);
+        diagState.hitCx = dhits[0].uv.x * 1024;
+        diagState.hitCy = (1 - dhits[0].uv.y) * 640;
+        diagState.hitBtn = '—';
+        for (const b of menuButtons) {
+          if (diagState.hitCx >= b.x && diagState.hitCx <= b.x + b.w && diagState.hitCy >= b.y && diagState.hitCy <= b.y + b.h) { diagState.hitBtn = b.id; break; }
+        }
+      } else {
+        diagMarker.visible = false;
+        diagState.hitCx = -1; diagState.hitCy = -1; diagState.hitBtn = 'none';
+      }
+      // Round 3 R2: rig-frame indicator — the controller parent + the
+      // ray-origin-to-menu distance prove the ray and the menu share a
+      // frame (headComp parent, <10 m). The marker turns red on a mismatch.
+      diagState.ctlParent = aimCtl.parent === headComp ? 'headComp' : aimCtl.parent === flightRig ? 'flightRig' : aimCtl.parent === scene ? 'scene' : 'other';
+      menuPlane.getWorldPosition(_diagV);
+      diagState.rayMenuDist = _aimO.distanceTo(_diagV);
+      diagState.frameOk = diagState.ctlParent !== 'scene' && diagState.ctlParent !== 'other' && diagState.rayMenuDist < 10;
+      diagMarker.material.color.setHex(diagState.frameOk ? 0x2bff88 : 0xff4444);
+    }
+    // Trigger edge (xr-standard buttons[0]) -> menu tap; if the ray misses
+    // every button, the trigger falls back to the stick selection (S5).
+    if (pressed && !prevMenuTrigger) {
+      if (!menuTapFromRay(_aimO, _aimD)) activateStickSelection();
+    }
+  } else {
+    laser.visible = false; diagMarker.visible = false;
+    // No ray tap while tracking is lost (the pose is stale) — but the
+    // trigger still activates the stick selection, so the menu stays usable.
+    if (pressed && !prevMenuTrigger) activateStickSelection();
+  }
   prevMenuTrigger = pressed;
+  pollStickMenuNav(); // Round 3 S5: stick navigation (up/down + trigger/A)
 }
 
 // VR pause button: B/Y (gamepad buttons[5]) edge toggles pause while flying
@@ -4223,6 +5165,7 @@ function drawDiag() {
     'R stick raw (' + f2(diagState.rxRaw) + ',' + f2(diagState.ryRaw) + ') dz (' + f2(diagState.rx) + ',' + f2(diagState.ry) + ') trig ' + diagState.rt.toFixed(2) + '\n' +
     'rollTgt ' + flight.rollTarget.toFixed(3) + ' (bank x' + prefs.bankIntensity.toFixed(1) + ') · pitchTgt ' + flight.pitchTarget.toFixed(3) + '\n' +
     'menu hit (' + diagState.hitCx.toFixed(0) + ',' + diagState.hitCy.toFixed(0) + ') btn=' + diagState.hitBtn + '\n' +
+    'rig frame: ctl parent=' + diagState.ctlParent + ' · ray-menu ' + (diagState.rayMenuDist < 0 ? 'n/a' : diagState.rayMenuDist.toFixed(1) + ' m') + ' · frame ' + (diagState.frameOk ? 'OK' : 'MISMATCH') + ' · tracking ' + (diagState.trackingLost ? 'LOST' : 'ok') + '\n' +
     'aimO (' + _aimO.x.toFixed(2) + ',' + _aimO.y.toFixed(2) + ',' + _aimO.z.toFixed(2) + ') aimD (' + f2(_aimD.x) + ',' + f2(_aimD.y) + ',' + f2(_aimD.z) + ')';
 }
 function drawPerfCell() {
@@ -4471,7 +5414,9 @@ if (navigator.xr && navigator.xr.isSessionSupported) {
   setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
 }
 vrBtn.addEventListener('click', async () => {
-  audioSys.resume();
+  // Round 3 S4: never let an audio failure abort VR entry — resume() is
+  // best-effort here (the session branches resume again after entry).
+  try { audioSys.resume(); } catch (e) { /* audio unavailable; VR entry continues */ }
   // Phase 5: await the support check before branching — a fast tap before
   // isSessionSupported resolves would otherwise take the desktop path on
   // a Quest (xrSupported still false). The awaited promise never rejects

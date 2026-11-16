@@ -129,6 +129,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js'; // namespace import: r160 exports { retarget, retargetClip, clone } — no `SkeletonUtils` named export (a named import fails module linking and kills the whole script, incl. the menu buttons)
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // Round 3 (P1-G7b): sniper merge — named export verified present in r160 (module-link check is mandatory for it)
 
 // ============ helpers ============
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -295,9 +296,9 @@ function xrLayerSize() {
 }
 
 // ============ lights ============
-scene.add(new THREE.HemisphereLight(0x2a3550, 0x0a0806, 0.65)); // 0.55 -> 0.65 compensates ACES mids; the night stays dark
-const moon = new THREE.DirectionalLight(0x8fa8d8, 0.5); // moonlight a touch stronger for readable silhouettes
-moon.position.set(-30, 50, -20);
+scene.add(new THREE.HemisphereLight(0x25324e, 0x0d0a07, 0.65)); // 0.55 -> 0.65 compensates ACES mids; the night stays dark (Round 3 P0-M7: cooler sky, warmer ground)
+const moon = new THREE.DirectionalLight(0x8fa8d8, 0.6); // moonlight a touch stronger for readable silhouettes
+moon.position.set(-60, 35, -40); // Round 3 (P0-M7): lower, raking angle — north facades catch cool rim light, south facades fall darker; the street gets a light direction
 scene.add(moon);
 // Round 2 flashlight rebuild (before/after comparison defect: the old
 // 0.55 rad / penumbra 0.5 cone threw an 8.6 m pool on the flat hardware-
@@ -346,13 +347,37 @@ function upgradeMap(photoUrl, material, rx, ry, onApplied) {
     material.needsUpdate = true;
   }, undefined, () => { /* keep the canvas texture */ });
 }
+// Round 3 (P0-M5): PBR upgrade — the color map (existing behavior) PLUS
+// the Poly Haven roughness + OpenGL normal maps for the same slug, all at
+// the SAME repeat (repeat is per-texture). Rough/normal maps are linear
+// data: they must NOT get SRGBColorSpace. Each map loads independently —
+// any failure leaves the other maps (and the canvas fallback) in place.
+function upgradePBR(slug, material, rx, ry, onApplied, normalScale) {
+  upgradeMap(ASSET_BASE + 'tex-' + slug + '-1k.jpg', material, rx, ry, onApplied);
+  const loadDataMap = (file, apply) => {
+    texLoader.load(ASSET_BASE + file, (tex) => {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(rx, ry);
+      tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+      apply(tex);
+      material.needsUpdate = true;
+    }, undefined, () => { /* keep the canvas texture / no map */ });
+  };
+  loadDataMap('tex-' + slug + '-rough-1k.jpg', (tex) => { material.roughnessMap = tex; });
+  loadDataMap('tex-' + slug + '-normal-1k.jpg', (tex) => {
+    material.normalMap = tex;
+    const ns = normalScale === undefined ? 0.6 : normalScale;
+    material.normalScale.set(ns, ns);
+  });
+}
 
 // Night environment map (visual-reference bar: realistic paint / glass /
 // metal / wet asphalt need something to reflect). A tiny PMREM scene: dark
-// sky, one cool moon disc, two warm lamp discs low on the horizon. Baked
-// once at boot; per-material envMapIntensity keeps the night dark (default
-// 0.22, set by applyEnvDefaults at the end of setup; special materials flag
-// userData.envSet and keep their own value).
+// sky, one cool moon disc + halo, a warm strip along the street axis, two
+// warm lamp discs low on the horizon, a faint cool horizon bounce + a dim
+// ground bounce. Baked once at boot; per-material envMapIntensity keeps
+// the night dark (default 0.22, set by applyEnvDefaults at the end of
+// setup; special materials flag userData.envSet and keep their own value).
 try {
   const envScene = new THREE.Scene();
   envScene.background = new THREE.Color(0x04060c);
@@ -360,10 +385,15 @@ try {
     const m = new THREE.Mesh(new THREE.CircleGeometry(r, 24), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
     m.position.set(x, y, z); m.lookAt(0, 0, 0); envScene.add(m);
   };
-  envDisc(0x8fa8d8, -30, 50, -20, 9);   // moon
+  envDisc(0x8fa8d8, -60, 35, -40, 9);   // moon (matches the P0-M7 raking direction)
+  envDisc(0x4a5a80, -66, 38, -44, 16);  // Round 3 (P0-M6): moon halo behind the disc
   envDisc(0xffc46b, 20, 3, -40, 7);     // warm town glow, east
   envDisc(0xff9a50, -45, 2, 30, 6);     // warm town glow, west
+  envDisc(0xffb060, -60, 3, 0, 5);      // Round 3 (P0-M6): warm strip along the street axis
+  envDisc(0xffc46b, 0, 2, 0, 5);        // (street axis, center)
+  envDisc(0xff9a50, 60, 4, 0, 5);       // (street axis, east)
   envDisc(0x2a3a5a, 0, -10, 60, 30);    // faint cool horizon bounce
+  envDisc(0x141c2a, 0, -25, 0, 20);     // Round 3 (P0-M6): dim cool ground bounce below
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(envScene, 0.04).texture;
   pmrem.dispose();
@@ -380,6 +410,13 @@ function applyEnvDefaults() {
 // centered on X/Z, base on the ground. Orientation per model was verified
 // offline against headlight / wheel geometry (see build notes).
 function fitCarModel(model, targetLen, frontSign) {
+  // Round 3 (P0-M2): the van GLB has NO NORMAL attribute and r160's
+  // GLTFLoader never synthesizes normals — without this the van lights
+  // near-black (a zero normal makes diffuse ~0). computeVertexNormals is
+  // a no-op for the other cars (they all have normals) and is idempotent.
+  model.traverse((o) => {
+    if (o.isMesh && o.geometry && !o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+  });
   const g = new THREE.Group();
   const box = new THREE.Box3().setFromObject(model);
   const size = new THREE.Vector3(); box.getSize(size);
@@ -392,45 +429,105 @@ function fitCarModel(model, targetLen, frontSign) {
   model.position.y -= box2.min.y;
   return g;
 }
+// Round 3 (P0-M1): classify an UNNAMED material by its baseColorFactor.
+// The sedan's 12 materials are all Blender defaults ('Material.001' …
+// 'Material.012'), so the old name-regex tuning silently did nothing and
+// the windows got painted body-color. Measured sedan values (GLB JSON,
+// 2026-11-15; GLTFLoader stores baseColorFactor verbatim — LinearSRGB —
+// so m.color IS these values at runtime):
+//   glass [0.497,0.732,0.800]  tire [0.020,0.020,0.020] x4 (wheels)
+//   hub   [0.124,0.124,0.124] x4 (wheel centres)
+//   dark trim [0.070,0.070,0.070]  bright trim [0.800,0.800,0.800]
+//   body  [0.800,0.014,0.016] (saturated red)
+// If the sedan GLB is ever re-downloaded, re-verify these values.
+function carColorRole(color) {
+  const r = color.r, g = color.g, b = color.b;
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  if (b > r && lum > 0.4) return 'glass';                 // pale blue-grey
+  if (max < 0.05) return 'tire';                          // near-black
+  if (r > 0.5 && r > 3 * g && r > 3 * b) return 'paint';   // saturated red body
+  if (min > 0.6 && max - min < 0.15) return 'trimBright'; // bright achromatic
+  if (max - min < 0.05 && min >= 0.08 && max <= 0.3) return 'hub'; // mid grey
+  return 'trim';
+}
+// Round 3 (P0-M3): one shared 128^2 noise texture, used as a roughnessMap
+// on car paint so the specular breaks up instead of reading as flat
+// plastic. Values 0.65-1.0: it modulates the base roughness, never zeroes
+// it. Built lazily (mkTex is defined later in the file).
+let _paintRoughTex = null;
+function paintRoughTex() {
+  if (_paintRoughTex) return _paintRoughTex;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#d8d8d8'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 2600; i++) {
+    const v = 165 + Math.floor(Math.random() * 90);
+    g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
+    g.fillRect(Math.random() * 128, Math.random() * 128, 1 + Math.random() * 3, 1 + Math.random() * 3);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  _paintRoughTex = tex;
+  return tex;
+}
 function tuneCarMaterials(model, paintColor, textured) {
-  // Per-car material clones (one Map per car): body paint toward the town
-  // palette, glass dark + reflective, lights dimly emissive (abandoned cars
-  // don't shine), rust left alone. Textured models (atlas) get a flat
-  // darkening instead of a palette tint so windows/wheels stay true.
-  const clones = new Map();
-  const white = new THREE.Color(0xffffff);
+  // Per-car material clones: body paint toward the town palette, glass
+  // dark + reflective, lights dimly emissive (abandoned cars don't shine),
+  // rust left alone. Textured models (atlas) get a flat darkening instead
+  // of a palette tint so windows/wheels stay true.
+  // Round 3: clones are PER MESH, not per material. The SUV shares its
+  // Black/Grey materials between body and wheels, so a per-material clone
+  // would tune by whichever prim the traversal hits first (order-
+  // dependent — the same silent-failure class as RC2). Per-mesh clones
+  // make every prim's treatment deterministic.
+  const paint = new THREE.Color(paintColor);
   model.traverse((o) => {
     if (!o.isMesh) return;
+    const onWheel = /wheel/i.test(o.name || '');
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     const out = mats.map((m) => {
       if (!m || !m.isMeshStandardMaterial) return m;
-      if (!clones.has(m)) {
-        const c = m.clone();
-        const nm = (m.name || '').toLowerCase();
-        c.userData.envSet = true;
-        if (/glass|window|windshield/.test(nm)) {
-          c.roughness = 0.08; c.metalness = 0.9; c.envMapIntensity = 1.5;
-          if (!m.map) c.color.multiplyScalar(0.6);
-        } else if (/headlight/.test(nm)) {
-          c.emissive = new THREE.Color(0xffe6a0); c.emissiveIntensity = 0.35;
-          c.envMapIntensity = 0.6;
-        } else if (/taillight|brakelight/.test(nm)) {
-          c.emissive = new THREE.Color(0xff2211); c.emissiveIntensity = 0.3;
-          c.envMapIntensity = 0.6;
-        } else if (/rust/.test(nm)) {
-          c.roughness = 0.9; c.metalness = 0.2; c.envMapIntensity = 0.3;
-        } else if (/tire/.test(nm) || /wheel/i.test(o.name || '')) {
-          c.roughness = 1; c.metalness = 0; c.envMapIntensity = 0.15;
-        } else if (textured) {
-          c.color.multiplyScalar(0.6); // night grime on the atlas
-          c.roughness = 0.5; c.metalness = 0.35; c.envMapIntensity = 0.7;
-        } else {
-          c.color.lerp(new THREE.Color(paintColor), 0.8);
-          c.roughness = 0.38; c.metalness = 0.5; c.envMapIntensity = 0.9;
-        }
-        clones.set(m, c);
+      const c = m.clone();
+      const nm = (m.name || '').toLowerCase();
+      c.userData.envSet = true;
+      const unnamed = !nm || /^material\.\d+$/.test(nm);
+      // Round 3 (P0-M1): unnamed materials classify by color, never by name.
+      const role = unnamed ? carColorRole(m.color) : null;
+      if (role === 'glass' || (!role && /glass|window|windshield/.test(nm))) {
+        c.roughness = 0.08; c.metalness = 0.9; c.envMapIntensity = 1.5;
+        if (!m.map) c.color.multiplyScalar(0.6);
+      } else if (role === 'tire' || (!role && (/tire/.test(nm) || (onWheel && /black/.test(nm))))) {
+        c.roughness = 1; c.metalness = 0; c.envMapIntensity = 0.15;
+      } else if (role === 'hub' || (!role && onWheel && /grey/.test(nm))) {
+        // Round 3 (P0-M4): hub brightening — wheel-centre metal catches light
+        c.roughness = 0.35; c.metalness = 0.7; c.envMapIntensity = 0.8;
+      } else if (!role && /headlight/.test(nm)) {
+        c.emissive = new THREE.Color(0xffe6a0); c.emissiveIntensity = 0.5; // 0.35 -> 0.5 (P0-M3)
+        c.envMapIntensity = 0.6;
+      } else if (!role && /taillight|brakelight/.test(nm)) {
+        c.emissive = new THREE.Color(0xff2211); c.emissiveIntensity = 0.3;
+        c.envMapIntensity = 0.6;
+      } else if (!role && /rust/.test(nm)) {
+        c.roughness = 0.9; c.metalness = 0.2; c.envMapIntensity = 0.3;
+      } else if (role === 'trimBright') {
+        c.roughness = 0.35; c.metalness = 0.7; c.envMapIntensity = 0.8;
+      } else if (role === 'trim') {
+        c.roughness = 0.9; c.metalness = 0.1; c.envMapIntensity = 0.3;
+      } else if (!role && /black|grey/.test(nm)) {
+        // Named dark trim (SUV body Black/Grey — not on a wheel mesh)
+        c.roughness = 0.5; c.metalness = 0.6; c.envMapIntensity = 0.7;
+      } else if (textured) {
+        c.color.multiplyScalar(0.6); // night grime on the atlas
+        c.roughness = 0.5; c.metalness = 0.35; c.envMapIntensity = 1.0; // 0.7 -> 1.0 (P0-M3)
+      } else {
+        // Round 3 (P0-M3): car paint PBR — glossier, more metallic, more env
+        c.color.lerp(paint, 0.8);
+        c.roughness = 0.25; c.metalness = 0.65; c.envMapIntensity = 1.3;
+        c.roughnessMap = paintRoughTex();
       }
-      return clones.get(m);
+      return c;
     });
     o.material = Array.isArray(o.material) ? out : out[0];
   });
@@ -461,13 +558,82 @@ function fitWeaponModel(model, cfg) {
   grip.applyEuler(model.rotation);
   model.position.copy(grip).negate();
   model.traverse((o) => {
-    if (o.isMesh && o.material && o.material.isMeshStandardMaterial) {
-      o.material.userData.envSet = true;
-      o.material.envMapIntensity = 0.7; // steel + wood read against the night env
+    if (!o.isMesh || !o.material || !o.material.isMeshStandardMaterial) return;
+    // Round 3 (P1-G7a): per-part PBR tuning (was: envMapIntensity only).
+    // Tuning is deterministic, so mutating the shared template materials
+    // is idempotent across fits (same input -> same values).
+    const m = o.material;
+    const nm = (m.name || '').toLowerCase();
+    m.userData.envSet = true;
+    if (/barrel|steel|metal/.test(nm)) {
+      m.roughness = 0.3; m.metalness = 0.85; m.envMapIntensity = 0.9;
+    } else if (/wood|stock|grip/.test(nm)) {
+      m.roughness = 0.85; m.metalness = 0; m.envMapIntensity = 0.25;
+    } else if (/blade/.test(nm)) {
+      m.roughness = 0.15; m.metalness = 0.95; m.envMapIntensity = 1.2;
+    } else if (/gold/.test(nm)) {
+      m.roughness = 0.25; m.metalness = 0.9; m.envMapIntensity = 1.0;
+    } else if (/scope|lens|glass/.test(nm)) {
+      m.roughness = 0.1; m.metalness = 0.9; m.envMapIntensity = 1.3;
+    } else if (/plastic/.test(nm)) {
+      m.roughness = 0.6; m.metalness = 0; m.envMapIntensity = 0.3;
+      // Canonicalize the near-black plastics (sniper: 0.067/0.095/0.099 —
+      // indistinguishable at night) so the P1-G7b merge groups them.
+      if (Math.max(m.color.r, m.color.g, m.color.b) < 0.12) m.color.setRGB(0.09, 0.09, 0.09);
+    } else if (m.map) {
+      m.envMapIntensity = 0.7; // textured (rifle/machete/katana atlas): leave PBR alone
+    } else {
+      // Unnamed / generic materials (pistol Main.001 etc.): color heuristic
+      const r = m.color.r, g = m.color.g, b = m.color.b;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      if (max < 0.06) { m.roughness = 0.45; m.metalness = 0.6; m.envMapIntensity = 0.7; } // dark metal
+      else if (min > 0.2 && max - min < 0.05) { m.roughness = 0.25; m.metalness = 0.85; m.envMapIntensity = 0.9; } // bright steel
+      else if (r > 0.15 && g > 0.1 && b < 0.08 && r > 2 * b) { m.roughness = 0.3; m.metalness = 0.85; m.envMapIntensity = 0.9; } // brass
+      else if (r > g && g >= b) { m.roughness = 0.85; m.metalness = 0; m.envMapIntensity = 0.25; } // warm brown: wood/paint
+      else { m.roughness = 0.5; m.metalness = 0.4; m.envMapIntensity = 0.7; }
     }
   });
+  // Round 3 (P1-G7b): merge same-tuned-material geometries on multi-prim
+  // weapons (the sniper is 22 prims / 16 materials -> ~7 meshes).
+  mergeWeaponMeshes(model);
   const box2 = new THREE.Box3().setFromObject(model);
   return { model, muzzleZ: box2.max.z };
+}
+// Round 3 (P1-G7b): group a fitted weapon's meshes by tuned-material key
+// and merge each group into one mesh. Only runs when a weapon has > 8
+// meshes (the sniper, 22 — every other weapon is <= 7). Geometries are
+// cloned first: the template's are shared across hands + pickups and must
+// never be mutated. Any failure keeps the original meshes.
+function mergeWeaponMeshes(model) {
+  const meshes = [];
+  model.traverse((o) => { if (o.isMesh) meshes.push(o); });
+  if (meshes.length <= 8) return;
+  for (const m of meshes) {
+    if (Array.isArray(m.material) || !m.material || !m.material.isMeshStandardMaterial) return;
+  }
+  model.updateMatrixWorld(true);
+  const invRoot = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const groups = new Map();
+  const tmpM = new THREE.Matrix4();
+  for (const m of meshes) {
+    const mat = m.material;
+    const key = [mat.color.r.toFixed(2), mat.color.g.toFixed(2), mat.color.b.toFixed(2),
+      mat.roughness, mat.metalness, mat.envMapIntensity || 0].join('|');
+    let g = groups.get(key);
+    if (!g) { g = { mat, geos: [] }; groups.set(key, g); }
+    const geo = m.geometry.clone();
+    tmpM.multiplyMatrices(invRoot, m.matrixWorld);
+    geo.applyMatrix4(tmpM);
+    g.geos.push(geo);
+  }
+  const mergedMeshes = [];
+  for (const g of groups.values()) {
+    const merged = g.geos.length === 1 ? g.geos[0] : mergeGeometries(g.geos, false);
+    if (!merged) return; // keep the original meshes on any failure
+    mergedMeshes.push(new THREE.Mesh(merged, g.mat));
+  }
+  for (const m of meshes) if (m.parent) m.parent.remove(m);
+  for (const mm of mergedMeshes) model.add(mm);
 }
 const weaponModels = {}; // name -> loaded glTF scene (template), or null
 
@@ -499,20 +665,48 @@ function glowTexture(inner, outer) {
 }
 const whiteGlowTex = glowTexture('rgba(255,255,255,0.9)', 'rgba(255,255,255,0)'); // tinted per use via material color
 {
+  // Round 3 (P0-M10): gradient sky dome instead of the flat background
+  // color — zenith near-black, horizon a touch lighter with a faint warm
+  // band just below it. r 380 fits inside the camera far (400); stars at
+  // r 320 sit inside the dome. fog: false — the dome must not fog out.
+  const skyCv = document.createElement('canvas'); skyCv.width = 4; skyCv.height = 256;
+  const sg = skyCv.getContext('2d');
+  const sgrad = sg.createLinearGradient(0, 0, 0, 256);
+  sgrad.addColorStop(0, '#04060c');    // zenith
+  sgrad.addColorStop(0.42, '#0a1020');
+  sgrad.addColorStop(0.5, '#0d1424');  // horizon
+  sgrad.addColorStop(0.56, '#141019'); // faint warm band just below the horizon
+  sgrad.addColorStop(1, '#05070a');    // nadir (never seen)
+  sg.fillStyle = sgrad; sg.fillRect(0, 0, 4, 256);
+  const skyTex = new THREE.CanvasTexture(skyCv);
+  skyTex.colorSpace = THREE.SRGBColorSpace;
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(380, 24, 16),
+    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })));
   const starGeo = new THREE.BufferGeometry();
   const pos = new Float32Array(900 * 3);
+  const starCol = new Float32Array(900 * 3); // Round 3 (P0-M10): 3 brightness tiers
   for (let i = 0; i < 900; i++) {
     const a = Math.random() * Math.PI * 2, e = rand(0.12, 1.4), r = 320;
     pos[i * 3] = Math.cos(a) * Math.cos(e) * r;
     pos[i * 3 + 1] = Math.sin(e) * r;
     pos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
+    const tier = Math.random();
+    const b = tier < 0.6 ? 0.55 : tier < 0.9 ? 0.8 : 1.0;
+    starCol[i * 3] = b; starCol[i * 3 + 1] = b; starCol[i * 3 + 2] = b;
   }
   starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xcdd8ff, size: 1.6, sizeAttenuation: false, fog: false })));
-  const moonSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(235,240,255,1)', 'rgba(150,170,220,0)'), transparent: true, fog: false, depthWrite: false }));
-  moonSpr.scale.set(42, 42, 1);
-  moonSpr.position.set(-160, 150, -220);
-  scene.add(moonSpr);
+  starGeo.setAttribute('color', new THREE.BufferAttribute(starCol, 3));
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xcdd8ff, size: 1.6, sizeAttenuation: false, fog: false, vertexColors: true })));
+  // Round 3 (P0-M10): a real moon disc (was a 42 m soft blob) + a smaller halo.
+  const moonDisc = new THREE.Mesh(new THREE.CircleGeometry(3, 24),
+    new THREE.MeshBasicMaterial({ color: 0xe8eeff, toneMapped: false, fog: false }));
+  moonDisc.position.set(-160, 150, -220);
+  moonDisc.lookAt(0, 1.6, 0); // face the town centre
+  scene.add(moonDisc);
+  const moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(220,230,255,0.55)', 'rgba(150,170,220,0)'), transparent: true, fog: false, depthWrite: false }));
+  moonHalo.scale.set(18, 18, 1);
+  moonHalo.position.set(-160, 150, -220);
+  scene.add(moonHalo);
 }
 
 // ============ procedural surface textures (all original canvas art) ============
@@ -572,6 +766,12 @@ function drawConcrete(g, w, h) {
 }
 const concreteGroundTex = mkTex(256, 256, drawConcrete, 16, 1);
 const plazaTex = concreteGroundTex.clone(); plazaTex.repeat.set(2, 2); plazaTex.needsUpdate = true;
+// Round 3 (P1-G2a): cross-street sidewalks get their own texture+material
+// so the pavement repeat can run along their 220 m length (1 tile across,
+// 91 along) instead of stretching one tile over 220 m in V, which is what
+// sharing Main St's (183,1) repeat did.
+const crossWalkTex = concreteGroundTex.clone(); crossWalkTex.repeat.set(1, 91); crossWalkTex.needsUpdate = true;
+const crossWalkMat = new THREE.MeshStandardMaterial({ map: crossWalkTex, color: 0xffffff, roughness: 1 });
 const concreteWallTex = mkTex(256, 256, drawConcrete, 4, 2);
 const brickTex = mkTex(256, 256, (g, w, h) => {
   g.fillStyle = '#3c3c40'; g.fillRect(0, 0, w, h); // mortar (light brick tinted by wall color)
@@ -625,14 +825,19 @@ const paintWearTex = mkTex(256, 256, (g, w, h) => {
   }
 }, 1, 1);
 function drawWinFrame(g, w, h, glass) {
-  g.fillStyle = '#14161c'; g.fillRect(0, 0, w, h); // frame
+  g.fillStyle = '#05070a'; g.fillRect(0, 0, w, h); // outer recess shadow (reads as depth)
+  g.fillStyle = '#14161c'; g.fillRect(4, 4, w - 8, h - 8); // frame
   g.fillStyle = glass; g.fillRect(10, 10, w - 20, h - 20); // glass
+  // Round 3 (P1-G1a): per-pane brightness variation (uneven glass)
+  g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(10, 10, w / 2 - 13, h / 2 - 13);
+  g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(w / 2 + 3, h / 2 + 3, w / 2 - 13, h / 2 - 13);
   g.fillStyle = '#14161c';
   g.fillRect(w / 2 - 3, 10, 6, h - 20); // muntin vertical
   g.fillRect(10, h / 2 - 3, w - 20, 6); // muntin horizontal
   g.fillStyle = 'rgba(255,255,255,0.10)'; // faint reflection streak
   g.beginPath(); g.moveTo(18, h - 14); g.lineTo(52, 14); g.lineTo(70, 14); g.lineTo(36, h - 14); g.fill();
-  g.fillStyle = '#2e323c'; g.fillRect(4, h - 12, w - 8, 8); // sill
+  g.fillStyle = '#3a3e48'; g.fillRect(4, h - 12, w - 8, 8); // sill
+  g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(4, h - 12, w - 8, 2); // sill highlight
 }
 const winDarkTex = mkTex(128, 160, (g, w, h) => drawWinFrame(g, w, h, '#0d1622'), 1, 1);
 const winLitTex = mkTex(128, 160, (g, w, h) => {
@@ -770,7 +975,7 @@ const skidTex = mkTex(256, 64, (g, w, h) => {
 }, 1, 1);
 const skidMat = new THREE.MeshStandardMaterial({ map: skidTex, transparent: true, opacity: 0.6, roughness: 1, depthWrite: false });
 const puddleMat = new THREE.MeshStandardMaterial({ color: 0x0a0e14, roughness: 0.05, metalness: 0.85 });
-puddleMat.userData.envSet = true; puddleMat.envMapIntensity = 1.5;
+puddleMat.userData.envSet = true; puddleMat.envMapIntensity = 1.8; // Round 3 (P0-M6): 1.5 -> 1.8, richer env to reflect
 const manholeMat = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.5, metalness: 0.6 });
 const dirtPathMat = new THREE.MeshStandardMaterial({ color: 0x3a2e20, roughness: 1 });
 const dockMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 1 });
@@ -816,8 +1021,18 @@ function sharedPlaneGeo(w, d) {
   if (!g) { g = new THREE.PlaneGeometry(w, d); _planeGeoCache.set(k, g); }
   return g;
 }
-function flatTex(w, d, x, z, y, tex, color) {
-  const m = new THREE.Mesh(sharedPlaneGeo(w, d), sharedStdMat({ map: tex, color: color || 0xffffff, roughness: 1 }));
+// Round 3 (P1-G10): unit geometries for instanced flat decals — defined
+// here (before the ground section) because the ground code pushes instances.
+const _unitPlaneGeo = new THREE.PlaneGeometry(1, 1);
+const _unitCircleGeo = new THREE.CircleGeometry(1, 12);
+// Round 3 (P1-G10): the instance collectors live here too — _instPush is a
+// hoisted function declaration, but _instGroups/_instDummy are consts, so
+// they must be initialized before the ground section's first _instPush call.
+const _instGroups = new Map();
+const _instDummy = new THREE.Object3D();
+_instDummy.rotation.order = 'YXZ'; // flat-then-spin: rotX lays a plane flat, rotY spins it in plan view
+function flatTex(w, d, x, z, y, tex, color, mat) {
+  const m = new THREE.Mesh(sharedPlaneGeo(w, d), mat || sharedStdMat({ map: tex, color: color || 0xffffff, roughness: 1 }));
   m.rotation.x = -Math.PI / 2;
   m.position.set(x, y, z);
   scene.add(m);
@@ -842,22 +1057,24 @@ addBox(440, 0.14, 0.3, 0, 0.07, -5.0, 0x2a2c36);
 addBox(440, 0.14, 0.3, 0, 0.07, 5.0, 0x2a2c36);
 // Cross street at x = 64: a second road running north-south across the whole town
 flatTex(10, 220, 64, 0, 0.02, asphaltTex);
-flatTex(2.4, 220, 57.8, 0, 0.04, concreteGroundTex);
-flatTex(2.4, 220, 70.2, 0, 0.04, concreteGroundTex);
+flatTex(2.4, 220, 57.8, 0, 0.04, concreteGroundTex, 0xffffff, crossWalkMat); // Round 3 (P1-G2a): own material, (1,91) repeat
+flatTex(2.4, 220, 70.2, 0, 0.04, concreteGroundTex, 0xffffff, crossWalkMat);
 addBox(0.3, 0.14, 220, 58.8, 0.07, 0, 0x2a2c36);
 addBox(0.3, 0.14, 220, 69.2, 0.07, 0, 0x2a2c36);
-for (let i = 0; i < 5; i++) flat(8, 1.2, 64, -20 + i * 2.2, 0.05, 0x3a3d48);
-for (let i = 0; i < 5; i++) flat(1.2, 8, -30 + i * 2.2, 0, 0.05, 0x3a3d48);
-// crosswalk stripes
-for (let i = 0; i < 5; i++) flat(1.2, 8, -14 + i * 2.2, 0, 0.05, 0x3a3d48);
-// scattered grass / dirt patches off the road
+// Round 3 (P1-G10): crosswalk stripes instanced (25 -> 2 InstancedMeshes:
+// one per _instFlush — the x=64/Main St stripes flush with the buildings,
+// the DH4 cross-street stripes flush with the street detail).
+const _stripeMat = sharedStdMat({ color: 0x3a3d48, roughness: 1 });
+for (let i = 0; i < 5; i++) _instPush('crosswalk', _unitPlaneGeo, _stripeMat, 64, 0.05, -20 + i * 2.2, 8, 1.2, 1, 0, -Math.PI / 2);
+for (let i = 0; i < 5; i++) _instPush('crosswalk', _unitPlaneGeo, _stripeMat, -30 + i * 2.2, 0.05, 0, 1.2, 8, 1, 0, -Math.PI / 2);
+for (let i = 0; i < 5; i++) _instPush('crosswalk', _unitPlaneGeo, _stripeMat, -14 + i * 2.2, 0.05, 0, 1.2, 8, 1, 0, -Math.PI / 2);
+// scattered grass / dirt patches off the road (Round 3 P1-G10: 22 -> 2, by color)
 for (let i = 0; i < 22; i++) {
-  const patch = new THREE.Mesh(new THREE.CircleGeometry(rand(0.8, 2.2), 12),
-    sharedStdMat({ color: i % 2 ? 0x0a140c : 0x171208, roughness: 1 }));
-  patch.rotation.x = -Math.PI / 2;
+  const pr = rand(0.8, 2.2);
   const side = Math.random() < 0.5 ? -1 : 1;
-  patch.position.set(rand(-215, 215), 0.01, side * rand(8.5, 105));
-  scene.add(patch);
+  _instPush(i % 2 ? 'patchB' : 'patchA', _unitCircleGeo,
+    sharedStdMat({ color: i % 2 ? 0x0a140c : 0x171208, roughness: 1 }),
+    rand(-215, 215), 0.01, side * rand(8.5, 105), pr, pr, 1, 0, -Math.PI / 2);
 }
 
 // ============ sign textures ============
@@ -947,14 +1164,13 @@ const _winGeo = new THREE.PlaneGeometry(1.15, 1.0);
 const _panelGeo = new THREE.BoxGeometry(1.15, 2.6, 0.06);
 const _bulbGeo = new THREE.SphereGeometry(0.07, 8, 6);
 const _ipoolGeo = new THREE.CircleGeometry(3.6, 20);
-const _instGroups = new Map();
-const _instDummy = new THREE.Object3D();
-_instDummy.rotation.order = 'YXZ'; // flat-then-spin: rotX lays a plane flat, rotY spins it in plan view
-function _instPush(key, geo, mat, x, y, z, sx, sy, sz, rotY, rotX) {
+// _instGroups / _instDummy are declared above (before the ground section);
+// _instPush/_instFlush are hoisted function declarations.
+function _instPush(key, geo, mat, x, y, z, sx, sy, sz, rotY, rotX, rotZ) {
   let g = _instGroups.get(key);
   if (!g) { g = { geo, mat, mats: [] }; _instGroups.set(key, g); }
   _instDummy.position.set(x, y, z);
-  _instDummy.rotation.set(rotX || 0, rotY || 0, 0);
+  _instDummy.rotation.set(rotX || 0, rotY || 0, rotZ || 0); // Round 3: optional rotZ (fallen logs)
   _instDummy.scale.set(sx === undefined ? 1 : sx, sy === undefined ? 1 : sy, sz === undefined ? 1 : sz);
   _instDummy.updateMatrix();
   g.mats.push(_instDummy.matrix.clone());
@@ -1054,14 +1270,25 @@ function buildBuilding(b) {
     instBox(0x11131a, bw, 0.3, 10.8, cx, WALL_H + 0.15, mid);
     instBox(0x9a928a, bw + 0.2, 0.5, 11.0, cx, WALL_H + 0.55, mid); // parapet block (one instance)
   }
-  // sign (unchanged texture + street-facing orientation)
+  // sign (Round 3 P0-M9: standard material with emissive map — signs read
+  // as dimly lit signage at night and still catch the flashlight, instead
+  // of glowing at full brightness like unlit posters)
+  const signTex = signTexture(b.name, b.sub, b.bg, b.fg);
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(10, b.x1 - b.x0 - 2), 1.5),
-    new THREE.MeshBasicMaterial({ map: signTexture(b.name, b.sub, b.bg, b.fg) }));
+    new THREE.MeshStandardMaterial({ map: signTex, emissiveMap: signTex, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.85 }));
   sign.position.set(cx, 2.9, frontZ + dir * 0.25);
   if (b.side === 'S') sign.rotation.y = Math.PI;
   scene.add(sign);
   // windows: framed canvas-texture planes (lit = warm glow), front + both side walls
   function addWin(x, y, z, rotY) {
+    // Round 3 (P1-G1b): an instanced frame box 1 cm behind the plane + a
+    // sill below it, so windows read as recessed openings, not decals.
+    // The facing normal is (sin rotY, 0, cos rotY).
+    const nx = Math.sin(rotY), nz = Math.cos(rotY);
+    _instPush('winFrame', _unitBoxGeo, sharedStdMat({ color: 0x0e1014, roughness: 1 }),
+      x - nx * 0.04, y, z - nz * 0.04, 1.25, 1.1, 0.06, rotY);
+    _instPush('winSill', _unitBoxGeo, sharedStdMat({ color: 0x2e323c, roughness: 1 }),
+      x + nx * 0.02, y - 0.54, z + nz * 0.02, 1.3, 0.08, 0.12, rotY);
     const r = Math.random();
     if (r < 0.15) { _instPush('winBoard', _winGeo, boardMat, x, y, z, 1, 1, 1, rotY); return; } // boarded-up
     if (r < 0.25) { _instPush('winCrack', _winGeo, winCrackedMat, x, y, z, 1, 1, 1, rotY); return; } // cracked
@@ -1162,13 +1389,23 @@ colliders.push({ x0: -220.4, x1: -220, z0: -110, z1: 110, h: 3.4 });
 colliders.push({ x0: 220, x1: 220.4, z0: -110, z1: 110, h: 3.4 });
 for (const sx of [-1, 1]) {
   addBox(0.4, 1.1, 9, sx * 214, 0.55, 0, 0x4a3b22);
-  addBox(0.3, 0.25, 9, sx * 214, 1.1, 0, 0xd8c840);
-  addBox(0.3, 0.25, 9, sx * 214, 0.45, 0, 0xd8c840);
+  addBox(0.3, 0.25, 9, sx * 214, 1.1, 0, 0x9a8a30); // Round 3 (P0-M11): faded yellow, was 0xd8c840
+  addBox(0.3, 0.25, 9, sx * 214, 0.45, 0, 0x9a8a30);
   colliders.push({ x0: sx * 214 - 0.3, x1: sx * 214 + 0.3, z0: -4.5, z1: 4.5, h: 1.2 });
 }
 
 
 // ============ lake, park, street furniture (bigger town) ============
+// Round 3 (P1-G11): unified tree geometry/materials — street + park trees
+// share one trunk group, one branch group, one leaf group (45 meshes -> 3
+// InstancedMeshes). Trunks unify at the park radii (0.16/0.26, h 3.4);
+// leaves unify on the 1.7 m sphere with per-instance scale; the leaf
+// colors (0x16240f vs 0x1a2e18) are indistinguishable at night.
+const treeTrunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 3.4, 8);
+const treeTrunkMat = sharedStdMat({ color: 0xffffff, roughness: 1, map: barkTex });
+const treeLeafGeo = new THREE.SphereGeometry(1.7, 12, 10);
+const treeLeafMat = new THREE.MeshStandardMaterial({ color: 0x16240f, roughness: 1, map: leafTex });
+const treeBranchGeo = new THREE.CylinderGeometry(0.04, 0.08, 1.8, 6);
 const waterTex = mkTex(256, 256, (g, w, h) => {
   g.fillStyle = '#0d2a3a'; g.fillRect(0, 0, w, h);
   for (let i = 0; i < 60; i++) {
@@ -1179,6 +1416,7 @@ const waterTex = mkTex(256, 256, (g, w, h) => {
   speckle(g, w, h, 500, ['#123a4e', '#0a2230'], 0.4, 2);
 }, 6, 4);
 const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25, metalness: 0.35 });
+waterMat.userData.envSet = true; waterMat.envMapIntensity = 0.6; // Round 3 (P0-M6): water catches the richer env
 { // Hollow Lake, east side: water you cannot walk into (colliders leave a dock corridor)
   const lake = new THREE.Mesh(new THREE.CircleGeometry(17, 28), waterMat);
   lake.rotation.x = -Math.PI / 2; lake.position.set(93, 0.06, -25); lake.scale.set(1.25, 0.85, 1); scene.add(lake);
@@ -1212,7 +1450,7 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
   scene.add(reedMesh);
   // small wooden dock reaching in from the west shore (walkable corridor z -27..-23)
   const dockGeo = new THREE.BoxGeometry(1.6, 0.12, 2.6);
-  for (let i = 0; i < 6; i++) { const dk = new THREE.Mesh(dockGeo, dockMat); dk.position.set(75 + i * 1.7, 0.12, -25); scene.add(dk); }
+  for (let i = 0; i < 6; i++) _instPush('dockPlank', dockGeo, dockMat, 75 + i * 1.7, 0.12, -25, 1, 1, 1, 0); // Round 3 (P1-G10): 6 -> 1
   addBox(0.18, 0.9, 0.18, 84, 0.45, -26.2, 0x3a2e22);
   addBox(0.18, 0.9, 0.18, 84, 0.45, -23.8, 0x3a2e22);
 }
@@ -1223,7 +1461,7 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
   const benchGeo = new THREE.BoxGeometry(1.8, 0.1, 0.5);
   const benchMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
   for (const [bx, bz] of [[-88, -28], [-68, -28], [-78, -40]]) {
-    const b = new THREE.Mesh(benchGeo, benchMat); b.position.set(bx, 0.5, bz); scene.add(b);
+    _instPush('bench', benchGeo, benchMat, bx, 0.5, bz, 1, 1, 1, 0); // Round 3 (P1-G10): benches instanced (shared with the east park)
     furniture.push({ x0: bx - 0.9, x1: bx + 0.9, z0: bz - 0.25, z1: bz + 0.25 });
   }
   // playground: swing frame + two swings, slide with ladder
@@ -1236,18 +1474,16 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.3), benchMat);
     seat.position.set(sx, 0.7, -38); scene.add(seat);
   }
-  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 3.2), new THREE.MeshStandardMaterial({ color: 0xb03030, roughness: 0.6 }));
+  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 3.2), new THREE.MeshStandardMaterial({ color: 0x6e2a24, roughness: 0.6 })); // Round 3 (P0-M11): faded rusty red, was 0xb03030
   slide.position.set(-72, 0.9, -38); slide.rotation.x = -0.45; scene.add(slide);
   addBox(0.5, 1.6, 0.5, -72, 0.8, -39.8, 0x2a3a4a);
-  // park trees (rounded foliage, reused geometry)
-  const parkTrunk = new THREE.CylinderGeometry(0.16, 0.26, 3.2, 8);
-  const parkTrunkMat = new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 });
-  const parkLeaf = new THREE.SphereGeometry(1.9, 12, 10);
-  const parkLeafMat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1 });
+  // park trees (Round 3 P1-G11: instanced into the shared street-tree
+  // groups — 15 meshes -> 0 new calls. Trunk 3.2 m = 3.4 * 0.94; leaf
+  // 1.9 m = 1.7 * 1.118, scale.y 1.25 kept; leaf2 0.7 * 1.118 = 0.78.)
   for (const [tx, tz] of [[-92, -42], [-64, -42], [-92, -24], [-64, -24], [-78, -44]]) {
-    const tr = new THREE.Mesh(parkTrunk, parkTrunkMat); tr.position.set(tx, 1.6, tz); scene.add(tr);
-    const lf = new THREE.Mesh(parkLeaf, parkLeafMat); lf.position.set(tx, 4.0, tz); lf.scale.y = 1.25; scene.add(lf);
-    const lf2 = new THREE.Mesh(parkLeaf, parkLeafMat); lf2.position.set(tx + 0.7, 3.2, tz); lf2.scale.setScalar(0.7); scene.add(lf2);
+    _instPush('treeTrunk', treeTrunkGeo, treeTrunkMat, tx, 1.6, tz, 1, 0.94, 1, 0);
+    _instPush('treeLeaf', treeLeafGeo, treeLeafMat, tx, 4.0, tz, 1.118, 1.397, 1.118, 0);
+    _instPush('treeLeaf', treeLeafGeo, treeLeafMat, tx + 0.7, 3.2, tz, 0.78, 0.78, 0.78, 0);
   }
   // low wooden fence along the park's south edge (posts instanced: 9 -> 1)
   {
@@ -1267,19 +1503,45 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
 // fire hydrants, mailboxes, fences (shared, cheap)
 {
   const hydGeo = new THREE.CylinderGeometry(0.16, 0.18, 0.7, 10);
-  const hydMat = new THREE.MeshStandardMaterial({ color: 0xa02020, roughness: 0.6 });
+  const hydMat = new THREE.MeshStandardMaterial({ color: 0x7a2820, roughness: 0.6 }); // Round 3 (P0-M11): faded red, was 0xa02020
   const hydTop = new THREE.SphereGeometry(0.17, 10, 8);
-  for (const [hx, hz] of [[-8, 5.6], [24, -5.6], [58, 5.6], [-58, -5.6], [90, 5.6]]) {
-    const h = new THREE.Mesh(hydGeo, hydMat); h.position.set(hx, 0.35, hz); scene.add(h);
-    const t = new THREE.Mesh(hydTop, hydMat); t.position.set(hx, 0.75, hz); scene.add(t);
+  const hydPos = [[-8, 5.6], [24, -5.6], [58, 5.6], [-58, -5.6], [90, 5.6]];
+  { // Round 3 (P1-G10): hydrants 10 -> 2 InstancedMeshes (body + top)
+    const d = new THREE.Object3D();
+    const bodyMesh = new THREE.InstancedMesh(hydGeo, hydMat, hydPos.length);
+    bodyMesh.frustumCulled = false;
+    const topMesh = new THREE.InstancedMesh(hydTop, hydMat, hydPos.length);
+    topMesh.frustumCulled = false;
+    hydPos.forEach(([hx, hz], i) => {
+      d.position.set(hx, 0.35, hz); d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); d.updateMatrix();
+      bodyMesh.setMatrixAt(i, d.matrix);
+      d.position.set(hx, 0.75, hz); d.updateMatrix();
+      topMesh.setMatrixAt(i, d.matrix);
+    });
+    bodyMesh.instanceMatrix.needsUpdate = true;
+    topMesh.instanceMatrix.needsUpdate = true;
+    scene.add(bodyMesh, topMesh);
   }
   const mbGeo = new THREE.BoxGeometry(0.5, 0.3, 0.3);
   const mbMat = new THREE.MeshStandardMaterial({ color: 0x2a4a6a, roughness: 0.6, metalness: 0.3 });
   const postGeo2 = new THREE.BoxGeometry(0.1, 0.9, 0.1);
   const postMat2 = new THREE.MeshStandardMaterial({ color: 0x4a3a28, roughness: 1 });
-  for (const [mx2, mz2] of [[12, -6.8], [30, 6.8], [-60, -6.8], [80, 6.8], [-90, -6.8]]) {
-    const p2 = new THREE.Mesh(postGeo2, postMat2); p2.position.set(mx2, 0.45, mz2); scene.add(p2);
-    const m2 = new THREE.Mesh(mbGeo, mbMat); m2.position.set(mx2, 0.95, mz2); scene.add(m2);
+  const mbPos = [[12, -6.8], [30, 6.8], [-60, -6.8], [80, 6.8], [-90, -6.8]];
+  { // Round 3 (P1-G10): mailboxes 10 -> 2 InstancedMeshes (post + box)
+    const d = new THREE.Object3D();
+    const postMesh = new THREE.InstancedMesh(postGeo2, postMat2, mbPos.length);
+    postMesh.frustumCulled = false;
+    const boxMesh = new THREE.InstancedMesh(mbGeo, mbMat, mbPos.length);
+    boxMesh.frustumCulled = false;
+    mbPos.forEach(([mx2, mz2], i) => {
+      d.position.set(mx2, 0.45, mz2); d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); d.updateMatrix();
+      postMesh.setMatrixAt(i, d.matrix);
+      d.position.set(mx2, 0.95, mz2); d.updateMatrix();
+      boxMesh.setMatrixAt(i, d.matrix);
+    });
+    postMesh.instanceMatrix.needsUpdate = true;
+    boxMesh.instanceMatrix.needsUpdate = true;
+    scene.add(postMesh, boxMesh);
   }
 }
 
@@ -1290,18 +1552,18 @@ const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25
 // Shared geometries/materials throughout; no shadow maps.
 for (const cx2 of [-128, 180]) {
   flatTex(10, 220, cx2, 0, 0.02, asphaltTex);
-  flatTex(2.4, 220, cx2 - 6.2, 0, 0.04, concreteGroundTex);
-  flatTex(2.4, 220, cx2 + 6.2, 0, 0.04, concreteGroundTex);
+  flatTex(2.4, 220, cx2 - 6.2, 0, 0.04, concreteGroundTex, 0xffffff, crossWalkMat); // Round 3 (P1-G2a)
+  flatTex(2.4, 220, cx2 + 6.2, 0, 0.04, concreteGroundTex, 0xffffff, crossWalkMat);
   addBox(0.3, 0.14, 220, cx2 - 5.2, 0.07, 0, 0x2a2c36);
   addBox(0.3, 0.14, 220, cx2 + 5.2, 0.07, 0, 0x2a2c36);
-  for (let i = 0; i < 5; i++) flat(1.2, 8, cx2 - 4.4 + i * 2.2, 0, 0.05, 0x3a3d48);
+  for (let i = 0; i < 5; i++) _instPush('crosswalk', _unitPlaneGeo, _stripeMat, cx2 - 4.4 + i * 2.2, 0.05, 0, 1.2, 8, 1, 0, -Math.PI / 2); // Round 3 (P1-G10)
 }
 { // East park (second park/plaza) at x ~160, z ~-33
   flatTex(30, 18, 160, -33, 0.03, grassTex);
   const bGeo = new THREE.BoxGeometry(1.8, 0.1, 0.5);
   const bMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
   for (const [bx, bz] of [[152, -28], [168, -28], [160, -40]]) {
-    const b = new THREE.Mesh(bGeo, bMat); b.position.set(bx, 0.5, bz); scene.add(b);
+    _instPush('bench', bGeo, bMat, bx, 0.5, bz, 1, 1, 1, 0); // Round 3 (P1-G10): same 'bench' group as the west park
     furniture.push({ x0: bx - 0.9, x1: bx + 0.9, z0: bz - 0.25, z1: bz + 0.25 });
   }
 }
@@ -1315,11 +1577,19 @@ for (const cx2 of [-128, 180]) {
 { // Churchyard stones near the church (south side, x -18..-2, z 22..36)
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6a6a72, roughness: 1 });
   const stoneGeo = new THREE.BoxGeometry(0.6, 0.9, 0.15);
+  // Round 3 (P1-G10): 8 -> 1 InstancedMesh (keeps the per-stone lean;
+  // _instPush can't carry rotZ+rotY the way the lean needs, so this uses
+  // the direct pattern like the reeds).
+  const stoneMesh = new THREE.InstancedMesh(stoneGeo, stoneMat, 8);
+  stoneMesh.frustumCulled = false;
+  const d = new THREE.Object3D();
   for (let i = 0; i < 8; i++) {
-    const st = new THREE.Mesh(stoneGeo, stoneMat);
-    st.position.set(-16 + (i % 4) * 4, 0.45, 24 + Math.floor(i / 4) * 6);
-    st.rotation.y = rand(-0.2, 0.2); st.rotation.z = rand(-0.12, 0.12); scene.add(st);
+    d.position.set(-16 + (i % 4) * 4, 0.45, 24 + Math.floor(i / 4) * 6);
+    d.rotation.set(0, rand(-0.2, 0.2), rand(-0.12, 0.12)); d.scale.set(1, 1, 1); d.updateMatrix();
+    stoneMesh.setMatrixAt(i, d.matrix);
   }
+  stoneMesh.instanceMatrix.needsUpdate = true;
+  scene.add(stoneMesh);
 }
 { // Rail crossing at the depot (rails run north-south, crossing Main at x = 133)
   const railMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.4, metalness: 0.7 });
@@ -1376,20 +1646,29 @@ for (const cx2 of [-128, 180]) {
     for (const [list, mat] of [[leaf1Xf, fLeafMat], [leaf2Xf, fLeafMat2]]) {
       const leafMesh = new THREE.InstancedMesh(fLeafGeo, mat, list.length);
       leafMesh.frustumCulled = false;
-      list.forEach(([tx, tz, s], i) => { d.position.set(tx, 4.3 * s, tz); d.rotation.set(0, 0, 0); d.scale.set(s, 1.3 * s, s); d.updateMatrix(); leafMesh.setMatrixAt(i, d.matrix); });
+      // Round 3 (P1-G3a): per-instance non-uniform scale + random Y rotation
+      // breaks the identical-lollipop read (0 new calls — same meshes).
+      list.forEach(([tx, tz, s], i) => { d.position.set(tx, 4.3 * s, tz); d.rotation.set(0, rand(0, 6.28), 0); d.scale.set(s * rand(0.85, 1.15), 1.3 * s, s * rand(0.85, 1.15)); d.updateMatrix(); leafMesh.setMatrixAt(i, d.matrix); });
       leafMesh.instanceMatrix.needsUpdate = true;
       scene.add(leafMesh);
     }
     // Round 2: dead trees — bare trunks, taller and thinner, no leaves.
-    // 1 InstancedMesh, 8 instances, placed at the forest edge.
+    // 1 InstancedMesh, 8 trunks + 16 branch instances, placed at the forest edge.
+    // Round 3 (P1-G3): 2 branch cylinders per tree, same mesh (0 new calls).
     const deadGeo = new THREE.CylinderGeometry(0.12, 0.2, 5.5, 7);
     const deadMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1, map: barkTex }); // darker than living bark, still textured
-    const deadMesh = new THREE.InstancedMesh(deadGeo, deadMat, 8);
+    const deadMesh = new THREE.InstancedMesh(deadGeo, deadMat, 24);
     deadMesh.frustumCulled = false;
     for (let i = 0; i < 8; i++) {
       const tx = rand(-210, -140), tz = rand(-100, -56), ds = rand(0.9, 1.2);
       d.position.set(tx, 2.75 * ds, tz); d.rotation.set(rand(-0.05, 0.05), 0, rand(-0.06, 0.06));
-      d.scale.set(ds, ds, ds); d.updateMatrix(); deadMesh.setMatrixAt(i, d.matrix);
+      d.scale.set(ds, ds, ds); d.updateMatrix(); deadMesh.setMatrixAt(i * 3, d.matrix);
+      for (let k = 0; k < 2; k++) { // branches: same cylinder, scaled short + tilted
+        d.position.set(tx + rand(-0.3, 0.3), (3.4 + k * 0.9) * ds, tz + rand(-0.3, 0.3));
+        d.rotation.set(rand(-0.9, 0.9), rand(0, 6.28), rand(0.7, 1.1) * (k ? -1 : 1));
+        d.scale.set(ds * 0.5, ds * 0.22, ds * 0.5); d.updateMatrix();
+        deadMesh.setMatrixAt(i * 3 + 1 + k, d.matrix);
+      }
     }
     deadMesh.instanceMatrix.needsUpdate = true;
     scene.add(deadMesh);
@@ -1409,13 +1688,13 @@ for (const cx2 of [-128, 180]) {
   }
   const logGeo = new THREE.CylinderGeometry(0.35, 0.4, 4, 10);
   const logMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 1 });
+  // Round 3 (P1-G10): logs/stumps/rocks 9 -> 3 InstancedMeshes (by geometry).
   for (const [lx, lz, lr] of [[-185, -70, 0.7], [-165, -88, -0.4], [-200, -80, 1.2]]) {
-    const log = new THREE.Mesh(logGeo, logMat);
-    log.rotation.z = Math.PI / 2; log.rotation.y = lr; log.position.set(lx, 0.35, lz); scene.add(log);
+    _instPush('log', logGeo, logMat, lx, 0.35, lz, 1, 1, 1, lr, 0, Math.PI / 2);
   }
   const stumpGeo = new THREE.CylinderGeometry(0.5, 0.6, 0.7, 10);
   for (const [sx, sz] of [[-170, -72], [-190, -92], [-160, -80]]) {
-    const st = new THREE.Mesh(stumpGeo, logMat); st.position.set(sx, 0.35, sz); scene.add(st);
+    _instPush('stump', stumpGeo, logMat, sx, 0.35, sz, 1, 1, 1, 0);
   }
   { // Instanced bushes: 18 -> 1 draw call.
     const bushMesh = new THREE.InstancedMesh(fBushGeo, fBushMat, 18);
@@ -1430,7 +1709,7 @@ for (const cx2 of [-128, 180]) {
   }
   const mushStem = new THREE.CylinderGeometry(0.06, 0.08, 0.25, 6);
   const mushCap = new THREE.SphereGeometry(0.22, 8, 6);
-  const mushCapMat = new THREE.MeshStandardMaterial({ color: 0xa03028, roughness: 1 });
+  const mushCapMat = new THREE.MeshStandardMaterial({ color: 0x5e2a22, roughness: 1 }); // Round 3 (P0-M11): faded, was 0xa03028
   { // Instanced mushrooms: 20 meshes -> 2 draw calls (stems + caps).
     const mushPos = [];
     for (let i = 0; i < 10; i++) mushPos.push([rand(-210, -140), rand(-100, -55)]);
@@ -1449,10 +1728,13 @@ for (const cx2 of [-128, 180]) {
   const rockGeo = new THREE.SphereGeometry(0.6, 8, 6);
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x5a5a60, roughness: 1 });
   for (const [rx, rz] of [[-180, -62], [-205, -95], [-150, -70]]) {
-    const rk = new THREE.Mesh(rockGeo, rockMat); rk.position.set(rx, 0.25, rz); rk.scale.y = 0.6; scene.add(rk);
+    _instPush('rock', rockGeo, rockMat, rx, 0.25, rz, 1, 0.6, 1, 0);
   }
   // Entrance sign at the south edge of the forest, facing the town
-  const fsign = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05), new THREE.MeshBasicMaterial({ map: signTexture('HOLLOW WOODS', 'TRAIL', '#1a2e18', '#d8ffe8') }));
+  // (Round 3 P0-M9: lit signage, same treatment as the building signs)
+  const fsignTex = signTexture('HOLLOW WOODS', 'TRAIL', '#1a2e18', '#d8ffe8');
+  const fsign = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05),
+    new THREE.MeshStandardMaterial({ map: fsignTex, emissiveMap: fsignTex, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.85 }));
   fsign.position.set(-140, 2.2, -49); scene.add(fsign);
   addBox(0.14, 2.2, 0.14, -142, 1.1, -49, 0x4a3524);
   addBox(0.14, 2.2, 0.14, -138, 1.1, -49, 0x4a3524);
@@ -1476,7 +1758,7 @@ const fireflyGeo = new THREE.BufferGeometry();
   }
   fireflyGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
 }
-const fireflies = new THREE.Points(fireflyGeo, new THREE.PointsMaterial({ color: 0xb8ff9a, size: 0.14, sizeAttenuation: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+const fireflies = new THREE.Points(fireflyGeo, new THREE.PointsMaterial({ color: 0x9ad07a, size: 0.14, sizeAttenuation: true, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); // Round 3 (P0-M11): muted green + dimmer, was 0xb8ff9a / 0.85
 scene.add(fireflies);
 function updateFireflies(t) {
   const pos = fireflyGeo.attributes.position;
@@ -1628,11 +1910,102 @@ async function setupGltfCars() {
   if (replaced === 8) for (const im of Object.values(carPartMeshes)) im.visible = false;
 }
 setupGltfCars();
+// Round 3 (P1-G4): car dressing without new models.
+// (a) Mud/grime skirts: dark gradient decal planes along the lower body
+// sides of all 8 cars — 1 InstancedMesh (16 instances). Positions derive
+// from carSpots; the +/-1.02 m offset sits just inside the 2.2 m collider
+// width. DoubleSide so one rotY serves both sides.
+const grimeSkirtTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 64;
+  const g = cv.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 64);
+  grad.addColorStop(0, 'rgba(10,8,6,0)');
+  grad.addColorStop(0.55, 'rgba(10,8,6,0.25)');
+  grad.addColorStop(1, 'rgba(8,6,5,0.6)');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 64);
+  for (let i = 0; i < 120; i++) { // grime speckles, denser at the bottom
+    g.fillStyle = 'rgba(5,4,3,' + (0.2 + Math.random() * 0.3) + ')';
+    g.fillRect(Math.random() * 128, 30 + Math.random() * 34, 1 + Math.random() * 4, 1 + Math.random() * 3);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+})();
+{
+  const skirtGeo = new THREE.PlaneGeometry(4.0, 0.5);
+  const skirtMat = new THREE.MeshStandardMaterial({ map: grimeSkirtTex, transparent: true, opacity: 0.5, depthWrite: false, roughness: 1, side: THREE.DoubleSide });
+  const skirtMesh = new THREE.InstancedMesh(skirtGeo, skirtMat, 16);
+  skirtMesh.frustumCulled = false;
+  const d = new THREE.Object3D(); d.rotation.order = 'YXZ';
+  carSpots.forEach(([cx, cz, rot], i) => {
+    for (let s = 0; s < 2; s++) {
+      const side = s ? 1 : -1;
+      d.position.set(cx + side * 1.02 * Math.sin(rot), 0.32, cz + side * 1.02 * Math.cos(rot));
+      d.rotation.set(0, rot, 0); d.scale.set(1, 1, 1); d.updateMatrix();
+      skirtMesh.setMatrixAt(i * 2 + s, d.matrix);
+    }
+  });
+  skirtMesh.instanceMatrix.needsUpdate = true;
+  scene.add(skirtMesh);
+}
+// (b) Cracked windshields on 2 cars (the wreck, spot 5, + the sedan, spot
+// 1) — 1 InstancedMesh (2 instances), reusing winCrackedTex. The plane is
+// built from a basis: normal up-forward (0.65, 0.76, 0) in car-local space,
+// width along the car's Z, then yawed by the car's rot. (The cracked
+// texture carries its window frame — dark at night, the crack lines are
+// the visible part.)
+{
+  const shieldGeo2 = new THREE.PlaneGeometry(1.2, 0.85);
+  const shieldMesh = new THREE.InstancedMesh(shieldGeo2, winCrackedMat, 2);
+  shieldMesh.frustumCulled = false;
+  const m = new THREE.Matrix4();
+  const nrm = new THREE.Vector3(0.65, 0.76, 0).normalize();
+  const wid = new THREE.Vector3(0, 0, 1);
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler(0, 0, 0);
+  [[5], [1]].forEach(([spot], i) => {
+    const [cx, cz, rot] = carSpots[spot];
+    e.set(0, rot, 0); q.setFromEuler(e);
+    const n = nrm.clone().applyQuaternion(q); // plane normal
+    const xA = wid.clone().applyQuaternion(q).negate(); // width (flipped: keeps the basis right-handed)
+    const yA = new THREE.Vector3().crossVectors(n, xA); // plane up = normal x width
+    m.makeBasis(xA, yA, n);
+    m.setPosition(cx + 0.7 * Math.cos(rot), 1.05, cz - 0.7 * Math.sin(rot));
+    shieldMesh.setMatrixAt(i, m);
+  });
+  shieldMesh.instanceMatrix.needsUpdate = true;
+  scene.add(shieldMesh);
+}
 const lampGlowTex = glowTexture('rgba(255,190,90,0.9)', 'rgba(255,150,40,0)');
 const sharedLampPoleMat = new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 1 });
 const sharedLampHeadMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc46b, emissiveIntensity: 1.4 });
 const lamps = [];
 const procLampMeshes = []; // Round 2: procedural pole+head meshes, hidden per lamp when the glTF streetlight loads
+// Round 3 (P1-G8): lamp ground pools (12 of 13) + all 13 bulbs are
+// instanced. The flicker lamp (i=2) keeps its own pool mesh because the
+// tick animates its opacity; its bulb is NOT animated (verified in tick),
+// so all 13 bulbs instance. setupGltfLamps repositions pools/bulbs to
+// the arm tip via the helpers below.
+const _lampPoolXf = []; // [x, z] per instanced pool (non-flicker lamps, in order)
+const _lampBulbXf = []; // [x, z] per bulb (all 13 lamps, in order)
+let lampPoolMesh = null, lampBulbMesh = null;
+const _lampDummy = new THREE.Object3D();
+function setLampPoolMatrix(i, x, z) {
+  _lampDummy.position.set(x, 0.05, z); _lampDummy.rotation.set(-Math.PI / 2, 0, 0); _lampDummy.scale.set(1, 1, 1);
+  _lampDummy.updateMatrix(); lampPoolMesh.setMatrixAt(i, _lampDummy.matrix); lampPoolMesh.instanceMatrix.needsUpdate = true;
+}
+function setLampBulbMatrix(i, x, z) {
+  _lampDummy.position.set(x, 4.32, z); _lampDummy.rotation.set(0, 0, 0); _lampDummy.scale.set(1, 1, 1);
+  _lampDummy.updateMatrix(); lampBulbMesh.setMatrixAt(i, _lampDummy.matrix); lampBulbMesh.instanceMatrix.needsUpdate = true;
+}
+// Round 3 (P1-G8c): light cones are one InstancedMesh of 13 (all lamps),
+// created in the street-detail block; declared here so setupGltfLamps can
+// reposition cone instances to the arm tip when the glTF lamps load.
+let lampConeMesh = null;
+function setLampConeMatrix(i, x, z) {
+  _lampDummy.position.set(x, 2.2, z); _lampDummy.rotation.set(0, 0, 0); _lampDummy.scale.set(1, 1, 1);
+  _lampDummy.updateMatrix(); lampConeMesh.setMatrixAt(i, _lampDummy.matrix); lampConeMesh.instanceMatrix.needsUpdate = true;
+}
 [[-50, -5.2], [-25, 5.2], [0, -5.2], [25, 5.2], [50, -5.2], [-85, -5.2], [-85, 5.2], [85, -5.2], [85, 5.2], [64, -35], [64, 35], [-100, -5.2], [100, 5.2]].forEach(([x, z], i) => {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.4, 8), sharedLampPoleMat);
   pole.position.set(x, 2.2, z); scene.add(pole);
@@ -1643,13 +2016,26 @@ const procLampMeshes = []; // Round 2: procedural pole+head meshes, hidden per l
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, transparent: true, opacity: 0.55, depthWrite: false }));
   glow.scale.set(3.2, 3.2, 1); glow.position.set(x, 4.35, z); scene.add(glow);
   valveGlows.push(glow); // atmosphere only: the valve may hide it at L2
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), porchBulbMat);
-  bulb.position.set(x, 4.32, z); scene.add(bulb);
-  const pool = new THREE.Mesh(new THREE.CircleGeometry(3.4, 20),
-    new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0.18, depthWrite: false }));
-  pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.05, z); scene.add(pool);
-  lamps.push({ headMat, glow, pool, bulb, x, z, headX: x, headZ: z, flicker: i === 2, t: 0 });
+  const bulbIndex = _lampBulbXf.length; _lampBulbXf.push([x, z]);
+  let pool = null, poolIndex = -1;
+  if (i === 2) { // flicker lamp: own pool mesh (opacity animated in tick)
+    pool = new THREE.Mesh(new THREE.CircleGeometry(3.4, 20),
+      new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0.18, depthWrite: false }));
+    pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.05, z); scene.add(pool);
+  } else { poolIndex = _lampPoolXf.length; _lampPoolXf.push([x, z]); }
+  lamps.push({ headMat, glow, pool, poolIndex, bulbIndex, x, z, headX: x, headZ: z, flicker: i === 2, t: 0 });
 });
+{
+  lampPoolMesh = new THREE.InstancedMesh(new THREE.CircleGeometry(3.4, 20),
+    new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0.18, depthWrite: false }), _lampPoolXf.length);
+  lampPoolMesh.frustumCulled = false;
+  _lampPoolXf.forEach(([px, pz], i) => setLampPoolMatrix(i, px, pz));
+  scene.add(lampPoolMesh);
+  lampBulbMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 8, 6), porchBulbMat, _lampBulbXf.length);
+  lampBulbMesh.frustumCulled = false;
+  _lampBulbXf.forEach(([bx, bz], i) => setLampBulbMatrix(i, bx, bz));
+  scene.add(lampBulbMesh);
+}
 // ============ Round 2: licensed glTF streetlight (Poly Pizza, CC BY 3.0) ====
 // One InstancedMesh from the model's single mesh (176 tris), 13 instances.
 // The cobra-head arm extends -X in model space, so Main St lamps rotate the
@@ -1680,9 +2066,10 @@ async function setupGltfLamps() {
     im.setMatrixAt(i, d.matrix);
     l.headX = l.x; l.headZ = l.z + armZ * HEAD_OFF;
     l.glow.position.set(l.headX, 4.35, l.headZ);
-    l.bulb.position.set(l.headX, 4.32, l.headZ);
-    l.pool.position.set(l.headX, 0.05, l.headZ);
-    if (l.cone) l.cone.position.set(l.headX, 2.2, l.headZ); // light cone follows the head
+    setLampBulbMatrix(l.bulbIndex, l.headX, l.headZ);
+    if (l.pool) l.pool.position.set(l.headX, 0.05, l.headZ); // flicker lamp: own pool mesh
+    else setLampPoolMatrix(l.poolIndex, l.headX, l.headZ);
+    if (lampConeMesh) setLampConeMatrix(i, l.headX, l.headZ); // light cone follows the head
     if (l.flicker) l.headMat = null; // head is shared now: glow + pool keep flickering, material no longer can
   });
   im.instanceMatrix.needsUpdate = true;
@@ -1690,22 +2077,16 @@ async function setupGltfLamps() {
   for (const m of procLampMeshes) m.visible = false;
 }
 setupGltfLamps();
-const sharedLeafMat = new THREE.MeshStandardMaterial({ color: 0x16240f, roughness: 1, map: leafTex });
-const sharedLeaf2Mat = new THREE.MeshStandardMaterial({ color: 0x1a2e18, roughness: 1, map: leafTex });
-const streetTrunkMat = sharedStdMat({ color: 0xffffff, roughness: 1, map: barkTex });
+// Round 3 (P1-G11): street trees instanced into the shared tree groups
+// (30 meshes -> 0 new calls; the 3 groups flush with the street detail).
+// Leaf2 1.1 m = 1.7 * 0.647.
 for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62, -12]]) {
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 3.4, 7), streetTrunkMat);
-  trunk.position.set(x, 1.7, z); scene.add(trunk);
+  _instPush('treeTrunk', treeTrunkGeo, treeTrunkMat, x, 1.7, z, 1, 1, 1, 0);
   for (let i = 0; i < 2; i++) {
-    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.08, 1.8, 6), streetTrunkMat);
-    br.position.set(x + rand(-0.8, 0.8), 3.2 + i * 0.7, z + rand(-0.8, 0.8));
-    br.rotation.z = rand(-0.9, 0.9); br.rotation.x = rand(-0.9, 0.9);
-    scene.add(br);
+    _instPush('treeBranch', treeBranchGeo, treeTrunkMat, x + rand(-0.8, 0.8), 3.2 + i * 0.7, z + rand(-0.8, 0.8), 1, 1, 1, 0, rand(-0.9, 0.9), rand(-0.9, 0.9));
   }
-  const leaf = new THREE.Mesh(new THREE.SphereGeometry(1.7, 12, 10), sharedLeafMat);
-  leaf.position.set(x, 4.6, z); leaf.scale.y = 1.3; scene.add(leaf);
-  const leaf2 = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), sharedLeaf2Mat);
-  leaf2.position.set(x + 0.6, 3.6, z + 0.4); scene.add(leaf2);
+  _instPush('treeLeaf', treeLeafGeo, treeLeafMat, x, 4.6, z, 1, 1.3, 1, 0);
+  _instPush('treeLeaf', treeLeafGeo, treeLeafMat, x + 0.6, 3.6, z + 0.4, 0.647, 0.647, 0.647, 0);
 }
 for (let i = 0; i < 7; i++) {
   const stain = new THREE.Mesh(new THREE.CircleGeometry(rand(0.5, 1.1), 10), sharedStdMat({ color: 0x2a0505, roughness: 1 }));
@@ -1714,11 +2095,15 @@ for (let i = 0; i < 7; i++) {
   scene.add(stain);
 }
 // square monument + benches
-addBox(1.2, 2.6, 1.2, 0, 1.3, -2.5, 0x2a2d36);
-addBox(2.2, 0.3, 2.2, 0, 0.15, -2.5, 0x23252e);
+// Round 3 (P0-S1): the monument was 2.5 m dead ahead of spawn, filling
+// ~76% of the frame height — the Phase D "grey slab". Moved off-axis to
+// x 5.5 (same square, same size); spawn position/yaw unchanged. The
+// furniture collider moves with it.
+addBox(1.2, 2.6, 1.2, 5.5, 1.3, -2.5, 0x2a2d36);
+addBox(2.2, 0.3, 2.2, 5.5, 0.15, -2.5, 0x23252e);
 addBox(1.8, 0.45, 0.5, -3.5, 0.45, 2.5, 0x3a2e22);
 addBox(1.8, 0.45, 0.5, 3.5, 0.45, 2.5, 0x3a2e22);
-furniture.push({ x0: -0.7, x1: 0.7, z0: -3.2, z1: -1.8 }, { x0: -4.4, x1: -2.6, z0: 2.2, z1: 2.8 }, { x0: 2.6, x1: 4.4, z0: 2.2, z1: 2.8 });
+furniture.push({ x0: 4.8, x1: 6.2, z0: -3.2, z1: -1.8 }, { x0: -4.4, x1: -2.6, z0: 2.2, z1: 2.8 }, { x0: 2.6, x1: 4.4, z0: 2.2, z1: 2.8 });
 
 // ============ Round 2: street-level detail (mostly instanced) ============
 // Puddles (wet reflective streets — the visual-reference bar), debris,
@@ -1761,7 +2146,7 @@ for (const [mx, mz] of [[0, 0], [-40, 0.5], [40, -0.5]]) {
   const headBox = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.95, 0.3), tlMat);
   headBox.position.set(67, 4.6, -0.5); scene.add(headBox);
   const lensGeo = new THREE.CircleGeometry(0.11, 12);
-  const lensCols = [0xff2211, 0x2a1a08, 0x0a2a12]; // red lit, amber + green dark
+  const lensCols = [0xd02010, 0x2a1a08, 0x0a2a12]; // red lit, amber + green dark (Round 3 P0-M11: red 0xff2211 -> 0xd02010)
   for (let i = 0; i < 3; i++) {
     const lens = new THREE.Mesh(lensGeo, new THREE.MeshBasicMaterial({ color: lensCols[i], toneMapped: false }));
     lens.position.set(67, 4.9 - i * 0.3, -0.34); lens.rotation.y = Math.PI; scene.add(lens);
@@ -1812,25 +2197,70 @@ function updateFog(t) {
     f.s.position.z = f.bz + Math.cos(t * 0.015 + f.ph * 1.3) * 5;
   }
 }
-{ // Lamp light cones: faint additive cones under the 5 central Main St lamps
+{ // Lamp light cones: faint additive cones under ALL 13 lamps, one InstancedMesh
+  // (Round 3 P1-G8c: was 5 individual cones under the central lamps only).
   const coneGeo = new THREE.ConeGeometry(2.2, 4.3, 12, 1, true);
   const coneMat = new THREE.MeshBasicMaterial({ color: 0xffc46b, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-  for (let i = 0; i < 5; i++) {
-    const cone = new THREE.Mesh(coneGeo, coneMat);
-    cone.position.set(lamps[i].headX, 2.2, lamps[i].headZ);
-    scene.add(cone);
-    lamps[i].cone = cone; // repositioned with the head if the glTF lamps load
-  }
+  lampConeMesh = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length);
+  lampConeMesh.frustumCulled = false;
+  lamps.forEach((l, i) => setLampConeMatrix(i, l.headX, l.headZ));
+  scene.add(lampConeMesh);
 }
 _instFlush(); // second flush: puddles, debris, weeds, skid, manholes, trash cans
+
+// ============ Round 3 (P0-M8): blob shadows — Bible-approved grounding ====
+// One InstancedMesh of radial-gradient dark decals under cars, the
+// monument, the water tower, trees, lamps, benches and hydrants. y 0.045:
+// above the sidewalks (0.04), below the lamp pools (0.05) and puddles
+// (0.055). +1 draw call. Zombies get their own following blob mesh (P2-A4).
+const blobTex = glowTexture('rgba(0,0,0,0.85)', 'rgba(0,0,0,0)');
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: 0.65, depthWrite: false });
+blobMat.polygonOffset = true; blobMat.polygonOffsetFactor = -1;
+{
+  const blobXf = []; // [x, z, sx, sz, rotY]
+  for (const [cx, cz, rot] of carSpots) blobXf.push([cx, cz, 2.4, 1.2, rot]); // cars: 4.8 x 2.4 ellipse
+  blobXf.push([5.5, -2.5, 1.4, 1.4, 0]); // monument (moved, P0-S1)
+  blobXf.push([180, -95, 6.5, 6.5, 0]); // water tower legs
+  for (const [x, z] of [[-58, -20], [58, 20], [-30, 22], [40, -22], [-62, 10], [62, -12]]) blobXf.push([x, z, 1.6, 1.6, 0]); // street trees
+  for (const [x, z] of [[-92, -42], [-64, -42], [-92, -24], [-64, -24], [-78, -44]]) blobXf.push([x, z, 1.8, 1.8, 0]); // park trees
+  for (const l of lamps) blobXf.push([l.x, l.z, 0.6, 0.6, 0]); // lamp poles
+  for (const [x, z] of [[-88, -28], [-68, -28], [-78, -40], [152, -28], [168, -28], [160, -40]]) blobXf.push([x, z, 1.1, 0.6, 0]); // benches
+  for (const [x, z] of [[-8, 5.6], [24, -5.6], [58, 5.6], [-58, -5.6], [90, 5.6]]) blobXf.push([x, z, 0.45, 0.45, 0]); // hydrants
+  const blobMesh = new THREE.InstancedMesh(_unitCircleGeo, blobMat, blobXf.length);
+  blobMesh.frustumCulled = false;
+  const d = new THREE.Object3D(); d.rotation.order = 'YXZ'; // flat-then-spin (like _instDummy)
+  blobXf.forEach(([bx, bz, sx, sz, ry], i) => {
+    d.position.set(bx, 0.045, bz); d.rotation.set(-Math.PI / 2, ry, 0); d.scale.set(sx, sz, 1); d.updateMatrix();
+    blobMesh.setMatrixAt(i, d.matrix);
+  });
+  blobMesh.instanceMatrix.needsUpdate = true;
+  scene.add(blobMesh);
+}
+// Round 3 (P2-A4): one InstancedMesh of blob shadows following live
+// zombies (12 max alive). Matrices update per frame in updateZombies.
+// Valve-sheddable (hidden at L2) — registered with valveGlows.
+const zombieBlobMesh = new THREE.InstancedMesh(_unitCircleGeo, blobMat, 12);
+zombieBlobMesh.frustumCulled = false;
+{
+  const d = new THREE.Object3D(); d.rotation.order = 'YXZ';
+  d.position.set(0, -10, 0); d.rotation.set(-Math.PI / 2, 0, 0); d.scale.set(0.9, 0.9, 1); d.updateMatrix();
+  for (let i = 0; i < 12; i++) zombieBlobMesh.setMatrixAt(i, d.matrix);
+  zombieBlobMesh.instanceMatrix.needsUpdate = true;
+}
+scene.add(zombieBlobMesh);
+valveGlows.push(zombieBlobMesh);
+const _zombieBlobDummy = new THREE.Object3D(); _zombieBlobDummy.rotation.order = 'YXZ';
 
 // ============ Round 2: photo textures (Poly Haven, CC0) ============
 // Swaps the canvas textures for photo textures once they load; every swap
 // is best-effort — a failed download leaves the canvas texture in place.
 // Repeats are chosen for ~square texels on the main surfaces (10 m tiles
-// on the road/grass); the cross streets share the road materials, so their
-// sidewalks stretch the pavement photo — acceptable at night, noted in the
-// build notes. Siding uses the dark-planks photo (horizontal lap siding).
+// on the road/grass). Round 3 (P0-M5): the main surfaces also get their
+// roughness + normal maps (upgradePBR); the plaza, dock and boarded
+// windows stay color-only (small areas — holds the texture budget at 14
+// new maps). The cross streets have their own sidewalk material now
+// (P1-G2a), so their sidewalks no longer stretch one tile over 220 m.
+// Siding uses the dark-planks photo (horizontal lap siding).
 function upgradePhotoTextures() {
   const white = new THREE.Color(0xffffff);
   // Centerline strips: the canvas asphalt has a painted centerline, the
@@ -1843,19 +2273,23 @@ function upgradePhotoTextures() {
     s.visible = false; scene.add(s);
     centerlineStrips.push(s);
   }
-  upgradeMap(ASSET_BASE + 'tex-asphalt_02-1k.jpg',
-    sharedStdMat({ map: asphaltTex, color: 0xffffff, roughness: 1 }), 44, 1,
-    () => { for (const s of centerlineStrips) s.visible = true; });
-  upgradeMap(ASSET_BASE + 'tex-grass_ground-1k.jpg',
-    sharedStdMat({ map: grassTex, color: 0xffffff, roughness: 1 }), 48, 24);
+  // Roads: base roughness 0.85 with the roughness map (dark = smooth =
+  // wet patches) + env 0.5 so the wet asphalt has something to reflect.
+  const roadMat = sharedStdMat({ map: asphaltTex, color: 0xffffff, roughness: 1 });
+  roadMat.roughness = 0.85; roadMat.userData.envSet = true; roadMat.envMapIntensity = 0.5;
+  upgradePBR('asphalt_02', roadMat, 44, 1,
+    () => { for (const s of centerlineStrips) s.visible = true; }, 0.6);
+  upgradePBR('grass_ground',
+    sharedStdMat({ map: grassTex, color: 0xffffff, roughness: 1 }), 48, 24, null, 0.5);
+  upgradePBR('concrete_pavement_03',
+    sharedStdMat({ map: concreteGroundTex, color: 0xffffff, roughness: 1 }), 183, 1, null, 0.6);
+  upgradePBR('concrete_pavement_03', crossWalkMat, 1, 91, null, 0.6); // Round 3 (P1-G2a)
   upgradeMap(ASSET_BASE + 'tex-concrete_pavement_03-1k.jpg',
-    sharedStdMat({ map: concreteGroundTex, color: 0xffffff, roughness: 1 }), 183, 1);
-  upgradeMap(ASSET_BASE + 'tex-concrete_pavement_03-1k.jpg',
-    sharedStdMat({ map: plazaTex, color: 0xffffff, roughness: 1 }), 2, 2);
-  upgradeMap(ASSET_BASE + 'tex-dirt-1k.jpg', dirtPathMat, 8, 1);
+    sharedStdMat({ map: plazaTex, color: 0xffffff, roughness: 1 }), 2, 2); // plaza: color only
+  upgradePBR('dirt', dirtPathMat, 8, 1, null, 0.5);
   upgradeMap(ASSET_BASE + 'tex-dark_planks-1k.jpg', dockMat, 1, 1,
-    (m) => { m.color.set(0xffffff); });
-  upgradeMap(ASSET_BASE + 'tex-dark_planks-1k.jpg', boardMat, 1, 1);
+    (m) => { m.color.set(0xffffff); }); // dock: color only
+  upgradeMap(ASSET_BASE + 'tex-dark_planks-1k.jpg', boardMat, 1, 1); // boarded windows: color only
   // Walls: brick (diner/gas) -> brick photo, concrete (all other non-siding
   // kinds) -> concrete photo, siding (hardware/houses) -> dark planks photo
   // (verified: horizontal weathered lap siding, 9 boards/tile — at repeat
@@ -1872,9 +2306,9 @@ function upgradePhotoTextures() {
     if (seenWalls.has(key)) continue;
     seenWalls.add(key);
     const mat = sharedStdMat({ map: wallTex, color: b.color, roughness: 1 });
-    if (wallTex === brickTex) upgradeMap(ASSET_BASE + 'tex-dark_brick_wall-1k.jpg', mat, 5, 1, (m) => m.color.lerp(white, 0.6));
-    else if (wallTex === concreteWallTex) upgradeMap(ASSET_BASE + 'tex-concrete-1k.jpg', mat, 4, 1, (m) => m.color.lerp(white, 0.6));
-    else upgradeMap(ASSET_BASE + 'tex-dark_planks-1k.jpg', mat, 5, 2, (m) => m.color.lerp(white, 0.35));
+    if (wallTex === brickTex) upgradePBR('dark_brick_wall', mat, 5, 1, (m) => m.color.lerp(white, 0.6), 0.5);
+    else if (wallTex === concreteWallTex) upgradePBR('concrete', mat, 4, 1, (m) => m.color.lerp(white, 0.6), 0.5);
+    else upgradePBR('dark_planks', mat, 5, 2, (m) => m.color.lerp(white, 0.35), 0.5);
   }
 }
 upgradePhotoTextures();
@@ -2164,6 +2598,13 @@ function buildGltfZombie(type, t) {
     if (o.isMesh && o.material && o.material.isMeshStandardMaterial) {
       o.material = o.material.clone();
       o.material.color.multiplyScalar(v);
+      // Round 3 (P1-G5a): the GLB ships metalness 0.4 on skin/cloth (wrong)
+      // and roughness 1.0 — kill the metal, soften the roughness slightly.
+      // (P1-G5b texture replacement was SKIPPED: the UV layout is a jumbled
+      // palette atlas — legs span the full v range including the head band,
+      // so no region can be painted confidently. See the build note.)
+      o.material.metalness = 0;
+      o.material.roughness = 0.9;
       o.material.userData.envSet = true;
       o.material.envMapIntensity = 0.25;
     }
@@ -2301,10 +2742,31 @@ const pickups = [];
 // SpriteMaterial per pickup — 7 identical pairs). The glow is never mutated
 // (pickups hide via group visibility), so sharing is safe.
 const pickupGlowTex = glowTexture('rgba(140,255,170,0.85)', 'rgba(60,255,120,0)');
+// Round 3 (P1-G9): weapon beams instanced — 7 beams + 7 cores -> 2 calls.
+// Scene-root (the pickup group bobs; the beam must not). Colors muted 35%
+// toward grey: the saturated rainbow read as arcade neon, not horror.
+// Count 7 = the 7 weapon kinds (shotgun/rifle/axe/knife/katana/machete/sniper).
+const pickupBeamMesh = new THREE.InstancedMesh(
+  new THREE.CylinderGeometry(0.35, 0.35, 9, 12, 1, true),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide }), 7);
+const pickupCoreMesh = new THREE.InstancedMesh(
+  new THREE.CylinderGeometry(0.12, 0.12, 9, 8, 1, true),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide }), 7);
+pickupBeamMesh.frustumCulled = false; pickupCoreMesh.frustumCulled = false;
+scene.add(pickupBeamMesh); scene.add(pickupCoreMesh);
+let _pickupBeamCount = 0;
+const _pickupBeamDummy = new THREE.Object3D();
+function muteBeamColor(hex) { // desaturate 35% toward luminance grey (setup-time only)
+  const c = new THREE.Color(hex);
+  const lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+  c.lerp(new THREE.Color(lum, lum, lum), 0.35);
+  return c;
+}
 function addPickup(kind, x, z) {
   const g = new THREE.Group();
   let label = '';
   let beamPool = null; // scene-root ground pool under a weapon beam (set below for weapons)
+  let beamIndex = -1; // Round 3 (P1-G9): index into the instanced beam/core meshes
   if (kind === 'shotgun') {
     const b = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.9), new THREE.MeshStandardMaterial({ color: 0x2a1c10, roughness: 0.7 }));
     g.add(b); label = 'SHOTGUN';
@@ -2359,23 +2821,32 @@ function addPickup(kind, x, z) {
   glow.scale.set(1.4, 1.4, 1); g.add(glow);
   const lab = labelSprite(label, '#eaffea'); lab.position.y = 0.55; g.add(lab);
   // DH4: tall glowing beacon beam on every weapon pickup, so it is visible
-  // from far across the (now doubled) town. Hidden automatically on pickup
-  // because the whole pickup group is hidden (p.grp.visible = false).
+  // from far across the (now doubled) town. Round 3 (P1-G9): the beam +
+  // core are instances in the scene-root pickupBeamMesh/pickupCoreMesh
+  // (7+7 -> 2 calls); hidden on pickup by zero-scaling the instance in
+  // updatePickups. Colors muted 35% toward grey, shell 0.32 -> 0.25,
+  // core 0.55 -> 0.45.
   if (kind === 'shotgun' || kind === 'rifle' || kind === 'axe' || kind === 'knife' || kind === 'katana' || kind === 'machete' || kind === 'sniper') {
     const beamColor = kind === 'shotgun' ? 0xffc040 : kind === 'rifle' ? 0x40c0ff : kind === 'axe' ? 0xff7020 :
       kind === 'knife' ? 0x60ff80 : kind === 'katana' ? 0xb040ff : kind === 'machete' ? 0xff3030 : 0xe8ecff; // DH5: katana purple, machete red, sniper white
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 9, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: beamColor, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide }));
-    beam.position.y = 4.5; g.add(beam);
-    // Layered beam (Bible §3.1): bright thin core inside the soft shell, so
-    // the beam reads as light, not a plastic tube.
-    const core = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 9, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color: beamColor, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
-    core.position.y = 4.5; g.add(core);
+    const muted = muteBeamColor(beamColor); // same muted color for beam, core and pool
+    beamIndex = _pickupBeamCount++;
+    _pickupBeamDummy.position.set(x, 5.2, z);
+    _pickupBeamDummy.rotation.set(0, 0, 0);
+    _pickupBeamDummy.scale.set(1, 1, 1);
+    _pickupBeamDummy.updateMatrix();
+    pickupBeamMesh.setMatrixAt(beamIndex, _pickupBeamDummy.matrix);
+    pickupCoreMesh.setMatrixAt(beamIndex, _pickupBeamDummy.matrix);
+    pickupBeamMesh.setColorAt(beamIndex, muted);
+    pickupCoreMesh.setColorAt(beamIndex, muted);
+    pickupBeamMesh.instanceMatrix.needsUpdate = true;
+    pickupCoreMesh.instanceMatrix.needsUpdate = true;
+    pickupBeamMesh.instanceColor.needsUpdate = true;
+    pickupCoreMesh.instanceColor.needsUpdate = true;
     // Colored light pool on the ground under the beam (scene-root: the pickup
     // group bobs, and a bobbing ground pool would sink into the floor).
     const pool = new THREE.Mesh(new THREE.CircleGeometry(1.7, 20),
-      new THREE.MeshBasicMaterial({ map: whiteGlowTex, color: beamColor, transparent: true, opacity: 0.28, depthWrite: false }));
+      new THREE.MeshBasicMaterial({ map: whiteGlowTex, color: muted, transparent: true, opacity: 0.28, depthWrite: false }));
     pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.08, z);
     scene.add(pool);
     beamPool = pool;
@@ -2384,7 +2855,7 @@ function addPickup(kind, x, z) {
   }
   g.position.set(x, 0.7, z);
   scene.add(g);
-  pickups.push({ grp: g, kind, taken: false, phase: Math.random() * 6, pool: beamPool, wgMeshes, upgraded: false });
+  pickups.push({ grp: g, kind, taken: false, phase: Math.random() * 6, pool: beamPool, beamIndex, wgMeshes, upgraded: false });
 }
 // Round 2: swap a weapon pickup's primitive meshes for its glTF model when
 // loaded. Guns/blades lie on their side (holder rolls about the barrel axis).
@@ -2913,12 +3384,10 @@ const handGamepad = { left: null, right: null }; // DH5: per-hand gamepad refs f
 // MARKER-DH2-MOVEFIX
 const pairBuf = { x: 0, y: 0 };
 function pickPair(axes) {
-  // Some Quest profiles report the thumbstick on axes (0,1), others on (2,3).
-  // Take whichever pair is being pushed harder; writes into pairBuf (no per-frame array).
-  const m1 = Math.hypot(axes[0] || 0, axes[1] || 0);
-  const m2 = axes.length > 3 ? Math.hypot(axes[2] || 0, axes[3] || 0) : 0;
-  if (m2 > m1) { pairBuf.x = axes[2] || 0; pairBuf.y = axes[3] || 0; }
-  else { pairBuf.x = axes[0] || 0; pairBuf.y = axes[1] || 0; }
+  // Round 3 (P-4): the thumbstick is axes (2,3) per the xr-standard
+  // mapping (Bible §2; W3C WebXR Gamepads Module §3.3). The old (0,1)
+  // candidate pair is gone — on Quest 2 those slots are placeholder 0s.
+  pairBuf.x = axes[2] || 0; pairBuf.y = axes[3] || 0;
 }
 function dead(v) { return Math.abs(v) < 0.15 ? 0 : v; }
 function pollInput(dt) {
@@ -2931,11 +3400,10 @@ function pollInput(dt) {
   if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
   if (mouseDown && !renderer.xr.isPresenting) fireR = true;
   if (keys['ShiftLeft'] || keys['ShiftRight']) running = true; // desktop run: hold Shift
-  let cycleL = false, cycleR = false, axisSeen = false, dbgBtn = false;
+  let cycleL = false, cycleR = false, dbgBtn = false;
   const applyHand = (hand, axes, buttons, gp) => {
     pickPair(axes); const ax = pairBuf.x, ay = pairBuf.y;
     const dx = dead(ax), dy = dead(ay);
-    if (dx !== 0 || dy !== 0) axisSeen = true;
     if (hand === 'left') {
       lx = dx; ly = dy;
       mx = dx; mz += -dy; // left stick: strafe + forward/back
@@ -2971,14 +3439,10 @@ function pollInput(dt) {
         if (gp.axes && gp.axes.length > 1) applyHand(src.handedness, gp.axes, gp.buttons, gp);
       }
     }
-    // Fallback: controller objects' gamepads, if the session sources gave nothing.
-    if (!axisSeen) {
-      for (const [c, hand] of [[leftCtl, 'left'], [rightCtl, 'right'], [ctlL, 'left'], [ctlR, 'right']]) {
-        if (!c) continue;
-        const gp = c.gamepad || (c.userData && c.userData.inputSource && c.userData.inputSource.gamepad);
-        if (gp && gp.axes && gp.axes.length > 1) applyHand(hand, gp.axes, gp.buttons, gp);
-      }
-    }
+    // Round 3 (P-5): the old fallback here read .gamepad off the
+    // controller objects — r160's target-ray Group has no .gamepad, so
+    // it was dead code. The session-inputSources path above is the
+    // working XR input path and is untouched.
     snapCd = Math.max(0, snapCd - dt);
   }
   if (cycleL && !prevCycleL) cycleHandWeapon('left');
@@ -3071,6 +3535,7 @@ function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 }
 function killZombie(z, hand) {
   z.dead = true; z.deadT = 0; kills++;
+  z.deathRoll = rand(-0.25, 0.25); // Round 3 (P1-G6): random roll so the fall settles instead of lying flat as a board
   if (z.mixer) z.mixer.stopAllAction(); // glTF zombie: freeze the clip, the group fall still plays
   if (hand) hapticPulse(hand, 60, 0.7); // kill confirm buzz on the firing hand
   tmpB.copy(z.grp.position); tmpB.y += 1;
@@ -3108,6 +3573,15 @@ function macheteHitSound() { noiseBurst(0.09, 0.3, 1400); blip(180, 0.1, 0.3, 's
 function fireHand(hand) {
   const name = handWeapon[hand];
   if (!name || handCooldown[hand] > 0) return;
+  // Round 3 (X-1): no firing from a stale pose. r160 sets the target-ray
+  // group's .visible = (inputPose !== null) (three.module.js, WebXRController
+  // update), so a hidden group means tracking is lost. Desktop (not
+  // presenting) always fires; an unconnected hand (null group) is not
+  // blocked — the guard only fires when the group exists but is hidden.
+  if (renderer.xr.isPresenting) {
+    const ctl = hand === 'left' ? leftCtl : rightCtl;
+    if (ctl && !ctl.visible) return;
+  }
   const w = WEAPONS[name];
   handCooldown[hand] = w.rate;
   const mount = gunMounts[hand];
@@ -3184,9 +3658,13 @@ function updateZombies(dt) {
     const z = zombies[i];
     if (z.dead) {
       z.deadT += dt;
-      const k = Math.min(1, z.deadT / 0.35);
-      z.grp.rotation.x = -Math.PI / 2 * k;
-      z.grp.position.y = -0.1 * k;
+      // Round 3 (P1-G6): slower eased fall (0.35 -> 0.6 s) + random roll +
+      // deeper sink, so the body settles instead of lying flat as a board.
+      const k = Math.min(1, z.deadT / 0.6);
+      const ke = 1 - (1 - k) * (1 - k); // ease-out
+      z.grp.rotation.x = -Math.PI / 2 * ke;
+      z.grp.rotation.z = (z.deathRoll || 0) * ke;
+      z.grp.position.y = -0.25 * ke;
       if (z.deadT > 1.4) { if (z.mixer) z.mixer.stopAllAction(); scene.remove(z.grp); zombies.splice(i, 1); }
       continue;
     }
@@ -3196,17 +3674,21 @@ function updateZombies(dt) {
     const dist = Math.hypot(dx, dz) || 0.001;
     // Round 2 (glTF zombies): advance the clip mixer and switch walk/run ->
     // bite when in attack range. Procedural zombies have no mixer.
+    // Round 3 (P1-G6): crossfade the switch (was a hard .stop() + play pop).
     if (z.mixer) {
       z.mixer.update(dt);
       const biting = dist <= 1.0;
       if (biting && !z.attacking) {
         z.attacking = true;
-        if (z.moveAction) z.moveAction.stop();
-        z.biteAction = zombiePlayAction(z, 'ZombieBite', true);
+        const next = zombiePlayAction(z, 'ZombieBite', true);
+        if (z.moveAction && next) z.moveAction.crossFadeTo(next, 0.25, true);
+        z.biteAction = next;
       } else if (!biting && z.attacking) {
         z.attacking = false;
-        if (z.biteAction) { z.biteAction.stop(); z.biteAction = null; }
-        z.moveAction = zombiePlayAction(z, z.type === 'runner' ? 'ZombieRun' : 'ZombieWalk', true);
+        const next = zombiePlayAction(z, z.type === 'runner' ? 'ZombieRun' : 'ZombieWalk', true);
+        if (z.biteAction && next) z.biteAction.crossFadeTo(next, 0.25, true);
+        z.biteAction = null;
+        z.moveAction = next;
       }
     }
     if (dist > 1.0) {
@@ -3264,18 +3746,49 @@ function updateZombies(dt) {
       }
     }
   }
+  // Round 3 (P2-A4): blob shadows follow live zombies (12 max alive).
+  // Dead zombies fade their blob out as they sink; unused slots stay
+  // zero-scale under the ground. 0 allocations — one shared dummy.
+  for (let i = 0; i < 12; i++) {
+    const z = zombies[i];
+    if (!z) {
+      _zombieBlobDummy.position.set(0, -10, 0);
+      _zombieBlobDummy.scale.set(0.01, 0.01, 1);
+    } else if (z.dead) {
+      const s = Math.max(0.01, 0.9 * (1 - z.deadT / 1.4)); // shrinks as the body sinks
+      _zombieBlobDummy.position.set(z.grp.position.x, 0.045, z.grp.position.z);
+      _zombieBlobDummy.scale.set(s, s, 1);
+    } else {
+      _zombieBlobDummy.position.set(z.grp.position.x, 0.045, z.grp.position.z);
+      _zombieBlobDummy.scale.set(0.9, 0.9, 1);
+    }
+    _zombieBlobDummy.rotation.set(-Math.PI / 2, 0, 0);
+    _zombieBlobDummy.updateMatrix();
+    zombieBlobMesh.setMatrixAt(i, _zombieBlobDummy.matrix);
+  }
+  zombieBlobMesh.instanceMatrix.needsUpdate = true;
 }
 
 // ============ pickup updates ============
 function updatePickups(dt, t) {
   for (const p of pickups) {
     if (p.taken) continue;
-    p.grp.position.y = 0.7 + Math.sin(t * 2 + p.phase) * 0.1;
-    p.grp.rotation.y += dt * 0.8;
+    p.grp.position.y = 0.7 + Math.sin(t * 2 + p.phase) * 0.06; // Round 3 (P1-G9): gentler bob, was 0.1
+    p.grp.rotation.y += dt * 0.5; // Round 3 (P1-G9): slower spin, was 0.8 rad/s
     const d = Math.hypot(p.grp.position.x - playerPos.x, p.grp.position.z - playerPos.z);
     if (d < 1.3) {
       p.taken = true; p.grp.visible = false;
       if (p.pool) p.pool.visible = false;
+      if (p.beamIndex >= 0) { // Round 3 (P1-G9): hide the instanced beam + core (zero-scale, parked below ground)
+        _pickupBeamDummy.position.set(p.grp.position.x, -10, p.grp.position.z);
+        _pickupBeamDummy.rotation.set(0, 0, 0);
+        _pickupBeamDummy.scale.set(0.01, 0.01, 0.01);
+        _pickupBeamDummy.updateMatrix();
+        pickupBeamMesh.setMatrixAt(p.beamIndex, _pickupBeamDummy.matrix);
+        pickupCoreMesh.setMatrixAt(p.beamIndex, _pickupBeamDummy.matrix);
+        pickupBeamMesh.instanceMatrix.needsUpdate = true;
+        pickupCoreMesh.instanceMatrix.needsUpdate = true;
+      }
       pickupSound();
       hapticPulse('left', 50, 0.4); hapticPulse('right', 50, 0.4); // pickup buzz, both hands
       if (p.kind === 'shotgun' || p.kind === 'rifle' || p.kind === 'axe' || p.kind === 'knife' || p.kind === 'katana' || p.kind === 'machete' || p.kind === 'sniper') {
