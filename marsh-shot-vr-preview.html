@@ -1307,15 +1307,19 @@ dog.add(dogGltf);
 let dogMixer = null, dogActions = {}, dogGltfActive = false, dogGltfCarried = null;
 const DOG_HOME = new THREE.Vector3(-1.4, 0, -4.5);
 {
-  // Lit coat (MeshStandardMaterial) so the sun shapes the dog; the neon collar
-  // keeps a faint emissive so it reads in the grass.
+  // Lit coat (MeshStandardMaterial) so the sun shapes the dog. P0 leash
+  // correction (Nov 15): the old neon collar is GONE — a glowing cyan ring
+  // around the neck read as a leash/collar and broke the cinematic realism.
+  // The dog is a hunting companion, not a pet on a lead: no collar, no
+  // leash, no straps or harness anywhere. The chest uses a lighter cream
+  // tone (Shiba-style light chest fur) so the coat is not one flat brown.
   const coat = new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 0.9, metalness: 0 });
+  const cream = new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.95, metalness: 0 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x4a2c14, roughness: 0.95, metalness: 0 });
   const noseM = new THREE.MeshStandardMaterial({ color: 0x1a1210, roughness: 0.4, metalness: 0 });
-  const collarM = new THREE.MeshStandardMaterial({ color: 0x27e8ff, roughness: 0.4, metalness: 0, emissive: 0x27e8ff, emissiveIntensity: 0.35 });
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), coat);
   body.scale.set(0.7, 0.8, 1.35); body.position.y = 0.42;
-  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), coat);
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), cream);
   chest.position.set(0, 0.55, 0.42);
   const head = new THREE.Group(); head.position.set(0, 0.86, 0.55);
   const skull = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), coat);
@@ -1327,8 +1331,8 @@ const DOG_HOME = new THREE.Vector3(-1.4, 0, -4.5);
   earL.position.set(-0.24, 0.05, 0); earL.rotation.z = 0.25;
   const earR = earL.clone(); earR.position.x = 0.24; earR.rotation.z = -0.25;
   head.add(skull, snout, nose, earL, earR);
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.045, 8, 20), collarM);
-  collar.position.set(0, 0.68, 0.5); collar.rotation.x = Math.PI / 2 - 0.35;
+  // (No collar: removed by the P0 leash correction — see the block comment
+  // above. The neck stays bare coat, anatomically natural.)
   const tail = new THREE.Group(); tail.position.set(0, 0.5, -0.55);
   const tailMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.07, 0.5, 6), coat);
   tailMesh.position.y = 0.25; tailMesh.rotation.x = -0.6;
@@ -1344,7 +1348,7 @@ const DOG_HOME = new THREE.Vector3(-1.4, 0, -4.5);
     });
   }
   dogProc.add(legs);
-  dogProc.add(body, chest, head, collar, tail);
+  dogProc.add(body, chest, head, tail);
   dog.userData.head = head; dog.userData.tail = tail;
   dog.userData.body = body; dog.userData.earL = earL; dog.userData.earR = earR;
   // Carried bird shown only during the fetch celebration.
@@ -1377,6 +1381,28 @@ const dogState = { mode: 'idle', t: 0, earT: 4, earSide: 0, earK: 0, fetch: null
 // dog for the animated one. Clip lookup matches by suffix — the file carries
 // each clip twice (plain name + 'AnimalArmature|' prefix).
 function registerDogModel(orientedScene, clips) {
+  // P0 leash correction (Nov 15): the Shiba GLB was verified to carry NO
+  // leash/collar/strap/harness geometry (single skinned mesh, 6 materials,
+  // bones only — the visible collar lived on the procedural fallback dog).
+  // Still, hide any attachment-named node by traversal so a future asset
+  // revision can never reintroduce one, and retune the authored materials:
+  // the GLB sets metalness 0.4 / roughness 0.42 on EVERY material, which
+  // reads as plastic under the sun — fur is matte, eyes stay glossy (wet,
+  // not metallic). Hidden nodes keep animating (visible=false only), so the
+  // skeleton and clips are untouched.
+  const ATTACHMENT_NAME = /leash|collar|strap|harness|\blead\b/i;
+  let hiddenAttachments = 0;
+  orientedScene.traverse((o) => {
+    if (ATTACHMENT_NAME.test(o.name || '')) { o.visible = false; hiddenAttachments++; }
+    if (o.isMesh && o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if ((m.name || '').toLowerCase().startsWith('eyes')) { m.metalness = 0; m.roughness = 0.25; }
+        else { m.metalness = 0; m.roughness = 0.9; }
+      }
+    }
+  });
+  if (hiddenAttachments) console.log('[marsh-shot] hid ' + hiddenAttachments + ' leash/collar attachment node(s) on the dog');
   dogGltf.add(orientedScene);
   dogMixer = new THREE.AnimationMixer(orientedScene);
   const findClip = (name) => clips.find(c => c.name === name || c.name.endsWith('|' + name)) || null;
