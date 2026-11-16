@@ -81,9 +81,12 @@
      D6b: z-index 30, ABOVE the launch panel (z-index 10) — at z-index 5
      the overlay rendered behind the opaque panel and was invisible in the
      menu even though tick updated it. pointer-events:none, so it never
-     blocks menu clicks. */
+     blocks menu clicks.
+     D2c: top 52px, BELOW the SOUND button (top 12px, ~34px tall) — at
+     top 12px the pill sat exactly on the button and its text showed
+     through. The DOM #hud is top-left, so the right side is clear. */
   #perf {
-    position:fixed; right:12px; top:12px; z-index:30; display:none;
+    position:fixed; right:12px; top:52px; z-index:30; display:none;
     color:#8fb8ff; font:700 13px/1.5 monospace; letter-spacing:0.5px; white-space:nowrap;
     background:rgba(2,8,24,.78); border:1px solid #27e8ff; border-radius:8px; padding:6px 10px;
     pointer-events:none;
@@ -2861,8 +2864,15 @@ bannerMesh.position.set(0, 0.35, -1.5);
 bannerMesh.visible = false;
 camera.add(bannerMesh);
 let bannerT = 0;
+// D2c: run-start banner grace (s) — the mission/free-play banner owns the
+// first 3 s of a run. Set in beginGame, counted down in tick.
+let bannerGraceT = 0;
 function showBanner(text, dur) {
-  S.msg = text; S.msgT = dur || 2.5;
+  // D2c: banners do NOT write S.msg — S.msg feeds the msgMesh announcement
+  // line, and writing it here rendered every banner TWICE (DOM #banner +
+  // the in-scene msgMesh on desktop; bannerMesh + msgMesh in VR). The
+  // msgMesh line belongs to the wave/tier announcements that set S.msg
+  // directly (WAVE n, TIER UNLOCKED, RAVAGER warnings, NOVA BOMB).
   // ONE banner path per mode (D2): the DOM overlay serves desktop, the
   // in-scene panel serves VR — writing both at once rendered the banner
   // TWICE on desktop, slightly offset and overlapping.
@@ -5878,6 +5888,7 @@ function beginGame() {
   plasmaCharge = 0; plasmaCd = 0;
   lockedTarget = null; targetRange = 120;
   paused = false; perfWarmup = 1.5; resetTrails();
+  bannerGraceT = 3; // D2c: the mission banner owns the first 3 s — the proximity warning must not overwrite it on tick 0
   perfSessionStart(); // a new play session begins (restarts continue it)
   if (currentEnv !== launchEnv) loadEnvironment(launchEnv);
   startWave(1);
@@ -6167,7 +6178,14 @@ function stepFlight(dt, inp) {
   }
   // Proximity warning (15 m): one-time banner on entry + the vignette term
   // tick drives from proxWarnActive. Hysteresis: clears at 18 m.
-  if (proxDist < FLIGHT.WARN_DIST && !proxWarnActive) { proxWarnActive = true; showBanner('PROXIMITY WARNING', 1.5); }
+  // D2c: during the run-start banner grace the warning is neither shown
+  // nor latched — a seeded near rock sits within 15 m of the spawn in
+  // envs 1/5/6, and an unguarded warning on tick 0 overwrote the mission
+  // banner before it was ever visible. After the grace it fires at once
+  // if the player is still in range.
+  if (proxDist < FLIGHT.WARN_DIST && !proxWarnActive) {
+    if (bannerGraceT <= 0) { proxWarnActive = true; showBanner('PROXIMITY WARNING', 1.5); }
+  }
   else if (proxDist > FLIGHT.WARN_DIST + 3) proxWarnActive = false;
   // --- sync the rig (ship transform), the exterior, and the aliases ---
   rig.position.copy(shipPos);
@@ -7666,6 +7684,7 @@ function tick() {
     hitFlash = Math.max(0, hitFlash - dt * 2);
     if (S.msgT > 0) { S.msgT -= dt; if (S.msgT <= 0) { S.msg = ''; hudDirty = true; } }
     if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) bannerMesh.visible = false; }
+    if (bannerGraceT > 0) bannerGraceT -= dt; // D2c: run-start banner grace
     // Frame-time valve: EMA fed only during active play (warm-up after a
     // start/resume is not gameplay frame time). Tier progression still
     // holds while degraded (see checkTier).
