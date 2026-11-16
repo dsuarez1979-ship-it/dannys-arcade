@@ -2634,7 +2634,7 @@ function buildGltfZombie(type, t) {
   const mixer = new THREE.AnimationMixer(model);
   const clips = {};
   for (const c of zombieGltf.animations) clips[c.name.split('|').pop()] = c;
-  const z = { grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL: null, legR: null, armL: null, armR: null, head: null, torso: null, tilt: rand(-0.25, 0.25), mixer, clips, moveAction: null, biteAction: null, attacking: false };
+  const z = { grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL: null, legR: null, armL: null, armR: null, head: null, torso: null, tilt: rand(-0.25, 0.25), mixer, clips, moveAction: null, biteAction: null, attacking: false, bestD: Infinity, bestT: 0, stuckSide: 1, sideT: 0 }; // bestD/bestT/stuckSide/sideT: anti-stall sidestep state (see updateZombies)
   z.moveAction = zombiePlayAction(z, type === 'runner' ? 'ZombieRun' : 'ZombieWalk', true);
   zombies.push(z);
 }
@@ -2689,9 +2689,19 @@ function spawnZombie(type) {
   }
   grp.scale.setScalar(t.scale);
   scene.add(grp);
-  zombies.push({ grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL, legR, armL, armR, head, torso, tilt: rand(-0.25, 0.25) });
+  zombies.push({ grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL, legR, armL, armR, head, torso, tilt: rand(-0.25, 0.25), bestD: Infinity, bestT: 0, stuckSide: 1, sideT: 0 }); // bestD/bestT/stuckSide/sideT: anti-stall sidestep state (see updateZombies)
 }
 const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [-20, -22], [20, 22], [-62, -10], [62, 12], [-100, 0], [104, 0], [-90, -32], [90, 32], [-70, 40], [70, 40], [-20, -45], [20, 45], [-105, 25], [105, -45], [64, -40], [64, 42], [-40, -45], [40, -45], [200, 0], [-200, 0], [160, 40], [-160, -40], [200, 45], [-200, 45], [140, -45], [-140, 60], [180, -60], [-180, 80], [64, -90], [-128, 90], [-180, -70], [-200, -90], [-150, -85], [-210, -60], [-165, -100]];
+// Wave 1 near band (P0 zombie-visibility fix, Nov 15): the full SPAWNS list
+// runs out to 219 m (mean ~120 m), so a wave-1 zombie could take 2+ minutes
+// to reach the player — in one harness seed the first zombie took 144 s to
+// come within 30 m, and Danny's headset session saw no zombies at all.
+// Wave 1 spawns from this near band instead: Main Street points 28-38 m
+// out with a clear run down the street (no building between them and the
+// square). All are >25 m from the player start, so the no-pop-in rule still
+// holds; the flashlight only reaches 26 m, so spawns stay out of the lit
+// cone. Later waves keep the wide spread.
+const SPAWNS_NEAR = [[-30, 0], [30, 0], [-35, 4], [35, -4], [-28, -5], [28, 5], [-38, -3], [38, 3], [-32, 6], [32, -6]];
 const playerPos = new THREE.Vector3(0, 0, 0);
 const playerCollide = { x: 0, z: 0 }; // reused every frame: no per-frame object in tick()
 const zombieCollide = { x: 0, z: 0 };
@@ -2717,9 +2727,16 @@ function spawnDirector(dt) {
   }
   spawnTimer -= dt;
   if (spawnTimer <= 0 && waveToSpawn > 0 && active < 12) {
-    spawnTimer = Math.max(2.6 - wave * 0.15, 0.8);
-    const far = SPAWNS.filter(([x, z]) => Math.hypot(x - playerPos.x, z - playerPos.z) > 25);
-    const [sx, sz] = (far.length ? far : SPAWNS)[Math.floor(Math.random() * (far.length ? far.length : SPAWNS.length))];
+    // Wave 1 spawns faster (1.2 s) so the opening wave arrives as a group
+    // instead of a trickle; later waves keep the original ramp.
+    spawnTimer = wave === 1 ? 1.2 : Math.max(2.6 - wave * 0.15, 0.8);
+    // Wave 1 uses the near band (clear street approaches, 28-38 m); later
+    // waves use the full list. The >25 m rule applies to both, measured
+    // from the player's CURRENT position.
+    const pool = wave === 1 ? SPAWNS_NEAR : SPAWNS;
+    const far = pool.filter(([x, z]) => Math.hypot(x - playerPos.x, z - playerPos.z) > 25);
+    const list = far.length ? far : SPAWNS;
+    const [sx, sz] = list[Math.floor(Math.random() * list.length)];
     let type = 'walker';
     if (kills >= 8) type = Math.random() < 0.2 ? 'runner' : 'walker';
     if (kills >= 20) { const r = Math.random(); type = r < 0.1 ? 'brute' : r < 0.4 ? 'runner' : 'walker'; }
@@ -3692,8 +3709,41 @@ function updateZombies(dt) {
       }
     }
     if (dist > 1.0) {
-      z.grp.position.x += dx / dist * z.speed * dt;
-      z.grp.position.z += dz / dist * z.speed * dt;
+      // Anti-stall sidestep (P0 zombie-visibility fix, Nov 15): a zombie
+      // walking head-on into a wall/car face is pushed straight back out by
+      // collideCircle every frame, so it makes zero progress indefinitely
+      // (harness: one zombie pinned at 46.7 m for 60+ s; seed 4 took 144 s
+      // to first come within 30 m). If a zombie makes no progress toward
+      // the player for 3 s, it sidesteps perpendicular to its approach —
+      // sliding around the obstacle — until a forward step would make
+      // progress again (tested with a real collideCircle probe each frame),
+      // then resumes the chase. A fixed-duration sidestep does NOT work:
+      // the zombie slides back along the face once it resumes (its heading
+      // has a face-parallel component), so only the probe exit escapes.
+      // The side flips each time a new sidestep triggers; the 20 s cap is
+      // a backstop (the probe, not the timer, ends the sidestep). Facing
+      // stays on the player (it shambles sideways, not away).
+      if (dist < z.bestD) { z.bestD = dist; z.bestT = elapsed; }
+      let mx = dx / dist, mz = dz / dist;
+      if (z.sideT > 0) {
+        // Probe: would a forward step from here make progress?
+        zombieCollide.x = z.grp.position.x + mx * z.speed * dt;
+        zombieCollide.z = z.grp.position.z + mz * z.speed * dt;
+        collideCircle(zombieCollide, 0.4, colliders);
+        const probeD = Math.hypot(zombieCollide.x - playerPos.x, zombieCollide.z - playerPos.z);
+        if (probeD < dist - 0.001) {
+          z.sideT = 0; z.bestT = elapsed; // path clear — resume the chase
+        } else {
+          z.sideT -= dt;
+          if (z.sideT <= 0) z.bestT = elapsed; // cap reached: fresh window, retries (other side) if still stuck
+          else { const px = -mz * z.stuckSide, pz = mx * z.stuckSide; mx = px; mz = pz; }
+        }
+      } else if (elapsed - z.bestT > 3) {
+        z.stuckSide = -z.stuckSide;
+        z.sideT = 20;
+      }
+      z.grp.position.x += mx * z.speed * dt;
+      z.grp.position.z += mz * z.speed * dt;
       z.grp.rotation.y = Math.atan2(dx, dz);
       zombieCollide.x = z.grp.position.x; zombieCollide.z = z.grp.position.z;
       const p = zombieCollide;
