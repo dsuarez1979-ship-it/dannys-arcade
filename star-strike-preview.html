@@ -77,6 +77,13 @@
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
     background:rgba(2,8,24,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px; max-width:calc(100vw - 24px);
   }
+  /* D6: DOM perf overlay (?debug=perf) — top-right, out of the HUD's way. */
+  #perf {
+    position:fixed; right:12px; top:12px; z-index:5; display:none;
+    color:#8fb8ff; font:700 13px/1.5 monospace; letter-spacing:0.5px; white-space:nowrap;
+    background:rgba(2,8,24,.78); border:1px solid #27e8ff; border-radius:8px; padding:6px 10px;
+    pointer-events:none;
+  }
   #banner {
     position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
     color:#ffd319; font-size:clamp(20px, 5vw, 30px); font-weight:900; letter-spacing:2px; text-align:center;
@@ -178,6 +185,7 @@
 </div>
 
 <div id="hud">SCORE 0 &nbsp;·&nbsp; WAVE 1 &nbsp;·&nbsp; HULL 100/100</div>
+<div id="perf"></div>
 <div id="banner"></div>
 <button id="muteBtn">SOUND: ON</button>
 <button id="recallBtn">RECENTER</button>
@@ -2554,6 +2562,7 @@ msgMesh.position.set(-0.55, 0.52, -1.5);
 msgMesh.visible = false;
 camera.add(msgMesh);
 const hudEl = document.getElementById('hud');
+const perfEl = document.getElementById('perf'); // D6: DOM perf overlay (?debug=perf)
 let hudDirty = true;
 function drawHUD(state) {
   if (!hudDirty) return;
@@ -2577,14 +2586,19 @@ function drawHUD(state) {
   // 2.0 (Phase 2): speed readout.
   hctx.font = 'bold 30px Arial'; hctx.fillStyle = '#8fb8ff';
   hctx.fillText('SPEED ' + Math.round(flightSpeed) + ' M/S', 22, 182);
-  // Perf readout (cinematic upgrade): measured frame-time EMA + valve level
-  // + the XR layer's ACTUAL framebuffer size. A measurement display, not a
-  // claim — refreshed at 2 Hz by the perf timer in tick. A debug overlay:
-  // drawn only with ?debug=perf (same gating as Longshot/Marsh Shot).
+  // Perf readout (cinematic upgrade): measured frame-time EMA + draw-call
+  // count + valve level. A measurement display, not a claim — refreshed
+  // at 2 Hz by the perf timer in tick. A debug overlay: drawn only with
+  // ?debug=perf (same gating as Longshot/Marsh Shot). The XR layer size
+  // lives in the DOM overlay (D6) — no room for it on this row.
   if (perfDebug) {
+    // D6: draw-call count — the budget instrument. In XR one render()
+    // covers both eyes, so the per-eye figure is calls/2.
+    const calls = renderer.info && renderer.info.render ? renderer.info.render.calls : 0;
+    const perEye = renderer.xr.isPresenting ? ' ≈' + Math.round(calls / 2) + '/eye' : '';
     hctx.textAlign = 'right';
     hctx.font = 'bold 24px Arial'; hctx.fillStyle = '#8fb8ff';
-    hctx.fillText(perfValve.ema.toFixed(1) + 'ms · V' + perfValve.level + ' · ' + xrLayerSize(), 618, 94);
+    hctx.fillText(perfValve.ema.toFixed(1) + 'ms · ' + calls + 'c' + perEye + ' · V' + perfValve.level, 618, 94);
   }
   if (muted) {
     hctx.textAlign = 'center';
@@ -2845,20 +2859,26 @@ camera.add(bannerMesh);
 let bannerT = 0;
 function showBanner(text, dur) {
   S.msg = text; S.msgT = dur || 2.5;
-  if (bannerEl) {
+  // ONE banner path per mode (D2): the DOM overlay serves desktop, the
+  // in-scene panel serves VR — writing both at once rendered the banner
+  // TWICE on desktop, slightly offset and overlapping.
+  const inVr = renderer.xr.isPresenting;
+  if (bannerEl && !inVr) {
     bannerEl.textContent = text;
     bannerEl.style.display = 'block';
     if (bannerTimer) clearTimeout(bannerTimer);
     bannerTimer = setTimeout(() => { bannerEl.style.display = 'none'; }, (dur || 2.5) * 1000);
   }
-  bctx.clearRect(0, 0, 640, 128);
-  bctx.fillStyle = 'rgba(2,8,24,0.72)'; bctx.fillRect(0, 0, 640, 128);
-  bctx.strokeStyle = '#ffd319'; bctx.lineWidth = 4; bctx.strokeRect(4, 4, 632, 120);
-  bctx.font = 'bold 34px Arial'; bctx.fillStyle = '#ffd319'; bctx.textAlign = 'center';
-  bctx.fillText(text, 320, 78);
-  bannerTex.needsUpdate = true;
-  bannerMesh.visible = true;
-  bannerT = dur || 2.5;
+  if (inVr) {
+    bctx.clearRect(0, 0, 640, 128);
+    bctx.fillStyle = 'rgba(2,8,24,0.72)'; bctx.fillRect(0, 0, 640, 128);
+    bctx.strokeStyle = '#ffd319'; bctx.lineWidth = 4; bctx.strokeRect(4, 4, 632, 120);
+    bctx.font = 'bold 34px Arial'; bctx.fillStyle = '#ffd319'; bctx.textAlign = 'center';
+    bctx.fillText(text, 320, 78);
+    bannerTex.needsUpdate = true;
+    bannerMesh.visible = true;
+    bannerT = dur || 2.5;
+  }
   hudDirty = true;
 }
 
@@ -3124,7 +3144,7 @@ pauseMesh.position.set(0, 0, -1.5);
 pauseMesh.renderOrder = 1000;
 pauseMesh.visible = false;
 camera.add(pauseMesh);
-let pauseSel = 0; // selected settings row (0 sensitivity, 1 reduced-motion, 2 invert-pitch, 3 secondary)
+let pauseSel = 0; // selected pause row (0 sensitivity, 1 reduced-motion, 2 invert-pitch, 3 secondary, 4 resume, 5 restart, 6 quit)
 let pauseNavT = 0; // navigation repeat timer (see the paused branch in tick)
 const SECONDARY_MODES = ['grip', 'button', 'trigger', 'double'];
 const SECONDARY_LABELS = { grip: 'GRIP', button: 'B / Y', trigger: 'L TRIGGER', double: '2× R TRIGGER' };
@@ -3134,37 +3154,54 @@ function drawPausePanel() {
   g.strokeStyle = '#27e8ff'; g.lineWidth = 6; g.strokeRect(4, 4, 504, 280);
   g.textAlign = 'center';
   g.fillStyle = '#eaf6ff'; g.font = '900 44px Arial';
-  g.fillText('PAUSED', 256, 48);
+  g.fillText('PAUSED', 256, 42);
   const rows = [
     'SENSITIVITY  ' + flightSettings.sensitivity.toFixed(1) + '×',
     'REDUCED MOTION  ' + (flightSettings.reducedMotion ? 'ON' : 'OFF'),
     'INVERT PITCH  ' + (flightSettings.invertPitch ? 'ON' : 'OFF'),
     'SECONDARY  ' + SECONDARY_LABELS[flightSettings.secondary],
   ];
-  g.font = '700 24px Arial';
+  g.font = '700 22px Arial';
   for (let i = 0; i < rows.length; i++) {
     g.fillStyle = i === pauseSel ? '#ffd319' : '#bfeaff';
-    g.fillText((i === pauseSel ? '▸ ' : '  ') + rows[i], 256, 88 + i * 28);
+    g.fillText((i === pauseSel ? '▸ ' : '  ') + rows[i], 256, 68 + i * 22);
   }
-  g.font = '700 18px Arial'; g.fillStyle = '#8fb8ff';
-  g.fillText('L stick — select · R stick — change (arrows on desktop)', 256, 204);
-  g.fillText('Hold click — resume · A/X — sound · Grip — restart', 256, 228);
+  // Action rows (D5): RESUME / RESTART RUN / QUIT TO PICKER — Enter on
+  // desktop, right trigger in VR.
+  const actions = ['RESUME', 'RESTART RUN', 'QUIT TO PICKER'];
+  g.fillStyle = '#27e8ff'; g.fillRect(56, 146, 400, 2);
+  for (let i = 0; i < actions.length; i++) {
+    const sel = pauseSel === 4 + i;
+    g.fillStyle = sel ? '#ffd319' : '#7df9ff';
+    g.fillText((sel ? '▸ ' : '  ') + actions[i], 256, 166 + i * 22);
+  }
+  g.font = '700 16px Arial'; g.fillStyle = '#8fb8ff';
+  g.fillText('Arrows / L stick — select · Enter / R trigger — activate', 256, 232);
   g.fillText('2× secondary — Nova Bomb · A/X in play — cycle lock', 256, 252);
+  g.fillText('Esc / hold click — resume · A/X — sound · Grip — restart', 256, 272);
   pauseTex.needsUpdate = true;
 }
 // Change the selected setting by dir (+1 / -1); applies immediately,
-// saves, and redraws the panel.
+// saves, and redraws the panel. Action rows (4-6) have no left/right
+// value — adjusting them is a no-op.
 function pauseAdjust(dir) {
   if (pauseSel === 0) {
     flightSettings.sensitivity = clamp(Math.round((flightSettings.sensitivity + dir * 0.1) * 10) / 10, FLIGHT.SENS_MIN, FLIGHT.SENS_MAX);
   } else if (pauseSel === 1) flightSettings.reducedMotion = !flightSettings.reducedMotion;
   else if (pauseSel === 2) flightSettings.invertPitch = !flightSettings.invertPitch;
-  else {
+  else if (pauseSel === 3) {
     const i = SECONDARY_MODES.indexOf(flightSettings.secondary);
     flightSettings.secondary = SECONDARY_MODES[(i + dir + SECONDARY_MODES.length) % SECONDARY_MODES.length];
-  }
+  } else return; // action row: nothing to adjust
   saveFlightSettings();
   drawPausePanel();
+}
+// Activate the selected action row (D5): RESUME / RESTART RUN /
+// QUIT TO PICKER. Settings rows (0-3) have no activation.
+function pauseActivate() {
+  if (pauseSel === 4) togglePause();
+  else if (pauseSel === 5) restartRun();
+  else if (pauseSel === 6) quitToPicker();
 }
 
 // BOSS VIGNETTE: red edge-glow plane for boss-encounter staging (Bible
@@ -3456,13 +3493,16 @@ recallBtn.addEventListener('click', () => { startAudio(); recallShip(); });
 const keys = {};
 // Desktop secondary/cycle edges: the keydown handler queues them, tick
 // consumes them (one action per press, like the XR rising edges).
-let secondaryKeyQueued = false, cycleKeyQueued = false;
+// pauseActivateQueued is the same pattern for Enter on the pause menu.
+let secondaryKeyQueued = false, cycleKeyQueued = false, pauseActivateQueued = false;
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
   if (e.repeat) return; // held keys must not re-toggle pause/mute/restart
   if (e.code === 'KeyM') setMuted(!muted);
   if (e.code === 'KeyP') togglePause();
+  if (e.code === 'Escape') togglePause(); // D5: desktop pause (was: no binding — reload was the only exit)
+  if (e.code === 'Enter' && paused) pauseActivateQueued = true; // D5: activate the selected pause-menu row
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') triggerRollOrDash();
   if (e.code === 'KeyN') tryNova();
   if (e.code === 'KeyQ') secondaryKeyQueued = true; // desktop secondary weapon
@@ -3626,6 +3666,9 @@ function pollXR(dt) {
 
 // ============================== game state ==============================
 const S = {
+  // SHLD 0/0 at session start is BY DESIGN (D3): the ship launches with
+  // no shield layer — Shield Cells (+50 max) and Shield Boost grant it
+  // in play; the regen layer (5/s after 6 s without damage) needs a max.
   mode: 'menu', score: 0, hull: 100, maxHull: 100, shield: 0, shieldMax: 0, wave: 1,
   lastDamageT: -99, railChargeT: 0, // shield-regen clock (6 s delay, Phase 3) + rail charge progress
   retries: 0, bossHp: 0, bossMax: 0, msg: 'WAVE 1 INCOMING',
@@ -4020,7 +4063,7 @@ function checkTier() {
 // sections are true 3D now) — nothing reads them anymore.
 let prevRoll = false, prevSecondary = false, prevCycle = false, prevRecall = false;
 let lastSecondaryPressT = -1; // Nova double-press window (Phase 3): two secondary presses within 0.4 s
-let prevMuteBtn = false, prevRestartBtn = false, stickHoldT = 0, stickHoldLatched = false; // pause/mute/restart edge state
+let prevMuteBtn = false, prevRestartBtn = false, prevPauseFire = false, stickHoldT = 0, stickHoldLatched = false; // pause/mute/restart edge state
 
 // ============================== weapons math (2.0, Phase 3 — pure) ==============================
 // Pure functions extracted by weapons-alignment-tests.js (markers below).
@@ -4376,7 +4419,7 @@ function syncProjectileInstances() {
 // object and steers toward the state's desired velocity.
 // COMBAT-AI-START
 const AI_TUNING = {
-  ACQUIRE_RANGE: 150, ATTACK_RANGE: 80, BREAK_RANGE: 220,
+  ACQUIRE_RANGE: 150, ATTACK_RANGE: 80, ATTACK_MIN_RANGE: 40, BREAK_RANGE: 220,
   PATROL_SPEED: 12, PURSUE_SPEED: 26, ATTACK_SPEED: 22, EVADE_SPEED: 34, BREAK_SPEED: 30, RAM_SPEED: 40,
   TURN_DRONE: 75 * Math.PI / 180, TURN_SHARD: 90 * Math.PI / 180, TURN_BOMBER: 60 * Math.PI / 180,
   ATTACK_TIME: 4, EVADE_TIME: 1.5, SLOW_TIME: 2, TAIL_TIME: 2,
@@ -4398,6 +4441,13 @@ function aiNextState(state, ctx) {
     case 'ATTACK':
       if (ctx.kind === 'bomber' && ctx.ramReady && ctx.dist < AI_TUNING.RAM_RANGE) return 'RAM';
       if (ctx.damaged || ctx.tailT > AI_TUNING.TAIL_TIME) return 'EVADE';
+      // D4: the firing run closes to 40–80 m (architecture §5) — inside
+      // 40 m the attacker breaks off and re-engages instead of flying
+      // into the player. Without this every undamaged attacker rammed
+      // (20 hull) within ~4 s, which read as "hull drains with no
+      // visible attacker" to a stationary player. Deliberate bomber
+      // RAMs (checked first) are unaffected.
+      if (ctx.dist < AI_TUNING.ATTACK_MIN_RANGE) return 'BREAK-OFF';
       if (ctx.timeInState > AI_TUNING.ATTACK_TIME || ctx.dist > AI_TUNING.ATTACK_RANGE * 1.6) return 'BREAK-OFF';
       return 'ATTACK';
     case 'EVADE':
@@ -5715,6 +5765,8 @@ function updateMissileWarning(dt) {
 function togglePause() {
   if (S.mode !== 'play') return;
   paused = !paused;
+  if (paused) pauseSel = 0; // the menu opens at the top (D5)
+  else pauseActivateQueued = false; // resuming drops a stale Enter queue
   if (!paused) hidePanel(); // resuming from the post-session-end panel
   drawPausePanel(); // refresh the settings display (selection + values)
   hudDirty = true;
@@ -5754,6 +5806,24 @@ function restartRun() {
   paused = false;
   beginGame();
 }
+// Quit to the mission picker from the pause menu (D5): the same run
+// teardown as restartRun, but back to the menu instead of a new run.
+// In VR this lands in the attract view — the picker is a DOM panel, so a
+// VR user exits VR to relaunch (the same as ending a VR session).
+function quitToPicker() {
+  if (S.mode !== 'play' || !paused) return;
+  clearAll();
+  S.fireCd = 0; S.rollT = 0; S.rollCd = 0; S.seekerCd = 0; S.railCd = 0;
+  S.spawnQueue = 0; S.spawnT = 0; S.shake = 0; S.msgT = 0;
+  resetFlight(); // flight state + ship + rig + trails (replaces the old px/py reset)
+  combatPulse = 0; bossFlash = 0;
+  perfValve.reset();
+  if (bannerEl) bannerEl.style.display = 'none'; // no stale banner over the menu
+  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  S.mode = 'menu';
+  paused = false;
+  showPanel();
+}
 
 // ============================== ENTER VR flow (proven pattern) ==============================
 const vrBtn = document.getElementById('vrBtn');
@@ -5781,6 +5851,8 @@ if (navigator.xr && navigator.xr.isSessionSupported) {
 }
 function beginGame() {
   if (S.mode === 'play') return;
+  // shield/shieldMax reset to 0: the shield layer is EARNED in play
+  // (Shield Cell pickup +50 max, Shield Boost) — see the S declaration.
   S.mode = 'play'; S.score = 0; S.hull = 100; S.maxHull = 100; S.shield = 0; S.shieldMax = 0; S.wave = 1;
   S.lastDamageT = -99; S.railChargeT = 0;
   S.retries = 0; S.bossHp = 0; S.tier = 0; S.bossCount = 0; S.eliteLvl = 0; S.stormLvl = 0; S.bomberLvl = 0;
@@ -6238,10 +6310,22 @@ function wireCockpitGLB() {
   const console = ck.getObjectByName('panel_console');
   const mount = ck.getObjectByName('holo_mount');
   if (!schematic || !radar || !weapons || !console || !mount) return; // incomplete asset — procedural stands
-  // Mount the live canvas textures on the GLB panels (UV 0..1, faces the
-  // camera — NO flip needed, verified against the procedural mapping;
-  // handoff risk 4 does not materialize). Position-preserving mapping:
-  // left→schematic, center→radar, right→weapons.
+  // The GLB panel meshes ship with their UV v-axis flipped (v=1 at the
+  // panel BOTTOM — measured on the raw vertices, Nov 16): canvas text
+  // read upside-down on the GLB panels while the procedural planes read
+  // correctly. Flip v on a CLONED geometry per panel (never mutate the
+  // shared cached asset — mesh.clone() shares geometry). The canvas
+  // textures themselves are untouched, so the procedural fallback keeps
+  // reading correctly. Position-preserving mapping: left→schematic,
+  // center→radar, right→weapons.
+  for (const m of [schematic, radar, weapons, console]) {
+    m.geometry = m.geometry.clone();
+    const uv = m.geometry.attributes.uv;
+    if (uv) {
+      for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+      uv.needsUpdate = true;
+    }
+  }
   schematic.material = new THREE.MeshBasicMaterial({ map: leftPanel.tex, toneMapped: false });
   radar.material = new THREE.MeshBasicMaterial({ map: centerPanel.tex, toneMapped: false });
   weapons.material = new THREE.MeshBasicMaterial({ map: rightPanel.tex, toneMapped: false });
@@ -6994,6 +7078,7 @@ function updateBlenderSystems(dt) {
 // ============================== main loop ==============================
 const clock = new THREE.Clock();
 let time = 0, perfHudT = 0, proxToneT = 0;
+let perfDomT = 0, perfDomEma = 0; // D6: DOM perf overlay cadence + frame-time EMA (menu included — perfValve only runs in play)
 const _waypointPos = new THREE.Vector3();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -7026,12 +7111,19 @@ function tick() {
       if (keys['ArrowRight']) navX = 1; else if (keys['ArrowLeft']) navX = -1;
     }
     if (navY !== 0 && pauseNavT <= 0) {
-      pauseSel = (pauseSel + (navY < 0 ? 1 : 3)) % 4; // push down = next row
+      pauseSel = (pauseSel + (navY < 0 ? 1 : 6)) % 7; // push down = next row (7 rows: 4 settings + 3 actions)
       pauseNavT = 0.3; drawPausePanel();
     } else if (navX !== 0 && pauseNavT <= 0) {
       pauseAdjust(navX > 0 ? 1 : -1);
       pauseNavT = 0.3;
     } else if (navY === 0 && navX === 0) pauseNavT = 0; // re-arm instantly on release
+    // Activate the selected action row (D5): Enter on desktop, right
+    // trigger (rising edge) in VR. pauseSel resets to 0 on pause, so a
+    // trigger held through the pause press only ever "activates" row 0
+    // (a setting — a no-op), never a stale QUIT selection.
+    if (pauseActivateQueued) { pauseActivateQueued = false; pauseActivate(); }
+    if (xr.fire && !prevPauseFire) pauseActivate();
+    prevPauseFire = xr.fire;
     beaconMat.opacity = 0.28 + Math.sin(time * 6) * 0.1;
     drawHUD(S);
   } else if (S.mode === 'play') {
@@ -7684,6 +7776,24 @@ function tick() {
   updateEnvDressing(dt); // Phase 4: starfield follow, glare, tumble, dressing
   updateBlenderSystems(dt); // Blender integration: wiring polls, LOD, turrets, flak, mixers, gates, audio bed
   renderer.render(scene, camera);
+
+  // D6: DOM perf overlay (?debug=perf) — the desktop verification
+  // instrument. The 3D HUD perf line is VR-only, so desktop had no
+  // readout at all. Updated at 2 Hz in every mode (menu included); the
+  // frame time is a local EMA because perfValve only runs in play.
+  // renderer.info.reset() runs at the START of render() (r160), so the
+  // count read here is the just-completed frame's.
+  if (perfDebug) {
+    perfDomEma = perfDomEma === 0 ? dt : perfDomEma * 0.9 + dt * 0.1;
+    perfDomT += dt;
+    if (perfDomT > 0.5) {
+      perfDomT = 0;
+      const calls = renderer.info && renderer.info.render ? renderer.info.render.calls : 0;
+      const perEye = renderer.xr.isPresenting ? ' ≈ ' + Math.round(calls / 2) + '/eye' : '';
+      perfEl.style.display = 'block';
+      perfEl.textContent = 'PERF ' + (perfDomEma * 1000).toFixed(1) + ' ms · ' + calls + ' calls' + perEye + ' · L' + perfValve.level + ' · ' + xrLayerSize();
+    }
+  }
 }
 renderer.setAnimationLoop(tick);
 
