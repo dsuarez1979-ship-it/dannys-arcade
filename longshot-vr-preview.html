@@ -589,6 +589,37 @@ const sunCore = new THREE.Mesh(
 sunCore.position.set(-160, 55, -599);
 scene.add(sunCore);
 
+// Environment map (Round 3, D-2): the PBR metals (rifle steel, plates)
+// had nothing to reflect — one PMREM pass at boot from a small
+// golden-hour env scene (sky gradient + sun disc + warm ground bounce),
+// assigned to scene.environment. One-time cost, no per-frame cost.
+// Metalness/roughness left as-is; if the metals blow out on the headset,
+// re-tune envMapIntensity per material.
+{
+  const envScene = new THREE.Scene();
+  envScene.add(new THREE.Mesh(
+    new THREE.SphereGeometry(50, 16, 12),
+    new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide })
+  ));
+  const envSun = new THREE.Mesh(
+    new THREE.CircleGeometry(7, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffe0a0 })
+  );
+  envSun.position.set(-16, 8, -45);
+  envSun.lookAt(0, 0, 0);
+  envScene.add(envSun);
+  const envGround = new THREE.Mesh(
+    new THREE.CircleGeometry(50, 16),
+    new THREE.MeshBasicMaterial({ color: 0x4a3a1e })
+  );
+  envGround.rotation.x = -Math.PI / 2;
+  envGround.position.y = -2;
+  envScene.add(envGround);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+  pmrem.dispose();
+}
+
 // Ground: dry-grass range floor with a procedural speckle texture, plus a
 // gravel firing-line strip under the bench. Static, cheap, standard material
 // so the warm sun still shades it.
@@ -641,6 +672,34 @@ const gravel = new THREE.Mesh(
 gravel.rotation.x = -Math.PI / 2; gravel.position.set(0, -1.58, -1.5);
 scene.add(gravel);
 
+// Blob shadows (Round 3, D-3): no real-time shadow maps (Bible §2), so
+// grounding comes from soft radial-gradient dark planes under the bench,
+// tripod, hero boulders, and one wide ellipse per plate-stand row. One
+// shared canvas texture + one shared geometry/material, 7 planes total,
+// static, no per-frame cost. Planes sit at y = -1.57, just above the
+// ground (-1.6) and the gravel strip (-1.58).
+function blobShadowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 4, 64, 64, 62);
+  grad.addColorStop(0, 'rgba(0,0,0,0.55)');
+  grad.addColorStop(0.6, 'rgba(0,0,0,0.28)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const blobTex = blobShadowTexture();
+const blobGeo = new THREE.PlaneGeometry(1, 1);
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, fog: false });
+function addBlobShadow(x, z, w, d) {
+  const m = new THREE.Mesh(blobGeo, blobMat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, -1.57, z);
+  m.scale.set(w, d, 1);
+  scene.add(m);
+  return m;
+}
+
 // Firing line: wooden bench + sandbags in front of the player.
 const benchMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.9 });
 const bench = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.12, 0.7), benchMat);
@@ -648,6 +707,7 @@ bench.position.set(0, -0.55, -1.4); scene.add(bench);
 const benchLegL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.6), benchMat);
 benchLegL.position.set(-1.0, -1.1, -1.4); scene.add(benchLegL);
 const benchLegR = benchLegL.clone(); benchLegR.position.x = 1.0; scene.add(benchLegR);
+addBlobShadow(0, -1.4, 3.0, 1.6); // bench grounding (D-3)
 function fabricTexture() {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
@@ -700,6 +760,7 @@ const _dummy = new THREE.Object3D();
   spotScope.position.set(tripodX, -0.12, tripodZ);
   scene.add(spotScope);
 }
+addBlobShadow(-1.8, -1.7, 1.6, 1.6); // tripod grounding (D-3)
 
 // Layered mountain ridges: jagged silhouette strips with procedural
 // rock/snow canvas textures and baked haze on the far ranges. All static,
@@ -774,6 +835,13 @@ makeRidge(1000, 0, -470, -1.6, 40, 110, midTex);
 makeRidge(900, 0, -380, -1.6, 25, 75, nearTex);
 makeRidge(420, -480, -330, -1.6, 20, 55, nearTex);
 makeRidge(420, 480, -340, -1.6, 20, 60, nearTex);
+// Round 3 (D-7): a second, hazier, TALLER layer behind each side ridge —
+// two ranges at different depths, so turning the head gives parallax
+// instead of a flat card. Same layering trick the forward view already
+// uses (far > mid > near heights). Headset look decides: if the second
+// layer reads worse than the single card, delete these two lines.
+makeRidge(420, -480, -375, -1.6, 30, 70, midTex);
+makeRidge(420, 480, -385, -1.6, 30, 72, midTex);
 
 // Berms + glowing distance markers at each lane.
 function dirtTexture() {
@@ -902,7 +970,7 @@ LANES.forEach(L => {
 // rejected (66k tris — not Quest 2-appropriate); the scanned TEXTURES on
 // ~80-tri rocks give the real-rock read at a fraction of the cost.
 // One InstancedMesh, 1 draw call.
-const rockMat = new THREE.MeshStandardMaterial({ color: 0x8a7f70, roughness: 1.0, metalness: 0.0 }); // metalness 0 until the ARM map arrives (a metalness-1 rock with no envmap renders black)
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x8a7f70, roughness: 1.0, metalness: 0.0 }); // metalness 0 until the ARM map arrives (the map carries the real metalness; the scene.environment map from D-2 means a bare metalness-1 rock would mirror the sky instead of rendering black)
 {
   const rockGeo = new THREE.IcosahedronGeometry(1, 1);
   const rp = rockGeo.attributes.position;
@@ -935,6 +1003,11 @@ const rockMat = new THREE.MeshStandardMaterial({ color: 0x8a7f70, roughness: 1.0
   rocks.instanceMatrix.needsUpdate = true;
   scene.add(rocks);
 }
+// Hero-boulder grounding (D-3): the two near boulders are the rocks the
+// player can walk up to, so they get their own blobs; the scattered rocks
+// are small and far enough to read without them.
+addBlobShadow(-4.5, -7, 4.8, 4.8);
+addBlobShadow(5.2, -9.5, 3.8, 3.8);
 
 // Treeline (Round 2): instanced pines along the ridge base + flanks — the
 // forested mountain slopes from the reference bar, at the distance where
@@ -1079,6 +1152,27 @@ let dustMotes = null;
 // normals, so the update is a position-buffer write only (3 flags × 36
 // verts). The dead empty `flagGroup` (flags were added to the scene, never
 // to the group) is removed.
+// Shared flag shading (Round 3, D-15): a subtle vertical gradient +
+// soft vertical fold bands, multiplied by each lane's flag color — the
+// flags read as cloth in the sun instead of flat rectangles. The material
+// stays MeshBasicMaterial (no normals to recompute on the per-frame
+// ripple — see updateFlagWave); only a map is added.
+function flagShadeTexture() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 64);
+  grad.addColorStop(0, '#ffffff'); grad.addColorStop(0.5, '#d8d8d8'); grad.addColorStop(1, '#9a9a9a');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 64);
+  for (let x = 8; x < 128; x += 16) {
+    const fg = g.createLinearGradient(x - 6, 0, x + 6, 0);
+    fg.addColorStop(0, 'rgba(255,255,255,0)');
+    fg.addColorStop(0.5, 'rgba(255,255,255,0.18)');
+    fg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = fg; g.fillRect(x - 6, 0, 12, 64);
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const flagShadeTex = flagShadeTexture();
 const flagPoles = [];
 const flagBase = [];
 LANES.forEach((L, i) => {
@@ -1090,7 +1184,7 @@ LANES.forEach((L, i) => {
   const flagGeo = new THREE.PlaneGeometry(2.4, 1.2, 8, 3);
   const flag = new THREE.Mesh(
     flagGeo,
-    new THREE.MeshBasicMaterial({ color: L.color, side: THREE.DoubleSide, fog: false })
+    new THREE.MeshBasicMaterial({ color: L.color, map: flagShadeTex, side: THREE.DoubleSide, fog: false })
   );
   flag.position.set(-24.7 + i * 4, 5.2, L.z + 8); scene.add(flag);
   flagPoles.push(flag);
@@ -1151,7 +1245,17 @@ let muzzleObj = null;
 // them on every weapon switch, so a late-arriving texture still applies).
 const rifleWood = { map: null, normalMap: null, roughnessMap: null };
 function buildRifle(w) {
-  while (rifleGroup.children.length) rifleGroup.remove(rifleGroup.children[0]);
+  // Round 3 (D-5): dispose the old rifle's geometries + materials before
+  // rebuilding — every weapon switch used to leak GPU memory (zero
+  // .dispose() calls in the file). Shared textures (grainTex, rifleWood
+  // maps) are NOT disposed: material.dispose() never touches textures,
+  // and the muzzle Object3D has no geometry/material to free.
+  while (rifleGroup.children.length) {
+    const old = rifleGroup.children[0];
+    rifleGroup.remove(old);
+    if (old.geometry) old.geometry.dispose();
+    if (old.material) old.material.dispose();
+  }
   const metal = new THREE.MeshStandardMaterial({ color: w.metal, roughness: 0.35, metalness: 0.85, bumpMap: grainTex, bumpScale: 0.0015 });
   const stock = new THREE.MeshStandardMaterial({
     color: w.stock, roughness: 1.0, metalness: 0.0,
@@ -1375,10 +1479,10 @@ const aimDot = new THREE.Mesh(
 aimDot.renderOrder = 899; scene.add(aimDot);
 
 // VR laser sight: a thin red beam from the right controller along the true
-// shot line. It matters because the rifle viewmodel is head-attached while
-// the shot comes from the hand — without the beam, the player aims with the
-// rifle they see and the bullet goes where the hand points. The beam removes
-// that guesswork. Unscoped VR only; hidden while scoped or on desktop.
+// shot line. The rifle is parented to the right controller's target-ray
+// space (Round 2), so the beam, the barrel, and the shot ray all agree;
+// the beam is the visible confirmation at range, where the rifle alone is
+// too small to judge. Unscoped VR only; hidden while scoped or on desktop.
 const laser = new THREE.Mesh(
   new THREE.CylinderGeometry(0.008, 0.008, 1, 6),
   new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.55, depthTest: false, fog: false })
@@ -1437,6 +1541,11 @@ function updatePerfReadout() {
   perfHudEl.textContent = text;
 }
 let hudDirty = true;
+// Round 3 (X-1): true while the right controller's input pose is lost
+// (its target-ray Group is invisible — r160 hides the Group when the pose
+// is null). Set/cleared on the transition in pollXR; drawHud() shows a
+// 'TRACKING LOST' tag on the in-VR HUD while it is set.
+let aimTrackingLost = false;
 const hudEl = document.getElementById('hud');
 function drawHud() {
   const w = WEAPONS[wpnIdx];
@@ -1444,7 +1553,7 @@ function drawHud() {
   const lines = [
     'SCORE ' + S.score + ' · HITS ' + S.hits,
     w.name,
-    'WIND ' + wind.mph.toFixed(0) + ' mph ' + windArrow + (muted ? ' · MUTED' : '')
+    'WIND ' + wind.mph.toFixed(0) + ' mph ' + windArrow + (muted ? ' · MUTED' : '') + (aimTrackingLost ? ' · TRACKING LOST' : '')
   ];
   hctx.clearRect(0, 0, 640, 288);
   hctx.fillStyle = 'rgba(8,4,2,0.72)'; hctx.fillRect(0, 0, 640, 288);
@@ -1484,6 +1593,23 @@ function startWindBed() {
     src.start();
   } catch (e) { /* wind bed is best-effort */ }
 }
+// Pre-built shot-noise buffers (Round 3, D-12): the crack + boom noise
+// used to be allocated fresh on every shot (two createBuffer calls and
+// ~13k random samples per trigger pull). Built once at audio init and
+// reused; a slight playbackRate jitter per shot keeps the crack from
+// sounding identical every time.
+let shotNoiseShort = null, shotNoiseLong = null;
+function buildShotNoiseBuffers() {
+  if (!actx || shotNoiseShort) return;
+  const mk = (dur) => {
+    const b = actx.createBuffer(1, Math.floor(actx.sampleRate * dur), actx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    return b;
+  };
+  shotNoiseShort = mk(0.08); // stage 1 crack
+  shotNoiseLong = mk(0.3); // stage 2 boom + echo tail
+}
 function startAudio() {
   if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
   try {
@@ -1491,6 +1617,7 @@ function startAudio() {
     masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.4;
     masterGain.connect(actx.destination);
     startWindBed();
+    buildShotNoiseBuffers();
   } catch (e) { /* audio unavailable — game still plays */ }
 }
 // Per-frame listener tracking: the AudioContext listener follows the
@@ -1532,23 +1659,22 @@ function blip(freqA, freqB, dur, type, vol, dest) {
 // mountain-range echo. No samples — pure WebAudio.
 function sfxShot(w) {
   if (!actx || muted) return;
+  if (!shotNoiseShort) buildShotNoiseBuffers();
   const t0 = actx.currentTime;
   const power = w.crack; // 0.5 Scout → 1.0 Thunder .50
   // Stage 1: sharp broadband crack (noise burst through a highpass).
-  const nb = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.08), actx.sampleRate);
-  const nd = nb.getChannelData(0);
-  for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / nd.length);
+  const nb = shotNoiseShort;
   const ns = actx.createBufferSource(); ns.buffer = nb;
+  ns.playbackRate.value = 0.92 + Math.random() * 0.16;
   const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1400;
   const ng = actx.createGain();
   ng.gain.setValueAtTime(0.55 + 0.45 * power, t0);
   ng.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
   ns.connect(hp); hp.connect(ng); ng.connect(masterGain); ns.start(t0);
   // Stage 2: deep boom body — lowpassed noise + a falling sine thump.
-  const lb = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.3), actx.sampleRate);
-  const ld = lb.getChannelData(0);
-  for (let i = 0; i < ld.length; i++) ld[i] = (Math.random() * 2 - 1) * (1 - i / ld.length);
+  const lb = shotNoiseLong;
   const ls = actx.createBufferSource(); ls.buffer = lb;
+  ls.playbackRate.value = 0.94 + Math.random() * 0.12;
   const lp = actx.createBiquadFilter(); lp.type = 'lowpass';
   lp.frequency.setValueAtTime(900 - 300 * power, t0);
   lp.frequency.exponentialRampToValueAtTime(120, t0 + 0.3);
@@ -1606,21 +1732,51 @@ function spatialBlip(freqA, freqB, dur, type, vol, pos, distM) {
   } catch (e) { blip(freqA, freqB, dur, type, vol * atten); }
 }
 const _pingPos = new THREE.Vector3();
+// Sound travels ~343 m/s — a 600-yd ping takes ~1.6 s to reach the
+// shooter. Impact sounds are delayed by the travel time (Round 3, D-9),
+// so a far hit sounds far away instead of instant.
+const SOUND_SPEED_MPS = 343;
+function soundDelayMs(distM) {
+  return (distM / SOUND_SPEED_MPS) * 1000;
+}
 function sfxPingAt(target) {
   target.group.getWorldPosition(_pingPos);
   const distM = camera.getWorldPosition(_lisPos).distanceTo(_pingPos);
-  spatialBlip(2400, 1900, 0.35, 'sine', 0.3, _pingPos, distM);
+  const delay = soundDelayMs(distM);
+  // Capture the hit position by value: _pingPos is shared scratch and
+  // the delayed callback fires up to ~1.6 s later.
+  const px = _pingPos.x, py = _pingPos.y, pz = _pingPos.z;
+  setTimeout(() => {
+    _pingPos.set(px, py, pz);
+    spatialBlip(2400, 1900, 0.35, 'sine', 0.3, _pingPos, distM);
+  }, delay);
   setTimeout(() => {
     if (muted) return;
-    target.group.getWorldPosition(_pingPos);
-    const d2 = camera.getWorldPosition(_lisPos).distanceTo(_pingPos);
-    spatialBlip(3100, 2600, 0.2, 'sine', 0.15, _pingPos, d2);
-  }, 40);
+    _pingPos.set(px, py, pz);
+    spatialBlip(3100, 2600, 0.2, 'sine', 0.15, _pingPos, distM);
+  }, delay + 40);
 }
 function sfxPopAt(target) {
   target.group.getWorldPosition(_pingPos);
   const distM = camera.getWorldPosition(_lisPos).distanceTo(_pingPos);
-  spatialBlip(900, 120, 0.15, 'triangle', 0.35, _pingPos, distM);
+  const delay = soundDelayMs(distM);
+  const px = _pingPos.x, py = _pingPos.y, pz = _pingPos.z;
+  setTimeout(() => {
+    _pingPos.set(px, py, pz);
+    spatialBlip(900, 120, 0.15, 'triangle', 0.35, _pingPos, distM);
+  }, delay);
+}
+// Soft thud for ground/berm strikes (Round 3, D-10): dust used to spawn
+// silently. Low-frequency, quiet, delayed by the same sound-travel time.
+// The position is captured by value — the caller's _dustPos is reused
+// for the muzzle smoke immediately after this call.
+function sfxThudAt(pos, distM) {
+  const delay = soundDelayMs(distM);
+  const px = pos.x, py = pos.y, pz = pos.z;
+  setTimeout(() => {
+    _pingPos.set(px, py, pz);
+    spatialBlip(140, 60, 0.18, 'sine', 0.25, _pingPos, distM);
+  }, delay);
 }
 // Distant bird chirps: sparse (every 12–30 s), quiet, randomly panned —
 // the range is outdoors and should sound like it. Driven from tick.
@@ -1697,8 +1853,8 @@ drawScopeFace(); // first paint — wind + WEAPONS both exist from here on
 
 // ============================== targets (pooled, endless) ==============================
 // Every target faces the player and lives at a fixed lane distance. On a hit
-// it flashes, loses HP, and when HP hits zero it drops (plates / pop-ups),
-// slides off (movers) or pops (balloons) — then respawns after a delay.
+// it flashes, loses HP, and when HP hits zero it tips over (plates /
+// movers / pop-ups) or pops (balloons) — then respawns after a delay.
 // Nothing here ever ends the game: the range just keeps serving targets.
 // Brushed-steel plate face (Round 2): radial brush arcs, scuffs from
 // past hits, a worn painted center circle, darkened rim. One canvas,
@@ -1737,6 +1893,22 @@ const plateTex = new THREE.CanvasTexture(plateCanvas); plateTex.colorSpace = THR
 const plateRoughTex = new THREE.CanvasTexture(plateCanvas); // linear: roughness data
 const steelMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: plateTex, roughnessMap: plateRoughTex, roughness: 1.0, metalness: 0.85 });
 const steelDark = new THREE.MeshStandardMaterial({ color: 0x5a636b, roughness: 0.5, metalness: 0.7 });
+// Shared balloon shading (Round 3, D-6): a soft radial highlight (upper
+// left) over a vertical falloff, multiplied by each balloon's lane color
+// — one grayscale texture for all five balloons. Balloons are now lit
+// MeshStandardMaterial (glossy, env-lit) instead of flat unlit color.
+function balloonShadeTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const vGrad = g.createLinearGradient(0, 0, 0, 128);
+  vGrad.addColorStop(0, '#ffffff'); vGrad.addColorStop(0.55, '#cfcfcf'); vGrad.addColorStop(1, '#8a8a8a');
+  g.fillStyle = vGrad; g.fillRect(0, 0, 128, 128);
+  const hl = g.createRadialGradient(44, 36, 4, 44, 36, 52);
+  hl.addColorStop(0, 'rgba(255,255,255,0.85)'); hl.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = hl; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const balloonShadeTex = balloonShadeTexture();
 function neonRing(radius, color) {
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(radius * 1.12, 0.06, 8, 32),
@@ -1760,9 +1932,9 @@ function addTarget(kind, x, y, z, r, hp, pts, laneColor) {
   let body;
   if (kind === 'balloon') {
     body = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 14),
-      new THREE.MeshBasicMaterial({ color: laneColor, fog: false }));
+      new THREE.MeshStandardMaterial({ color: laneColor, map: balloonShadeTex, roughness: 0.35, metalness: 0 }));
     const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4, 6),
-      new THREE.MeshBasicMaterial({ color: 0x222222, fog: false }));
+      new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 }));
     knot.position.y = -r - 0.2; group.add(knot);
   } else {
     body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.18, 28), steelMat);
@@ -1842,6 +2014,10 @@ for (let i = 0; i < 5; i++) {
   bars.instanceMatrix.needsUpdate = true;
   scene.add(bars);
 }
+// Blob shadows under each plate-stand row (Round 3, D-3): one wide soft
+// ellipse per lane grounds all 14 stands for 3 draw calls. Widths follow
+// the plate spread per lane (100 yd: ±16 m, 300 yd: ±20 m, 600 yd: ±22 m).
+LANES.forEach((L, i) => addBlobShadow(0, L.z + 0.35, [36, 44, 48][i], 3));
 function respawnTarget(t) {
   t.hp = t.maxHp; t.state = 'live'; t.timer = 0;
   t.group.visible = true; t.group.rotation.x = 0; t.group.rotation.z = 0;
@@ -2068,15 +2244,28 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => { if (e.key === 'Shift') scopeMouse = false; });
 
 const _rayO = new THREE.Vector3(), _rayD = new THREE.Vector3(), _ctrlPos = new THREE.Vector3(), _ctrlQuat = new THREE.Quaternion();
+// Round 3 (D-11): pollXR runs every frame — its result object + aim
+// vectors are module-scope scratch, reused instead of allocated per frame
+// (one fresh object + two Vector3 clones per frame before). Callers use
+// the result within the same frame only (tick caches it; tryFire and the
+// aim dot read it before the next poll), so reuse is safe.
+const _xrOut = { fire: false, scope: false, cycle: false, aim: null, cycleEdge: false, pauseClick: false, muteClick: false };
+const _xrAim = { o: new THREE.Vector3(), d: new THREE.Vector3() };
 function pollXR() {
-  const out = { fire: false, scope: false, cycle: false, aim: null, cycleEdge: false, pauseClick: false, muteClick: false };
+  const out = _xrOut;
+  out.fire = false; out.scope = false; out.cycle = false; out.aim = null;
+  out.cycleEdge = false; out.pauseClick = false; out.muteClick = false;
   if (!renderer.xr.isPresenting) return out;
   const session = renderer.xr.getSession();
   if (!session) return out;
-  // three.js maps getController(i) to inputSources[i] in order, so the
-  // controller object must be picked by the source's own index — a hardcoded
-  // index 1 silently reads the WRONG hand when the right controller is not
-  // second, which was one cause of the "aiming is off" reports.
+  // Round 3 (P-2): the aim pose comes from rightCtrlObj — the SAME
+  // handedness-tracked object the rifle is parented to (see the rifle
+  // section) — so the shot ray and the rifle can never diverge after a
+  // reconnect. Slots are assigned in connection order, so getController(si)
+  // is only a fallback for the brief window before the first 'connected'
+  // event has fired. (The old code read getController(si) unconditionally,
+  // assuming three's slot order == inputSources order — true in the normal
+  // flow, but an assumption the rifle path never made.)
   for (let si = 0; si < session.inputSources.length; si++) {
     const src = session.inputSources[si];
     const gp = src.gamepad;
@@ -2089,13 +2278,25 @@ function pollXR() {
     if (src.handedness === 'right') {
       if (trig > 0.5) out.fire = true;
       if (stickClick) out.pauseClick = true; // right stick click = pause
-      const ctrl = renderer.xr.getController(si);
+      const ctrl = rightCtrlObj || renderer.xr.getController(si);
+      // Round 3 (X-1): r160 hides the target-ray Group when its pose is
+      // null (tracking lost) while its matrix keeps the LAST GOOD value —
+      // a shot from that stale pose would go where the hand WAS. Gate the
+      // aim on visibility: with out.aim null, tryFire returns without
+      // firing and the aim dot/laser hide (tick). The HUD tag flips on the
+      // transition only. Scoped shots are head-aimed (camera ray) and are
+      // unaffected by this gate, by design.
       if (ctrl) {
+        const lost = !ctrl.visible;
+        if (lost !== aimTrackingLost) { aimTrackingLost = lost; hudDirty = true; }
+      }
+      if (ctrl && ctrl.visible) {
         ctrl.updateMatrixWorld();
         ctrl.getWorldPosition(_ctrlPos);
         ctrl.getWorldQuaternion(_ctrlQuat);
         _rayD.set(0, 0, -1).applyQuaternion(_ctrlQuat);
-        out.aim = { o: _ctrlPos.clone(), d: _rayD.clone() };
+        _xrAim.o.copy(_ctrlPos); _xrAim.d.copy(_rayD);
+        out.aim = _xrAim;
       }
     }
     if (src.handedness === 'left' && stickClick) out.muteClick = true; // left stick click = mute
@@ -2169,6 +2370,23 @@ function windDriftAt(distYd) {
   // reticle-on-target shot still hits — the drift is a nudge to compensate
   // for, not a second lottery.
   return wind.dir * wind.mph * 0.003 * (distYd / 100) * (distYd / 100);
+}
+// The range compresses real distance (100 yd at 60 m, 300 yd at 120 m,
+// 600 yd at 190 m). Convert a ray distance in metres to game yards by
+// piecewise-linear interpolation through the lane anchors, so miss
+// feedback (tracer/dust) carries the same drift a hit at that depth
+// would — no discontinuity at the plate planes. Beyond the far lane,
+// extend the last segment's slope. (Round 3, D-8.)
+function yardsAtDist(distM) {
+  let pD = 0, pYd = 0;
+  for (let i = 0; i < LANES.length; i++) {
+    const d = -LANES[i].z, yd = LANES[i].yd;
+    if (distM <= d) return pYd + (distM - pD) * (yd - pYd) / (d - pD);
+    pD = d; pYd = yd;
+  }
+  const d0 = -LANES[LANES.length - 2].z, y0 = LANES[LANES.length - 2].yd;
+  const d1 = -LANES[LANES.length - 1].z, y1 = LANES[LANES.length - 1].yd;
+  return y1 + (distM - d1) * (y1 - y0) / (d1 - d0);
 }
 function laneYdForZ(z) {
   let best = LANES[0], bd = 1e9;
@@ -2307,16 +2525,21 @@ function tryFire(xrOpt) {
     if (bestT.hp <= 0) onTargetDown(bestT);
     else { sfxPingAt(bestT); pulseHaptics('right', 0.6, 60); }
   } else {
-    // Miss: tracer runs out to the far berm line, carrying the same wind
-    // drift a real bullet would, so the tracer never lies about the shot.
-    _to.set(o.x + d.x * 200 + windDriftAt(600), Math.max(-1, o.y + d.y * 200), -200);
+    // Miss: tracer runs out to the far berm line, carrying the wind drift
+    // for the distance it actually travels (Round 3, D-8 — the old code
+    // hardcoded 600-yd drift at any distance), so the tracer never lies
+    // about the shot.
+    _to.set(o.x + d.x * 200 + windDriftAt(yardsAtDist(200)), Math.max(-1, o.y + d.y * 200), -200);
     // Dirt strike: if the shot line reaches the ground, dust marks where
-    // it landed — a miss still gets feedback.
+    // it landed — a miss still gets feedback. Drift is for the distance
+    // to the impact point, not the far lane; the strike also gets a soft
+    // thud (D-10), delayed by the sound-travel time.
     if (d.y < -0.001) {
       const tg = (-1.6 - o.y) / d.y;
       if (tg > 0 && tg < 250) {
-        _dustPos.set(o.x + d.x * tg + windDriftAt(600), -1.4, o.z + d.z * tg);
+        _dustPos.set(o.x + d.x * tg + windDriftAt(yardsAtDist(tg)), -1.4, o.z + d.z * tg);
         spawnDust(_dustPos, 2);
+        sfxThudAt(_dustPos, tg);
       }
     }
   }

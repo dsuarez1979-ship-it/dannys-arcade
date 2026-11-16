@@ -625,7 +625,40 @@ const BLADE_BASE_Z = -0.07; // blade starts here (local z); tip at -1.07
 // Shared handle materials (PBR standard materials, lit by the scene lights).
 const gripMat = new THREE.MeshStandardMaterial({ color: 0x2a2d34, metalness: 0.9, roughness: 0.35 });
 const gripDarkMat = new THREE.MeshStandardMaterial({ color: 0x14151c, metalness: 0.85, roughness: 0.45 });
-const bladeCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+// L2 (Round 3): blade energy gradient — a canvas gradient along the blade
+// length, hot white at the emitter fading to the blade color at the tip.
+// CylinderGeometry v=1 is the +Y end, rotation.x = π/2 points +Y toward +Z
+// (the emitter), and CanvasTexture flipY puts the canvas top at v=1 — so the
+// canvas gradient runs white (top = emitter) → color (bottom = tip). Same
+// geometry, same draw calls, same silhouette.
+function makeBladeGradientTexture(colorHex) {
+  const cv = document.createElement('canvas'); cv.width = 4; cv.height = 64;
+  const g = cv.getContext('2d');
+  const col = '#' + new THREE.Color(colorHex).getHexString();
+  const gr = g.createLinearGradient(0, 0, 0, 64);
+  gr.addColorStop(0, '#ffffff');
+  gr.addColorStop(0.3, '#ffffff');
+  gr.addColorStop(0.65, col);
+  gr.addColorStop(1, col);
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 64);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+// L4 (Round 3): blade shell falloff — a soft alpha gradient along the shell
+// so its ends fade instead of ending at a hard cylinder rim. Shared by both
+// blades (it carries no color).
+const shellFalloffTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = 4; cv.height = 64;
+  const g = cv.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 64);
+  gr.addColorStop(0, '#000000');
+  gr.addColorStop(0.2, '#ffffff');
+  gr.addColorStop(0.8, '#ffffff');
+  gr.addColorStop(1, '#000000');
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 64);
+  return new THREE.CanvasTexture(cv);
+})();
 function buildBlade(color) {
   const g = new THREE.Group();
   // --- Handle: metallic grip + band + pommel + glowing emitter ring ---
@@ -640,13 +673,15 @@ function buildBlade(color) {
   emitter.position.z = BLADE_BASE_Z; g.add(emitter);
   // --- Blade: layered cylinders, center at base - LEN/2 ---
   const midZ = BLADE_BASE_Z - BLADE_LEN / 2;
-  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, BLADE_LEN, 10), bladeCoreMat);
+  const gradTex = makeBladeGradientTexture(color); // L2: white-hot emitter → blade color at tip
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, BLADE_LEN, 10),
+    new THREE.MeshBasicMaterial({ map: gradTex, toneMapped: false }));
   core.rotation.x = Math.PI / 2; core.position.z = midZ; g.add(core);
   const mid = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, BLADE_LEN, 12),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ map: gradTex, transparent: true, opacity: 0.85, toneMapped: false }));
   mid.rotation.x = Math.PI / 2; mid.position.z = midZ; g.add(mid);
   const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, BLADE_LEN, 12),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color, alphaMap: shellFalloffTex, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
   shell.rotation.x = Math.PI / 2; shell.position.z = midZ; g.add(shell);
   // Rounded tip cap (hemisphere, dome toward -Z).
   const cap = new THREE.Mesh(new THREE.SphereGeometry(0.021, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
@@ -696,6 +731,17 @@ const baseCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: 
 // path was the inconsistent one.
 const bladeVel = { left: new THREE.Vector3(), right: new THREE.Vector3() };
 const bladeInit = { left: false, right: false };
+// Round 3 (X-1): per-hand tracking-loss latch. r160 hides the target-ray
+// Group when its input pose is null (tracking lost) while its matrix keeps
+// the LAST GOOD value — slicing from it would score stale-pose slices, and
+// the pose jump on recovery would read as a supersonic swing. While a hand
+// is lost, the tick holds its bladeInit false AFTER trackBlade runs (order
+// matters: trackBlade's init branch sets the flag true, so a hold placed
+// BEFORE the call would be undone in the same frame and the recovery frame
+// would read the full jump — caught by round3-controller-tests.js), so the
+// first live frame re-zeroes the velocity; the latch also fires the
+// one-time in-VR notice (see tick) instead of spamming it every frame.
+const trackLost = { left: false, right: false };
 const _midPrev = new THREE.Vector3(), _midCur = new THREE.Vector3();
 function trackBlade(key, dt) {
   _midPrev.copy(basePrev[key]).add(tipPrev[key]).multiplyScalar(0.5);
@@ -1196,6 +1242,10 @@ let settingsFrom = 'menu';
 function pauseGame() {
   if (!levelActive || screen !== 'playing') return;
   screen = 'paused';
+  // R3: seed the pause edge from live state — a B/Y held when the pause
+  // menu appears (e.g. auto-pause on session exit) must not instantly
+  // resume on the first poll after re-entry.
+  prevPauseBtn = vrButtonPressed(5);
   if (audioSys.ctx) audioSys.ctx.suspend();
   hideApproachMarkers();
   menuPlane.visible = true;
@@ -1273,6 +1323,7 @@ const DIR_NAMES = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
 const audioSys = {
   ctx: null, master: null, musicBus: null, sfxBus: null, noiseBuf: null, muted: prefs.muted,
   running: false, baseTime: 0, stepDur: 0, nextStep: 0, stepIdx: 0, totalSteps: 0, lv: null,
+  kickTimes: [], // R1: kick times queued at schedule time; the tick fires the beat pulse when audioSys.now crosses them
   ensure() {
     if (this.ctx) return;
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -1348,7 +1399,7 @@ const audioSys = {
   },
   scheduleStep(idx, t) {
     const lv = this.lv, s = idx % 16;
-    if (lv.kick[s]) { this.kick(t); beatPulse = 1; }
+    if (lv.kick[s]) { this.kick(t); this.kickTimes.push(t); } // R1: queue the kick time — the tick fires the visual pulse when the kick SOUNDS, not when it is scheduled (up to 0.25 s early)
     if (lv.snare[s]) this.snare(t);
     if (lv.hat[s]) this.hat(t, s % 4 === 0);
     if (lv.bass[s] >= 0) this.bass(t, this.semi(lv.root, lv.bass[s]));
@@ -1367,9 +1418,10 @@ const audioSys = {
     this.baseTime = this.ctx.currentTime + 0.6;
     this.nextStep = this.baseTime;
     this.stepIdx = 0;
+    this.kickTimes.length = 0; // R1: no stale kicks from a previous level
     this.running = true;
   },
-  stop() { this.running = false; },
+  stop() { this.running = false; this.kickTimes.length = 0; },
   tick() {
     if (!this.running || !this.ctx) return;
     const ahead = this.ctx.currentTime + 0.25;
@@ -1383,14 +1435,54 @@ const audioSys = {
   get now() { return this.ctx ? this.ctx.currentTime : 0; },
   get endTime() { return this.baseTime + this.totalSteps * this.stepDur; },
 };
+// R1 (Round 3): beat-pulse firing, driven by the AUDIO CLOCK. scheduleStep
+// runs up to 0.25 s ahead of the audible kick (the scheduler's lookahead),
+// so a pulse set there peaked before the kick landed and had decayed to
+// ~0.58 by the time it sounded. Kicks are queued at schedule time
+// (kickTimes) and fire HERE, when audioSys.now crosses them — the 0.25 s
+// audio lookahead is unchanged; only the VISUAL pulse moved to the audible
+// beat. Kicks already past (e.g. after a hitch) fire immediately instead of
+// piling up. While paused the AudioContext is suspended, so now is frozen
+// and no kick can cross mid-pause.
+function fireDueBeatPulses() {
+  if (!audioSys.ctx) return;
+  const now = audioSys.now;
+  const q = audioSys.kickTimes;
+  while (q.length && q[0] <= now) { q.shift(); beatPulse = 1; }
+}
 // One-shot SFX (all synthesized)
-function sfxSlice(comboN, x = 0) {
+// R7 (Round 3): pooled HRTF panners for one-shot impacts + whooshes — the
+// same HRTF pattern as the blade hums (createPanner, HRTF, inverse), so
+// slices localize in 3D (left/right + height + distance) instead of stereo
+// L/R only. 3 reusable nodes, round-robin: a new impact re-points the
+// oldest panner, so a fast double-slice never snaps a still-ringing impact
+// to a new position. refDistance 1.2 m (not the hums' 0.5 m) keeps the
+// impact mix level at the typical slice distance (~1.1–1.4 m from the
+// listener); the hums' 0.5 m would attenuate impacts ~3x.
+const sfxPanners = [];
+let sfxPanHead = 0;
+function sfxPannerAt(x, y, z) {
+  const c = audioSys.ctx;
+  if (!c || typeof c.createPanner !== 'function') return null;
+  while (sfxPanners.length < 3) {
+    const pan = c.createPanner();
+    pan.panningModel = 'HRTF'; pan.distanceModel = 'inverse';
+    pan.refDistance = 1.2; pan.maxDistance = 8; pan.rolloffFactor = 1;
+    pan.connect(audioSys.sfxBus);
+    sfxPanners.push(pan);
+  }
+  const pan = sfxPanners[sfxPanHead];
+  sfxPanHead = (sfxPanHead + 1) % sfxPanners.length;
+  if (pan.positionX) { pan.positionX.value = x; pan.positionY.value = y; pan.positionZ.value = z; }
+  else pan.setPosition(x, y, z);
+  return pan;
+}
+function sfxSlice(comboN, x = 0, y = 1.3, z = HIT_Z) {
   if (!audioSys.ctx || audioSys.muted) return;
   const t = audioSys.now, c = audioSys.ctx;
-  // Stereo pan by slice position so the impact sits where the cube was.
-  const pan = c.createStereoPanner ? c.createStereoPanner() : null;
-  if (pan) { pan.pan.value = clamp(x / 1.2, -1, 1); pan.connect(audioSys.sfxBus); }
-  const out = pan || audioSys.sfxBus;
+  // R7: HRTF impact at the slice point (falls back to the dry bus if the
+  // browser has no PannerNode).
+  const out = sfxPannerAt(x, y, z) || audioSys.sfxBus;
   const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
   const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 1.2;
   const g = c.createGain();
@@ -1515,10 +1607,10 @@ function maybeWhoosh(key) {
   const g = c.createGain();
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
-  const pan = c.createStereoPanner ? c.createStereoPanner() : null;
   n.connect(f); f.connect(g);
-  if (pan) { pan.pan.value = clamp(tipCur[key].x / 1.2, -1, 1); g.connect(pan); pan.connect(audioSys.sfxBus); }
-  else g.connect(audioSys.sfxBus);
+  // R7: HRTF whoosh at the blade midpoint (the same point the hums use).
+  _midCur.copy(baseCur[key]).add(tipCur[key]).multiplyScalar(0.5);
+  g.connect(sfxPannerAt(_midCur.x, _midCur.y, _midCur.z) || audioSys.sfxBus);
   n.start(t); n.stop(t + 0.24);
 }
 // Keep the Web Audio listener on the headset (position + orientation) so the
@@ -1656,6 +1748,45 @@ for (let i = 0; i < 8; i++) {
   grp.visible = false; scene.add(grp);
   bombs.push({ grp, ring, active: false, x: 0, y: 0, z: 0, vz: 0, judged: false, spin: 0, hitTime: 0 });
 }
+// L1 (Round 3): procedural environment map for the PBR metals. The grips
+// (metalness 0.9) and bomb shells (metalness 0.9) had NO envMap, so in a
+// 3-light scene they read near-black instead of metal. One small PMREM
+// envMap, generated once at boot from a canvas equirect of the arena's own
+// neon (blue/red stage lights, purple sky, dark floor) — no external
+// assets, no new lights. Notes get a low envMapIntensity so the neon look
+// is not washed out. Assigned before the first render, so no needsUpdate.
+function makeArenaEnvMap() {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const g = cv.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, 128);
+  sky.addColorStop(0, '#0a1030'); sky.addColorStop(0.45, '#2a0f4a');
+  sky.addColorStop(0.55, '#12062e'); sky.addColorStop(1, '#05021a');
+  g.fillStyle = sky; g.fillRect(0, 0, 256, 128);
+  // Neon blobs where the stage lights sit: blue left, red right, amber
+  // center-low, cool skylight above.
+  const blob = (x, y, r, color) => {
+    const gr = g.createRadialGradient(x, y, 2, x, y, r);
+    gr.addColorStop(0, color); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  };
+  blob(48, 52, 42, 'rgba(47,127,255,0.95)');
+  blob(208, 52, 42, 'rgba(255,43,43,0.95)');
+  blob(128, 84, 30, 'rgba(255,170,0,0.7)');
+  blob(128, 20, 36, 'rgba(143,184,255,0.5)');
+  const tex = new THREE.CanvasTexture(cv);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envRT = pmrem.fromEquirectangular(tex);
+  tex.dispose(); pmrem.dispose();
+  return envRT.texture;
+}
+const arenaEnvMap = makeArenaEnvMap();
+gripMat.envMap = arenaEnvMap; gripMat.envMapIntensity = 1.0;
+gripDarkMat.envMap = arenaEnvMap; gripDarkMat.envMapIntensity = 0.8;
+bombMat.envMap = arenaEnvMap; bombMat.envMapIntensity = 0.8;
+noteMats.left.envMap = arenaEnvMap; noteMats.left.envMapIntensity = 0.35;
+noteMats.right.envMap = arenaEnvMap; noteMats.right.envMapIntensity = 0.35;
 // Particles (slice bursts): pooled additive sprites
 const PMAX = 96;
 const pGeo = new THREE.BufferGeometry();
@@ -1749,10 +1880,12 @@ const flashEl = document.getElementById('flash');
 const flashQuad = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6),
   new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
 flashQuad.position.set(0, 0, -1.2);
+flashQuad.visible = false; // R8: never render the quad at opacity 0 (1 wasted draw/eye)
 camera.add(flashQuad);
 let flashAmt = 0;
 function doFlash(a) {
   flashAmt = Math.max(flashAmt, a);
+  if (a > 0) flashQuad.visible = true;
   flashEl.style.opacity = String(clamp(a, 0, 0.9));
 }
 
@@ -1902,7 +2035,12 @@ function buildChart(lv, di, baseTime, speed = 1) {
   const diff = DIFFS[di];
   const rng = mulberry32(1234 + (selLevel + 1) * 77 + (di + 1) * 13);
   const beat = 60 / lv.bpm / speed;
-  const nBeats = Math.floor(lv.dur / (60 / lv.bpm)) - 1;
+  // R5: the chart is shifted one bar later (see the +4*beat offset below),
+  // so it also ENDS one bar earlier — same length, same musical span, no
+  // notes landing after the results tail. (Without this, the shift pushed
+  // the last WARMUP note ~0.5 s past endTime + 1.6 at practice speed, so it
+  // would never spawn — caught by the P0-fix test suite.)
+  const nBeats = Math.floor(lv.dur / (60 / lv.bpm)) - 1 - 4;
   // Alternating color/position patterns (2026-11-15, owner directive):
   // the two cube colors ALTERNATE sides — color tells the HAND, not the
   // side. A blue cube can come down a right lane (left hand crosses over)
@@ -1950,7 +2088,14 @@ function buildChart(lv, di, baseTime, speed = 1) {
     }
     const usedLanes = [];
     for (const off of slots) {
-      const T = baseTime + (b + off) * beat;
+      // R5: chart offset by one bar — the first event used to sit at beat 0,
+      // and baseTime is only 0.6 s after level start (shorter than any travel
+      // time), so the first note spawned mid-runway at near-full scale. One
+      // bar (4 beats = one full 16-step pattern) preserves musical alignment
+      // and gives the first note the full runway; nBeats is reduced by the
+      // same bar, so the chart ends where it used to — a count-in bar, then
+      // the same notes, then a quiet outro bar, no notes past the music.
+      const T = baseTime + 4 * beat + (b + off) * beat;
       const isBomb = rng() < diff.bombRate;
       if (isBomb) {
         let lane = Math.floor(rng() * 4);
@@ -2081,7 +2226,7 @@ function resolveNoteSlice(n, hand, dirIdx) {
   burst(n.x, n.y, n.z, n.hand === 'left' ? COL_BLUE : COL_RED, Math.max(2, Math.round((perfect ? 18 : 12) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
   ringFlash(n.x, n.y, n.z, n.hand === 'left' ? COL_BLUE : COL_RED);
   spawnHalves(n.x, n.y, n.z, n.hand, dirIdx);
-  if (perfect) sfxPerfect(); else sfxSlice(combo, n.x);
+  if (perfect) sfxPerfect(); else sfxSlice(combo, n.x, n.y, n.z); // R7: slice point for the HRTF impact
   // Haptics on EVERY successful slice (Danny, 2026-11-15): a firm buzz the
   // player can always feel, not a light tap.
   if (hand === 'left' || hand === 'right') pulseHaptics(hand, perfect ? 0.9 : 0.8, perfect ? 90 : 80);
@@ -2305,12 +2450,32 @@ window.addEventListener('keydown', e => {
 // ============================== VR session menu interaction ==============================
 let prevTrigger = false;
 const _aimO = new THREE.Vector3(), _aimD = new THREE.Vector3(), _aimQ = new THREE.Quaternion();
+// Live gamepad button state (any input source) — the edge detectors are
+// SEEDED from this instead of assuming "released" (R3).
+function vrButtonPressed(idx) {
+  const session = renderer.xr.getSession();
+  if (!session) return false;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (gp && gp.buttons && gp.buttons[idx] && gp.buttons[idx].pressed) return true;
+  }
+  return false;
+}
 function pollMenuInput() {
   if (!renderer.xr.isPresenting || (screen !== 'menu' && screen !== 'results' && screen !== 'paused' && screen !== 'settings')) {
-    laser.visible = false; prevTrigger = false; return;
+    laser.visible = false;
+    // R3: seed from LIVE state — a trigger already held when a menu appears
+    // must not read as a fresh edge on the first menu frame.
+    prevTrigger = vrButtonPressed(0);
+    return;
   }
-  const aimCtl = rightCtl || leftCtl;
-  if (!aimCtl) { laser.visible = false; return; }
+  // R4 (X-1 pattern): aim only from a controller whose pose is live. If the
+  // preferred hand lost tracking, the other hand still aims the menu; if
+  // both are lost, hide the laser and skip the tap — never aim from a stale
+  // pose. (Seeds prevTrigger too, so a trigger held through the loss does
+  // not tap on recovery.)
+  const aimCtl = (rightCtl && rightCtl.visible) ? rightCtl : (leftCtl && leftCtl.visible) ? leftCtl : null;
+  if (!aimCtl) { laser.visible = false; prevTrigger = vrButtonPressed(0); return; }
   aimCtl.getWorldQuaternion(_aimQ);
   _aimO.setFromMatrixPosition(aimCtl.matrixWorld);
   _aimD.set(0, 0, -1).applyQuaternion(_aimQ);
@@ -2320,14 +2485,7 @@ function pollMenuInput() {
   laserGeo.attributes.position.needsUpdate = true;
   laser.visible = true;
   // Trigger edge -> menu tap
-  let pressed = false;
-  const session = renderer.xr.getSession();
-  if (session) {
-    for (const src of session.inputSources) {
-      const gp = src.gamepad;
-      if (gp && gp.buttons && gp.buttons[0] && gp.buttons[0].pressed) { pressed = true; break; }
-    }
-  }
+  const pressed = vrButtonPressed(0);
   if (pressed && !prevTrigger) menuTapFromRay(_aimO, _aimD);
   prevTrigger = pressed;
 }
@@ -2335,14 +2493,7 @@ function pollMenuInput() {
 // or paused. A/X (buttons[4]) is left untouched.
 let prevPauseBtn = false;
 function pollPauseButton() {
-  let pressed = false;
-  const session = renderer.xr.getSession();
-  if (session) {
-    for (const src of session.inputSources) {
-      const gp = src.gamepad;
-      if (gp && gp.buttons && gp.buttons[5] && gp.buttons[5].pressed) { pressed = true; break; }
-    }
-  }
+  const pressed = vrButtonPressed(5);
   if (pressed && !prevPauseBtn) {
     if (screen === 'playing') pauseGame();
     else if (screen === 'paused') resumeGame();
@@ -2387,6 +2538,7 @@ vrBtn.addEventListener('click', async () => {
     menuPlane.visible = true;
     perfValve.reset();
     bladeInit.left = false; bladeInit.right = false; // stale blade history would fake a velocity spike
+    prevTrigger = vrButtonPressed(0); prevPauseBtn = vrButtonPressed(5); // R3: seed the menu/pause edges from live state on session start
     // Re-entering after an auto-pause restores the pause menu, not the menu.
     if (screen === 'paused') { drawPause(); }
     else { screen = 'menu'; drawMenu(); audioSys.resume(); }
@@ -2400,6 +2552,7 @@ vrBtn.addEventListener('click', async () => {
       menuPlane.visible = true;
       perfValve.reset();
       bladeInit.left = false; bladeInit.right = false; // stale blade history would fake a velocity spike
+      prevTrigger = vrButtonPressed(0); prevPauseBtn = vrButtonPressed(5); // R3: seed the menu/pause edges from live state on session start
       if (screen === 'paused') { drawPause(); }
       else { screen = 'menu'; drawMenu(); audioSys.resume(); }
       session.addEventListener('end', () => { perfSessionFlush(); if (levelActive && screen === 'playing') pauseGame(); showPanel(); vrBtn.disabled = false; });
@@ -2440,7 +2593,10 @@ function tick() {
   // (background-tab return, OS hitch) are ignored as unrepresentative.
   if (perfWarmup > 0) perfWarmup -= dt;
   else if (screen === 'playing' && rawDt < 0.1) { perfValve.update(dt); perfSessionTick(dt); }
-  if (!frozen) beatPulse = Math.max(0, beatPulse - dt * 2.2);
+  if (!frozen) {
+    beatPulse = Math.max(0, beatPulse - dt * 2.2);
+    fireDueBeatPulses(); // R1: pulse on the audio clock, not the scheduler
+  }
 
   // V2: zero the rig height offset in VR (local-floor already reports true
   // head height); ride the strike zone on the smoothed live head Y.
@@ -2472,6 +2628,19 @@ function tick() {
       tipPrev.left.copy(tipCur.left); controllerTip(leftCtl, tipCur.left);
       basePrev.left.copy(baseCur.left); controllerBase(leftCtl, baseCur.left);
       trackBlade('left', dt);
+      // Round 3 (X-1): when the pose is null the target-ray Group goes
+      // invisible but its matrix freezes at the last good pose. Hold
+      // bladeInit false AFTER trackBlade ran — the flag must still be
+      // false on the recovery frame, so trackBlade's init branch zeroes
+      // the velocity instead of reading the pose jump as a supersonic
+      // swing (same class of bug resyncDeskBlade fixes for desktop); zero
+      // this frame's velocity outright too. The loss notice fires once
+      // per loss (latched), not every frame.
+      if (!leftCtl.visible) {
+        bladeInit.left = false;
+        bladeVel.left.set(0, 0, 0);
+        if (!trackLost.left) { trackLost.left = true; if (screen === 'playing') floatText('LEFT — TRACKING LOST', '#ffaa00', -0.6, 1.7, HIT_Z); }
+      } else trackLost.left = false;
       pushVrTrail(vrTrailL, baseCur.left, tipCur.left);
       vrTrailL.material.opacity = 0.9 * Math.min(1, vrBladeSpeed('left') / 1.5);
     }
@@ -2479,6 +2648,12 @@ function tick() {
       tipPrev.right.copy(tipCur.right); controllerTip(rightCtl, tipCur.right);
       basePrev.right.copy(baseCur.right); controllerBase(rightCtl, baseCur.right);
       trackBlade('right', dt);
+      // Round 3 (X-1): same hold as the left hand (see the comment above).
+      if (!rightCtl.visible) {
+        bladeInit.right = false;
+        bladeVel.right.set(0, 0, 0);
+        if (!trackLost.right) { trackLost.right = true; if (screen === 'playing') floatText('RIGHT — TRACKING LOST', '#ffaa00', 0.6, 1.7, HIT_Z); }
+      } else trackLost.right = false;
       pushVrTrail(vrTrailR, baseCur.right, tipCur.right);
       vrTrailR.material.opacity = 0.9 * Math.min(1, vrBladeSpeed('right') / 1.5);
     }
@@ -2488,8 +2663,13 @@ function tick() {
       // Single-hand mode: either blade slices any color.
       const handL = prefs.singleHand ? 'both' : 'left';
       const handR = prefs.singleHand ? 'both' : 'right';
-      if (leftCtl) trySlice('left', handL, dt);
-      if (rightCtl) trySlice('right', handR, dt);
+      // Round 3 (X-1): a hand slices only while its pose is live — the
+      // blade is hidden while tracking is lost (it is a child of the
+      // invisible target-ray Group), so a stale-pose slice would score a
+      // hit the player cannot see. The bladeInit hold above also makes
+      // the recovery frame safe (velocity re-zeroed, no phantom swing).
+      if (leftCtl && leftCtl.visible) trySlice('left', handL, dt);
+      if (rightCtl && rightCtl.visible) trySlice('right', handR, dt);
     }
     updateAudioListener();
     updateBladeHums();
@@ -2531,6 +2711,7 @@ function tick() {
       chartIdx++;
     }
     // Move notes/bombs; misses break combo (never end the run)
+    let minTLeft = Infinity; // L3: time until the nearest active note arrives
     for (const n of notes) {
       if (!n.active) continue;
       // Audio-clock positioning: depth comes from the music clock, so a
@@ -2538,11 +2719,12 @@ function tick() {
       // (which suspends the audio clock) freezes notes exactly in place.
       n.z = HIT_Z - (n.hitTime - now) * n.vz;
       n.grp.position.z = n.z;
+      if (!n.judged) { const tl = n.hitTime - now; if (tl < minTLeft) minTLeft = tl; } // L3
       n.nglow.visible = perfValve.glowsOn;
       const pop = clamp((n.z - SPAWN_Z) / 2, 0, 1);
       const s = 0.6 + 0.4 * pop;
       n.grp.scale.set(s, s, s);
-      if (n.z >= HIT_Z + 0.65) {
+      if (n.z >= HIT_Z + zoneZ() + 0.05) { // R6: MISS boundary from the active zone, not a fixed 0.65 — lenient promises ±0.85 m, so its late window is now 0.90 m
         n.active = false; n.grp.visible = false;
         combo = 0; applyMult();
         dbgMiss++; // TEMPORARY diagnostic counter
@@ -2561,9 +2743,22 @@ function tick() {
       b.ring.scale.set(pulse, pulse, 1);
       if (b.z >= HIT_Z + 0.45) { b.active = false; b.grp.visible = false; }
     }
+    // L3: note emissive approach pulse — the shared note materials brighten
+    // (0.55 → 0.9) as the nearest active note approaches the hit plane, so
+    // notes brighten as they arrive. Tuning only: a few float writes per
+    // frame, driven by the same hitTime - now the approach markers use.
+    const approachK = minTLeft === Infinity ? 0 : 1 - clamp(Math.max(0, minTLeft) / 1.2, 0, 1);
+    const noteEI = 0.55 + 0.35 * approachK;
+    noteMats.left.emissiveIntensity = noteEI;
+    noteMats.right.emissiveIntensity = noteEI;
     updateApproachMarkers(now);
     // Track end -> results (no fail state ever)
     if (now > audioSys.endTime + 1.6) endLevel();
+  } else if (!levelActive) {
+    // L3: no level running — notes are invisible, but keep the shared
+    // materials at their resting emissive (a paused run holds its pulse).
+    noteMats.left.emissiveIntensity = 0.55;
+    noteMats.right.emissiveIntensity = 0.55;
   }
 
   // Particles (frozen while paused: sdt = 0 holds everything in place)
@@ -2600,6 +2795,7 @@ function tick() {
     flashAmt = Math.max(0, flashAmt - sdt * 2.4);
     flashEl.style.opacity = String(clamp(flashAmt, 0, 0.9));
     flashQuad.material.opacity = clamp(flashAmt, 0, 0.85);
+    flashQuad.visible = flashAmt > 0; // R8: hide the quad once the flash has decayed
   }
 
   // Scoreboard: VR cell while presenting, DOM cell on desktop

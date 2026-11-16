@@ -761,7 +761,13 @@ function assignElites() {
     pick.elite = true; pick.hp = 2; pick.points = pick.def.points * 2;
   }
 }
-let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnMuted = false;
+let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnMuted = false, drawnTrackingLost = false;
+// Round 3 (X-1): true while either connected hand's input pose is lost
+// (its target-ray Group is invisible — r160 hides the Group when the pose
+// is null). Declared HERE, not with the input section: drawScorePanel()
+// runs once at module load (below), so anything it reads must already
+// exist — same TDZ reason the `muted` flag lives here.
+let trackingLost = false;
 // Mute flag lives here (not in the audio section) because drawScorePanel()
 // runs once at module load, before the audio section executes — declaring
 // `muted` later would throw a TDZ ReferenceError on that first draw.
@@ -802,8 +808,8 @@ function drawScorePanel() {
   // extra stat the game already tracks). No new scoring, no scoring-logic
   // change: tier/SURGE/gear info still arrives via announcements and pickup
   // labels, exactly as before. Same numbers go to both forms of the cell.
-  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && muted === drawnMuted) return;
-  drawnScore = score; drawnWave = wave; drawnLost = shipsLost; drawnMuted = muted;
+  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && muted === drawnMuted && trackingLost === drawnTrackingLost) return;
+  drawnScore = score; drawnWave = wave; drawnLost = shipsLost; drawnMuted = muted; drawnTrackingLost = trackingLost;
   const g = scorePanel.ctx, W2 = scorePanel.cv.width, H = scorePanel.cv.height;
   g.clearRect(0, 0, W2, H);
   g.fillStyle = 'rgba(8,10,26,0.78)'; g.fillRect(0, 0, W2, H);
@@ -817,6 +823,14 @@ function drawScorePanel() {
     g.fillText('MUTED', W2 - 24, 62);
     g.textAlign = 'left';
   }
+  // Round 3 (X-1): one-line notice while a hand's tracking is lost.
+  // Parked below MUTED when both show, so the tags never overlap.
+  if (trackingLost) {
+    g.textAlign = 'right';
+    g.fillStyle = '#ffaa00'; g.font = '900 30px Arial';
+    g.fillText('TRACKING LOST', W2 - 24, muted ? 108 : 62);
+    g.textAlign = 'left';
+  }
   g.font = '700 32px Arial';
   g.fillStyle = '#2bff88';
   const waveText = 'WAVE ' + wave;
@@ -824,7 +838,7 @@ function drawScorePanel() {
   g.fillStyle = '#ffb3d9';
   g.fillText(' · SHIPS LOST ' + shipsLost, 24 + g.measureText(waveText).width, 128);
   scorePanel.tex.needsUpdate = true;
-  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost + (muted ? ' · MUTED' : '');
+  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost + (muted ? ' · MUTED' : '') + (trackingLost ? ' · TRACKING LOST' : '');
   if (t !== hudText) { hudText = t; hud.textContent = t; }
 }
 drawScorePanel();
@@ -1523,7 +1537,7 @@ function setDroneLevel(waveNum) {
   const target = Math.min(0.05 + waveNum * 0.004, 0.10);
   droneNodes.gain.gain.setTargetAtTime(target, actx.currentTime, 0.5);
 }
-function blip(freqA, freqB, dur, type, vol, pan) {
+function blip(freqA, freqB, dur, type, vol, pan, x, y, z) {
   if (!actx || muted) return;
   const o = actx.createOscillator(), g = actx.createGain();
   o.type = type;
@@ -1532,17 +1546,37 @@ function blip(freqA, freqB, dur, type, vol, pan) {
   g.gain.setValueAtTime(vol, actx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
   o.connect(g);
-  // Stereo placement (cinematic upgrade): pan follows the event's position
-  // in the player's view. A missing StereoPanner (old browser) just plays
-  // centered — the try/catch keeps audio failure-free either way.
-  const p = pan || 0;
-  if (p !== 0 && actx.createStereoPanner) {
+  // Spatial placement (Round 3 N-P0-3, Bible §3.6): a world position
+  // (x,y,z) routes through a per-event HRTF panner at the event point —
+  // front/back and distance, not just left/right. No position, or no
+  // PannerNode (old browser), falls back to the stereo pan; no
+  // StereoPanner either plays centered. Distance is gentle (refDistance 3,
+  // rolloff 0.5): a kill at hold range (~8) plays at ~55%, a far spawn
+  // (~17) at ~30% — audible, but distance now reads. The try/catch keeps
+  // audio failure-free either way.
+  let routed = false;
+  if (x !== undefined && actx.createPanner) {
     try {
-      const sp = actx.createStereoPanner();
-      sp.pan.value = clamp(p, -0.8, 0.8);
-      g.connect(sp); sp.connect(masterGain);
-    } catch (e) { g.connect(masterGain); }
-  } else g.connect(masterGain);
+      const pn = actx.createPanner();
+      pn.panningModel = 'HRTF';
+      pn.distanceModel = 'inverse';
+      pn.refDistance = 3; pn.maxDistance = 40; pn.rolloffFactor = 0.5;
+      if (pn.positionX) { pn.positionX.value = x; pn.positionY.value = y; pn.positionZ.value = z; }
+      else pn.setPosition(x, y, z);
+      g.connect(pn); pn.connect(masterGain);
+      routed = true;
+    } catch (e) { /* fall through to the stereo pan */ }
+  }
+  if (!routed) {
+    const p = pan || 0;
+    if (p !== 0 && actx.createStereoPanner) {
+      try {
+        const sp = actx.createStereoPanner();
+        sp.pan.value = clamp(p, -0.8, 0.8);
+        g.connect(sp); sp.connect(masterGain);
+      } catch (e) { g.connect(masterGain); }
+    } else g.connect(masterGain);
+  }
   o.start(); o.stop(actx.currentTime + dur + 0.02);
 }
 // Stereo pan of a world point from the player's view: -1 hard left, +1 hard
@@ -1559,17 +1593,45 @@ function panFor(x, y, z) {
     return clamp(_panV.x / len, -0.8, 0.8);
   } catch (e) { return 0; }
 }
+// Keep the Web Audio listener on the camera (position + orientation) so the
+// HRTF panners spatialize correctly (Round 3 N-P0-3, Bible §3.6 — same
+// pattern as Rhythm Slicer's updateAudioListener). Module-scope helper: it
+// reads the camera directly and NEVER a tick()-local (Bible §2 — the Nov 14
+// black-screen scope rule). Updated every frame, VR and desktop alike — the
+// desktop camera sits at standing height and tilts, so the default listener
+// pose (origin, facing -z) would be wrong there too. Best-effort: never throws.
+const _lisPos = new THREE.Vector3(), _lisQuat = new THREE.Quaternion();
+const _lisFwd = new THREE.Vector3(), _lisUp = new THREE.Vector3();
+function updateAudioListener() {
+  if (!actx) return;
+  try {
+    const l = actx.listener;
+    camera.getWorldPosition(_lisPos);
+    camera.getWorldQuaternion(_lisQuat);
+    _lisFwd.set(0, 0, -1).applyQuaternion(_lisQuat);
+    _lisUp.set(0, 1, 0).applyQuaternion(_lisQuat);
+    if (l.positionX) {
+      l.positionX.value = _lisPos.x; l.positionY.value = _lisPos.y; l.positionZ.value = _lisPos.z;
+      l.forwardX.value = _lisFwd.x; l.forwardY.value = _lisFwd.y; l.forwardZ.value = _lisFwd.z;
+      l.upX.value = _lisUp.x; l.upY.value = _lisUp.y; l.upZ.value = _lisUp.z;
+    } else {
+      l.setPosition(_lisPos.x, _lisPos.y, _lisPos.z);
+      l.setOrientation(_lisFwd.x, _lisFwd.y, _lisFwd.z, _lisUp.x, _lisUp.y, _lisUp.z);
+    }
+  } catch (e) { /* listener update is best-effort */ }
+}
 // SOUND REDESIGN (Danny 2026-10-27: the old effects were annoying): every
 // effect is now softer, rounder and quieter — triangles and sines instead
 // of harsh squares and sawtooths, shorter, and roughly half the volume.
 // The ball-weapon (orb) explosions use the same softened boom below.
-function laserSound(x, y, z) { blip(700, 320, 0.08, 'triangle', 0.07, x === undefined ? 0 : panFor(x, y, z)); }
-function invaderHitSound(x, y, z) { blip(300, 130, 0.10, 'sine', 0.10, x === undefined ? 0 : panFor(x, y, z)); }
-function beamSound(x, y, z) { blip(1200, 300, 0.15, 'triangle', 0.08, x === undefined ? 0 : panFor(x, y, z)); }
-function spartanSound(x, y, z) { blip(300, 80, 0.25, 'triangle', 0.15, x === undefined ? 0 : panFor(x, y, z)); } // Spartan Laser: low crimson thump, same soft family as the redesign
-function missileSound(x, y, z) { blip(420, 800, 0.12, 'sine', 0.07, x === undefined ? 0 : panFor(x, y, z)); }
-function pickupSound(x, y, z) { const p = x === undefined ? 0 : panFor(x, y, z); blip(660, 1320, 0.14, 'sine', 0.12, p); blip(990, 1980, 0.18, 'sine', 0.08, p); }
-function shieldSound() { blip(520, 300, 0.20, 'triangle', 0.12); }
+function laserSound(x, y, z) { blip(700, 320, 0.08, 'triangle', 0.07, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function invaderHitSound(x, y, z) { blip(300, 130, 0.10, 'sine', 0.10, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function beamSound(x, y, z) { blip(1200, 300, 0.15, 'triangle', 0.08, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function spartanSound(x, y, z) { blip(300, 80, 0.25, 'triangle', 0.15, x === undefined ? 0 : panFor(x, y, z), x, y, z); } // Spartan Laser: low crimson thump, same soft family as the redesign
+function missileSound(x, y, z) { blip(420, 800, 0.12, 'sine', 0.07, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function pickupSound(x, y, z) { const p = x === undefined ? 0 : panFor(x, y, z); blip(660, 1320, 0.14, 'sine', 0.12, p, x, y, z); blip(990, 1980, 0.18, 'sine', 0.08, p, x, y, z); }
+function shieldSound(x, y, z) { blip(520, 300, 0.20, 'triangle', 0.12, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function waveClearSound() { blip(660, 660, 0.12, 'sine', 0.09); blip(990, 990, 0.22, 'sine', 0.07); } // Round 3 N-P0-9: soft two-note chime (E5 + B5) when a wave clears
 function boomSound() {
   if (!actx || muted) return;
   blip(100, 40, 0.28, 'sine', 0.30);
@@ -1660,8 +1722,16 @@ let rightCtl = null, leftCtl = null;
   c.addEventListener('connected', e => {
     c.userData.handedness = e.data.handedness;
     c.userData.connected = true;
-    if (e.data.handedness === 'right') rightCtl = c;
-    if (e.data.handedness === 'left') leftCtl = c;
+    // Round 3 (P-6): parent the palm cannon by HANDEDNESS, not slot —
+    // the old boot-time ctlL.add(handL)/ctlR.add(handR) put the cyan
+    // cannon on the right hand whenever the right controller connected
+    // first (slots are connection-ordered). handL/handR are built below
+    // this block, but 'connected' only fires during a live session, after
+    // module evaluation, so the closure is safe. Re-parenting on
+    // reconnect is automatic: Object3D.add removes the child from its
+    // previous parent first.
+    if (e.data.handedness === 'right') { rightCtl = c; c.add(handR); }
+    if (e.data.handedness === 'left') { leftCtl = c; c.add(handL); }
   });
   c.addEventListener('disconnected', () => {
     c.userData.connected = false;
@@ -1696,7 +1766,8 @@ function buildPalmCannon(color) {
   return g;
 }
 const handL = buildPalmCannon(0x27e8ff), handR = buildPalmCannon(0x2bff88);
-ctlL.add(handL); ctlR.add(handR);
+// Round 3 (P-6): the cannons are parented in the 'connected' handler
+// above, by handedness — NOT here by slot index (see the handler comment).
 // Aim laser from the right controller + aim dot at ray distance
 const laserGeo = new THREE.BufferGeometry();
 laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
@@ -1785,7 +1856,16 @@ function pollInput(dt) {
     // Aim hand: right preferred for the guide laser/dot, left if the right
     // isn't connected, headset forward if neither — firing itself is fully
     // per-hand (see fireHand), this only drives the visual guide.
-    const aimCtl = rightCtl || leftCtl;
+    // Round 3 (X-1): prefer a hand whose pose is LIVE — r160 hides the
+    // target-ray Group when the pose is null (tracking lost) while its
+    // matrix keeps the last good value, so a guide drawn from a lost hand
+    // would point where the hand WAS. A lost hand also stops firing
+    // (gated in tick) and flips the scoreboard notice, on the transition
+    // only — the panel redraws on dirty, at most 4×/s.
+    const aimCtl = (rightCtl && rightCtl.visible) ? rightCtl
+      : (leftCtl && leftCtl.visible) ? leftCtl : null;
+    const lostNow = !!((rightCtl && !rightCtl.visible) || (leftCtl && !leftCtl.visible));
+    if (lostNow !== trackingLost) { trackingLost = lostNow; markScoreDirty(); }
     if (aimCtl) {
       tmpV.setFromMatrixPosition(aimCtl.matrixWorld);
       tmpV2.set(0, 0, -1).applyQuaternion(aimCtl.getWorldQuaternion(tmpQ));
@@ -1868,6 +1948,7 @@ function startWave() {
   else showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
   if (wave > 1) { // wave-clear bonus: 1 free upgrade pickup rains into the front field
     spawnPickup(rand(-6, 6), rand(3, 9), rand(-14, -8), UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
+    waveClearSound(); // Round 3 N-P0-9: short chime when a wave clears
   }
   setDroneLevel(wave); // danger bed gets slightly louder every wave
 }
@@ -1951,6 +2032,12 @@ function playerHit() {
 // automatic — no setting, no player action — and weapon/upgrade levels stay
 // uncapped throughout.
 let avgFrameMs = 16, degraded = false, frameNo = 0;
+// Graduated foveation state (Round 3 N-P0-5, Bible §2): SEPARATE from the
+// `degraded` flag, so the flag's flip timing — and everything it sheds — is
+// unchanged. Level 0/1/2 → foveation 0.0/0.25/0.5; fovDwellT is seconds
+// spent at the current level (2 s minimum dwell per level).
+const FOV_STEPS = [0.0, 0.25, 0.5];
+let fovLevel = 0, fovDwellT = 0;
 let elapsed = 0;
 
 // ============================== local performance capture (V2.0 / Standard §4) ==============================
@@ -2073,6 +2160,21 @@ function killInvader(v) {
     startWave();
   }
 }
+// Swept segment–sphere test (Round 3 N-P0-1, Standard §5): does the segment
+// A→B pass within radius r of center C? Same closest-point-on-segment math
+// as fireBeam — project C onto the segment, clamp t to [0,1], compare the
+// squared distance. Pure scalar math: no temps, no allocation, so it is
+// safe to call inside the bolt loop (killInvader may use tmpA/tmpB
+// downstream). A zero-length segment (dt 0) degrades to a point test.
+function segSphereHit(ax, ay, az, bx, by, bz, cx, cy, cz, r2) {
+  const abx = bx - ax, aby = by - ay, abz = bz - az;
+  const lenSq = abx * abx + aby * aby + abz * abz;
+  let t = 0;
+  if (lenSq > 0) t = ((cx - ax) * abx + (cy - ay) * aby + (cz - az) * abz) / lenSq;
+  t = clamp(t, 0, 1);
+  const dx = cx - (ax + abx * t), dy = cy - (ay + aby * t), dz = cz - (az + abz * t);
+  return dx * dx + dy * dy + dz * dz < r2;
+}
 function updateBolts(dt) {
   // ROUND-2: single collision step per frame, always. The old code ran a 2nd
   // substep whenever dt > 0.022, so a slow frame did MORE work and got slower
@@ -2080,14 +2182,34 @@ function updateBolts(dt) {
   for (const b of bolts) {
     if (!b.active) continue;
     boltStep: {
+      // SWEPT COLLISION (Round 3 N-P0-1): the bolt's frame segment runs
+      // from its previous position (ox,oy,oz) to its new one (p) — every
+      // hit test below runs against the SEGMENT, not the end point, so a
+      // slow-frame step can no longer jump clean over a target. Still ONE
+      // step per frame (no substep — see the Round-2 note above).
+      const p = b.grp.position;
+      const ox = p.x, oy = p.y, oz = p.z;
       b.grp.position.x += b.vx * dt;
       b.grp.position.y += b.vy * dt;
       b.grp.position.z += b.vz * dt;
-      const p = b.grp.position;
       // Shield cubes erode from player fire too (skipped on alternate frames
       // while the adaptive safety valve is active — see degraded/frameNo).
-      if ((!degraded || (frameNo % 2 === 0)) && Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) { b.active = false; break boltStep; }
-      // Mothership
+      // Swept: the shield band is 1.0 wide and a slow-frame step is 2.1,
+      // so a bolt can jump clean over it — test the plane-crossing point
+      // too (all shield cubes sit at z = SHIELD_Z, so the crossing point
+      // is where the bolt meets the shield plane). The crossing branch can
+      // only run when oz and p.z are on opposite sides of the plane, so
+      // p.z - oz is never 0 there.
+      if (!degraded || (frameNo % 2 === 0)) {
+        let shieldHit = Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z);
+        if (!shieldHit && (oz - SHIELD_Z) * (p.z - SHIELD_Z) < 0) {
+          const t = (SHIELD_Z - oz) / (p.z - oz);
+          shieldHit = hitShield(ox + (p.x - ox) * t, oy + (p.y - oy) * t, SHIELD_Z);
+        }
+        if (shieldHit) { b.active = false; break boltStep; }
+      }
+      // Mothership — point test kept: the saucer box is 3.2 × 1.5 × 2.8,
+      // far wider than any single frame step, so it cannot tunnel.
       if (motherActive && Math.abs(p.x - mother.position.x) < 1.6 && Math.abs(p.y - mother.position.y) < 0.75 && Math.abs(p.z - mother.position.z) < 1.4) {
         const bonus = 50 * (1 + Math.floor(Math.random() * 4));
         addScore(bonus);
@@ -2112,22 +2234,23 @@ function updateBolts(dt) {
       for (const pk of pickups) {
         if (!pk.active) continue;
         const pp = pk.grp.position;
-        const dx = p.x - pp.x, dy = p.y - pp.y, dz = p.z - pp.z;
-        if (dx * dx + dy * dy + dz * dz < 0.49) collectPickup(pk);
+        if (segSphereHit(ox, oy, oz, p.x, p.y, p.z, pp.x, pp.y, pp.z, 0.49)) collectPickup(pk);
       }
-      // Swarm invaders (sphere test in world space — they come from every
-      // angle now, so there is no formation plane to test against). The
-      // radius grows with the invader's loom scale, so a lunging flyer that
-      // looks huge is just as huge a target. Cannon Power = pierce: the
-      // bolt keeps flying through up to `pierce` invaders instead of dying
-      // on one. Bolt speed 42 × dt cap 0.05 = 2.1/frame max, under the 0.85
-      // radius, so fast bolts cannot tunnel through between frames.
+      // Swarm invaders (swept sphere test in world space — they come from
+      // every angle now, so there is no formation plane to test against).
+      // The radius grows with the invader's loom scale, so a lunging flyer
+      // that looks huge is just as huge a target. Cannon Power = pierce:
+      // the bolt keeps flying through up to `pierce` invaders instead of
+      // dying on one. Bolt speed 42 × dt cap 0.05 = 2.1/frame max — MORE
+      // than the 1.7 invader DIAMETER (r 0.85), so the old point test could
+      // tunnel clean through on a slow frame; the swept test cannot.
+      // (The old comment compared 2.1 against the 0.85 RADIUS — wrong side
+      // of the comparison; a step tunnels when it exceeds the diameter.)
       for (const v of invaders) {
         if (!v.alive) continue;
         const dp = v.grp.position;
-        const dx = p.x - dp.x, dy = p.y - dp.y, dz = p.z - dp.z;
         const rr = 0.85 * v.grp.scale.x;
-        if (dx * dx + dy * dy + dz * dz < rr * rr) {
+        if (segSphereHit(ox, oy, oz, p.x, p.y, p.z, dp.x, dp.y, dp.z, rr * rr)) {
           killInvader(v);
           if (b.pierce > 0) b.pierce--;
           else b.active = false;
@@ -2138,8 +2261,8 @@ function updateBolts(dt) {
       // Bombs can be shot down
       for (const mb of bombs) {
         if (!mb.active) continue;
-        const dx = p.x - mb.grp.position.x, dy = p.y - mb.grp.position.y, dz = p.z - mb.grp.position.z;
-        if (dx * dx + dy * dy + dz * dz < 0.2) {
+        const mp = mb.grp.position;
+        if (segSphereHit(ox, oy, oz, p.x, p.y, p.z, mp.x, mp.y, mp.z, 0.2)) {
           mb.active = false; mb.grp.visible = false;
           addScore(5);
           spawnBurst(p.x, p.y, p.z, 0xffa02e, 10, 3.4, 0.5);
@@ -2227,6 +2350,7 @@ function updateBombs(dt) {
     const p = b.grp.position;
     if ((!degraded || (frameNo % 2 === 0)) && Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) {
       spawnBurst(p.x, p.y, p.z, 0x19e3ff, 8, 3, 0.45);
+      shieldSound(p.x, p.y, p.z); // Round 3 N-P0-9: soft block blip, panned to the block point
       b.active = false; b.grp.visible = false;
       continue;
     }
@@ -2462,7 +2586,8 @@ function tick() {
   // below ~16ms, so the valve doesn't flutter on a single slow frame.
   // VALVE REGISTRY (Bible §2 — shed ONLY these, each with a reverse path;
   // never lighting, geometry, textures, or gameplay feedback):
-  //  degraded: fixed foveation 0.5 (0 = none, 1 = max — r160 semantics);
+  //  degraded: foveation sheds gradually — Bible §2 steps [0.0, 0.25, 0.5]
+  //  with a 2 s dwell per level (0 = none, 1 = max — r160 semantics);
   //  particle spawns halved (spawnBurst); shield checks alternate frames;
   //  kill rings off (spawnKillRing); shockwaves alternate frames;
   //  combat pulse frozen at base values (below); tier escalation paused.
@@ -2471,23 +2596,38 @@ function tick() {
   avgFrameMs = avgFrameMs * 0.95 + dt * 1000 * 0.05;
   if (!degraded && avgFrameMs > 20) {
     degraded = true;
-    try { renderer.xr.setFoveation(0.5); } catch (e) { /* foveation unavailable */ }
   } else if (degraded && avgFrameMs < 16) {
     degraded = false;
-    try { renderer.xr.setFoveation(0.0); } catch (e) { /* foveation unavailable */ }
+  }
+  // Graduated foveation (Round 3 N-P0-5, Bible §2): steps [0.0, 0.25, 0.5]
+  // with a 2 s minimum dwell per level, driven by the same EMA thresholds
+  // as `degraded` — but the level state is separate, so foveation sheds
+  // gradually instead of jumping straight to 0.5, and recovers the same
+  // way. setFoveation only runs on a level change.
+  fovDwellT += dt;
+  if (avgFrameMs > 20 && fovLevel < 2 && fovDwellT >= 2) {
+    fovLevel++; fovDwellT = 0;
+    try { renderer.xr.setFoveation(FOV_STEPS[fovLevel]); } catch (e) { /* foveation unavailable */ }
+  } else if (avgFrameMs < 16 && fovLevel > 0 && fovDwellT >= 2) {
+    fovLevel--; fovDwellT = 0;
+    try { renderer.xr.setFoveation(FOV_STEPS[fovLevel]); } catch (e) { /* foveation unavailable */ }
   }
   if (mode === 'play' && !paused) perfSessionTick(dt); // perf log samples active play only
   const presenting = renderer.xr.isPresenting;
+  updateAudioListener(); // Bible §3.6: the HRTF listener follows the camera every frame
 
   // ONE scoreboard, one visible form at a time: the camera-attached VR cell
   // while presenting, the top-left DOM cell on desktop preview. (The DOM is
   // invisible inside an immersive session anyway; this keeps the two forms
   // from ever doubling up on desktop.)
   scoreMesh.visible = presenting;
+  aimDot.visible = mode === 'play'; // Round 3 N-P0-6: no aim dot in the menu backdrop
   pauseMesh.visible = paused && mode === 'play';
-  // Palm cannons ride the controllers only while presenting and connected.
-  handL.visible = presenting && !!ctlL.userData.connected;
-  handR.visible = presenting && !!ctlR.userData.connected;
+  // Palm cannons ride the controllers only while presenting and connected
+  // (handedness-tracked refs — the cannons are parented by handedness,
+  // Round 3 P-6, so visibility follows the hand, not the slot).
+  handL.visible = presenting && !!leftCtl;
+  handR.visible = presenting && !!rightCtl;
   if (mode === 'play') hud.style.display = presenting ? 'none' : 'block';
   else hud.style.display = 'none';
 
@@ -2514,8 +2654,12 @@ function tick() {
       // volley from its own palm toward where THAT hand points;
       // desktop/rail firing is unchanged.
       if (presenting && (fireHands.left || fireHands.right)) {
-        if (fireHands.left && leftCtl) fireHand(leftCtl);
-        if (fireHands.right && rightCtl) fireHand(rightCtl);
+        // Round 3 (X-1): a hand fires only while its pose is live — a
+        // tracking-lost hand's matrix is frozen at the last good pose,
+        // so firing from it would shoot where the hand WAS. The other
+        // hand keeps firing normally.
+        if (fireHands.left && leftCtl && leftCtl.visible) fireHand(leftCtl);
+        if (fireHands.right && rightCtl && rightCtl.visible) fireHand(rightCtl);
         if (!leftCtl && !rightCtl) fireWeapons();
       } else fireWeapons();
       // ONE WEAPON (Danny 2026-10-27): a single equipped weapon, so one pull

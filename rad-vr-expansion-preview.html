@@ -3066,7 +3066,12 @@ function loadLicensedAssets() {
     finish();
   });
 }
-loadLicensedAssets();
+// Round 3 (R4): a synchronous throw inside the loader (e.g. an unparseable
+// URL) used to kill the whole module before the ENTER VR button was wired.
+// Async load failures are already handled inside (fallback chain); this
+// guards only the synchronous path. The loader reports its own status via
+// assetLoadStatus once its callbacks run.
+try { loadLicensedAssets(); } catch (e) { console.warn('[rad-expansion] licensed assets failed to start:', e); }
 
 // ============================== cockpit ==============================
 const cockpit = new THREE.Group();
@@ -3373,7 +3378,7 @@ const pauseTex = new THREE.CanvasTexture(pauseCanvas);
 pauseTex.colorSpace = THREE.SRGBColorSpace;
 const pausePanel = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.66),
   new THREE.MeshBasicMaterial({ map: pauseTex, transparent: true, toneMapped: false, depthTest: false }));
-pausePanel.position.set(0, 0.05, -1.5);
+pausePanel.position.set(0, 0.20, -1.5);   // Round 3 (pause-menu MINOR): was 0.05 — the panel's bottom edge sat over the top of the 3D dashboard gauges; raised so the whole panel (incl. the PERF line) clears them
 pausePanel.renderOrder = 990;
 pausePanel.visible = false;
 camera.add(pausePanel);
@@ -3430,11 +3435,17 @@ function setPaused(p) {
   if (p) { pauseSel = 0; drawPauseMenu(); }
   else { perfWarmup = 2; }   // resume hitch is not gameplay frame time
 }
+// Round 3 (pause-menu FIX 1): one shared selection-move path for the XR
+// thumbstick (tick, edge-detected) and the keyboard arrows (keydown event).
+function movePauseSelection(dir) {
+  pauseSel = (pauseSel + dir + PAUSE_ITEMS.length) % PAUSE_ITEMS.length;
+  drawPauseMenu(); clickSound();
+}
 // Pause-menu LOCATION cycling, shared by Enter/trigger activation (+1, then
-// resume) and the desktop Left/Right arrows (+/-1, stay paused so the new
-// location shows in the menu). Single mode reuses the main menu's
-// selectLocation (same track rebuild + run reset); journey mode jumps to
-// the neighbouring block's start. The controller path is unchanged.
+// resume), the desktop Left/Right arrows (+/-1, stay paused so the new
+// location shows in the menu), and the VR right stick (R5, same +/-1).
+// Single mode reuses the main menu's selectLocation (same track rebuild +
+// run reset); journey mode jumps to the neighbouring block's start.
 function cyclePauseLocation(dir) {
   if (expPrefs.journey) {
     const next = (currentLocIdx() + dir + 4) % 4;
@@ -3736,13 +3747,49 @@ window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
   if (e.code === 'KeyM') setMuted(!muted);
+  // Round 3 (pause-menu FIX 1/2): keyboard menu input is handled HERE, in
+  // the event, not via the once-per-frame poll in readInputs. A tap that
+  // starts and ends between two frames (or during the synchronous track
+  // rebuild, when no frames run at all) leaves no trace for the poll to
+  // see — on the slow software-rendered cloud browser that dropped every
+  // arrow tap and, intermittently, P. The event cannot miss a tap. Held
+  // keys auto-repeat, so repeats are ignored (one action per press, same
+  // as the old edge detection). Driving keys stay polled (held state);
+  // only the menu actions move here. XR menu input is unchanged (sticks
+  // have no DOM events, so the tick still polls them). Location cycling
+  // shares cyclePauseLocation with the tick's XR stick path (R5) and the
+  // click path — one cycle path, three inputs.
+  if (!e.repeat) {
+    if (e.code === 'KeyP') setPaused(!paused);
+    else if (paused) {
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') movePauseSelection(-1);
+      else if (e.code === 'ArrowDown' || e.code === 'KeyS') movePauseSelection(1);
+      else if (e.code === 'ArrowLeft') { if (pauseSel === 1) { cyclePauseLocation(-1); drawPauseMenu(); clickSound(); } }
+      else if (e.code === 'ArrowRight') { if (pauseSel === 1) { cyclePauseLocation(1); drawPauseMenu(); clickSound(); } }
+      else if (e.code === 'Enter') activatePauseItem();
+    }
+  }
   startAudio();
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
+// Round 3 (pause-menu FIX 2 hardening): a key held across a window blur
+// (alt-tab, focus loss) never delivers its keyup, so keys[] latches true
+// and the polled edge for that key can never fire again until reload.
+// Clear the whole map on blur; held keys re-register on the next keydown.
+window.addEventListener('blur', () => { for (const k of Object.keys(keys)) keys[k] = false; });
 
 const DEAD = 0.12;
 let prevSqL = false, prevSqR = false, prevTodR = false;
 let prevBtnB = false, prevBtnY = false, prevTrigR = false;
+// Round 3 (R3): clears every button edge flag. Called when there is no live
+// session, and (per hand) for any hand not seen in a frame — a controller
+// that drops mid-press must not leave a stuck-true edge behind.
+function clearXREdges() { prevSqL = prevSqR = prevTodR = prevBtnB = prevTrigR = prevBtnY = false; }
+// Round 3 (R2): latest XR input snapshot for the in-VR input readout
+// (?debug=aim). Written by pollXRInput only when DEBUG_AIM is on, so
+// normal play pays nothing but one boolean check per frame. Updated in
+// place (no per-frame allocation).
+let dbgXR = { presenting: false, sources: 0, seenL: false, seenR: false, lx: 0, rx: 0, gas: 0, brake: 0, sqL: false, sqR: false, btnA: false, btnB: false, btnY: false, trigR: false, menuY: 0, menuX: 0, lastEdge: '-', lastEdgeT: 0 };
 function xrBtnPressed(gp, i) { return (gp.buttons && gp.buttons[i]) ? (gp.buttons[i].pressed || gp.buttons[i].value > 0.5) : false; }
 // PORTED by the integration pass (2026-11-15) from the main prototype
 // (rad-vr-prototype/index.html): the corrected input model. The old
@@ -3790,14 +3837,18 @@ function pollXRInput() {
   // Reads the live XR session's input sources directly. Quest controller mapping:
   // thumbstick = axes[2] (X) / axes[3] (Y), trigger = buttons[0], squeeze = buttons[1],
   // A/X = buttons[4], B/Y = buttons[5].
-  const r = { steer: 0, gas: 0, brake: 0, fire: false, cycle: false, tod: false, pause: false, mute: false, menuY: 0, menuAct: false };
-  if (!renderer.xr.isPresenting) return r;
+  const r = { steer: 0, gas: 0, brake: 0, fire: false, cycle: false, tod: false, pause: false, mute: false, menuY: 0, menuX: 0, menuAct: false };
+  // Round 3 (R3): a controller held mid-press across a session end left its
+  // prev* flag true, so the first press of the next session never fired.
+  if (!renderer.xr.isPresenting) { clearXREdges(); if (DEBUG_AIM) { dbgXR.presenting = false; dbgXR.sources = 0; } return r; }
   const session = renderer.xr.getSession();
-  if (!session) return r;
+  if (!session) { clearXREdges(); if (DEBUG_AIM) { dbgXR.presenting = false; dbgXR.sources = 0; } return r; }
   let lx = 0, rx = 0;   // raw stick X per hand; selection happens after the loop (single owner + hysteresis)
+  let seenL = false, seenR = false;   // Round 3 (R3): which hands were actually seen this frame
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
+    if (src.handedness === 'left') seenL = true; else seenR = true;
     if (gp.axes && gp.axes.length > 2) {
       const ax = gp.axes[2] || 0;
       if (src.handedness === 'left') lx = ax;
@@ -3835,16 +3886,32 @@ function pollXRInput() {
       prevBtnY = yb;
     }
   }
+  // Round 3 (R3): a controller that disconnects mid-press leaves a
+  // stuck-true edge, so the first press after reconnect never fires.
+  // Clear the edge flags for any hand not seen this frame.
+  if (!seenL) { prevSqL = false; prevBtnY = false; }
+  if (!seenR) { prevSqR = false; prevTodR = false; prevBtnB = false; prevTrigR = false; }
+  // Round 3 (R2): snapshot the live input for the in-VR readout. The prev*
+  // flags now hold the CURRENT pressed states (the loop just updated them).
+  if (DEBUG_AIM) {
+    dbgXR.presenting = true; dbgXR.sources = session.inputSources.length;
+    dbgXR.seenL = seenL; dbgXR.seenR = seenR; dbgXR.lx = lx; dbgXR.rx = rx;
+    dbgXR.gas = r.gas; dbgXR.brake = r.brake;
+    dbgXR.sqL = prevSqL; dbgXR.sqR = prevSqR; dbgXR.btnA = prevTodR; dbgXR.btnB = prevBtnB; dbgXR.btnY = prevBtnY; dbgXR.trigR = prevTrigR;
+    dbgXR.menuY = r.menuY; dbgXR.menuX = rx;
+    const edge = r.fire ? 'FIRE' : r.cycle ? 'CYCLE' : r.tod ? 'TOD' : r.pause ? 'PAUSE' : r.mute ? 'MUTE' : r.menuAct ? 'ACT' : null;
+    if (edge) { dbgXR.lastEdge = edge; dbgXR.lastEdgeT = performance.now(); }
+  }
   // Steering: ONE stick owns it at a time (hysteresis), deadzone rescaled.
   // The old max-magnitude rule let a resting thumb on the idle stick hijack
   // steering from the driving hand.
   const sel = selectSteerStick(lx, rx, steerHand, DEAD, STEER_SWITCH_MARGIN);
   steerHand = sel.hand;
   r.steer = sel.value;
+  r.menuX = rx;   // Round 3 (R5): right-stick X cycles the pause-menu LOCATION row (sticks don't steer while paused, so there is no conflict)
   return r;
 }
 let prevKeyB = false, prevKeyH = false, prevKeyO = false, prevKeyT = false;
-let prevKeyP = false, prevKeyEnter = false;
 function readInputs() {
   const xr = pollXRInput();
   let keySteer = 0;
@@ -3857,20 +3924,12 @@ function readInputs() {
   if (keys['KeyH'] && !prevKeyH) keyFire = 1;
   if (keys['KeyO'] && !prevKeyO) keyFire = 2;
   const keyTod = keys['KeyT'] && !prevKeyT;
-  const keyPause = keys['KeyP'] && !prevKeyP;
-  const keyMenuAct = keys['Enter'] && !prevKeyEnter;
-  // Menu nav on desktop: arrow up/down (W/S double as nav keys while paused).
-  let keyMenuY = 0;
-  if (keys['ArrowUp'] || keys['KeyW']) keyMenuY = -1;
-  else if (keys['ArrowDown'] || keys['KeyS']) keyMenuY = 1;
-  // Menu left/right on desktop: Left/Right arrows cycle the location while
-  // the LOCATION row is selected (the tick gates on that). No XR source:
-  // the sticks steer, and the controller path is unchanged.
-  let keyMenuX = 0;
-  if (keys['ArrowLeft']) keyMenuX = -1;
-  else if (keys['ArrowRight']) keyMenuX = 1;
+  // Round 3 (pause-menu FIX 1/2): keyboard menu actions (P, arrows, Enter)
+  // are handled in the keydown listener, not polled here — a tap shorter
+  // than one frame is invisible to the poll. pause/menuY/menuX/menuAct
+  // below carry XR input only (menuX is the right stick, R5); driving
+  // keys stay polled (held state).
   prevKeyB = !!keys['KeyB']; prevKeyH = !!keys['KeyH']; prevKeyO = !!keys['KeyO']; prevKeyT = !!keys['KeyT'];
-  prevKeyP = !!keys['KeyP']; prevKeyEnter = !!keys['Enter'];
   return {
     steer: clamp(keySteer + xr.steer, -1, 1),
     gas: Math.max(keyGas, xr.gas),
@@ -3879,11 +3938,11 @@ function readInputs() {
     fireSel: keyFire >= 0 ? keyFire : -1,
     cycle: xr.cycle,
     tod: xr.tod || keyTod,
-    pause: xr.pause || keyPause,
+    pause: xr.pause,
     mute: xr.mute,
-    menuY: keyMenuY !== 0 ? keyMenuY : xr.menuY,
-    menuX: keyMenuX,
-    menuAct: xr.menuAct || keyMenuAct
+    menuY: xr.menuY,
+    menuX: xr.menuX,
+    menuAct: xr.menuAct
   };
 }
 
@@ -3944,7 +4003,76 @@ function updateAimOverlay() {
     '\nlatVel ' + dbgLatVel.toFixed(2) + ' m/s (raw would be ' + dbgRawLatVel.toFixed(2) + ')' +
     '\nplayerX ' + playerX.toFixed(2) + '  speed ' + (speed * 2.23694).toFixed(0) + ' MPH' +
     '\nvalve L' + perfValve.level + '  EMA ' + perfValve.ema.toFixed(1) + ' ms' +
+    '\ngas ' + dbgXR.gas.toFixed(2) + ' brake ' + dbgXR.brake.toFixed(2) + ' src ' + dbgXR.sources + ' edge ' + dbgXR.lastEdge +
     '\nassets: ' + assetLoadStatus + (kenneyCarsOn ? ' · kenney cars ON' : ' · procedural cars') + (kenneyNatureOn ? ' · kenney nature ON' : ' · procedural nature') + (asphaltOn ? ' · photo asphalt ON' : ' · canvas asphalt');
+}
+
+// Round 3 (R2): in-VR input readout. The ?debug=aim numeric overlay above
+// is a DOM div (invisible inside the headset) and the 3D lines show
+// steering only, so a trigger/button failure on hardware was
+// undiagnosable from the headset. This small camera-attached canvas shows
+// the live XR input state inside VR: raw + smoothed steer, gas, brake,
+// live button states, and the last edge event. Same gate as the aim lines
+// (?debug=aim in the URL). Redrawn at 10 Hz — a 512x384 canvas upload
+// every frame would cost frame time. Contents:
+//   line 1: XR INPUT [LIVE] / [NOT PRESENTING]
+//   line 2: input-source count + which hands are seen (L/R)
+//   line 3: STEER raw per hand (L/R stick X, before deadzone/owner rules)
+//   line 4: STEER selected value + owning hand + smoothed value (the car)
+//   line 5: GAS + BRAKE analog values (right / left trigger)
+//   line 6: live button states (● pressed / · released): squeeze L/R,
+//           A, B, Y, right trigger past half-press
+//   line 7: last rising-edge event (FIRE/CYCLE/TOD/PAUSE/MUTE/ACT) + age
+//   line 8: menuY + menuX (pause-menu stick axes; menuX is the right
+//           stick, which cycles LOCATION — R5)
+//   + a red NO INPUT SOURCES! warning when presenting with zero sources —
+//     the reading that separates "input not arriving" from "input arriving
+//     but feel wrong" on the next headset test.
+let dbgInputPanel = null, dbgInputCtx = null, dbgInputTex = null, dbgInputTimer = 0;
+function buildInputDebug() {
+  if (!DEBUG_AIM) return;
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 384;
+  dbgInputCtx = cv.getContext('2d');
+  dbgInputTex = new THREE.CanvasTexture(cv);
+  dbgInputTex.colorSpace = THREE.SRGBColorSpace;
+  dbgInputPanel = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.46),
+    new THREE.MeshBasicMaterial({ map: dbgInputTex, transparent: true, toneMapped: false, depthTest: false }));
+  dbgInputPanel.position.set(0.62, 0.82, -1.5);   // upper right; score cell is upper left, pause menu is centre
+  dbgInputPanel.renderOrder = 991;
+  camera.add(dbgInputPanel);
+}
+function updateInputDebug(dt) {
+  if (!DEBUG_AIM || !dbgInputPanel) return;
+  dbgInputTimer += dt;
+  if (dbgInputTimer < 0.1) return;
+  dbgInputTimer = 0;
+  const g = dbgInputCtx, x = dbgXR;
+  const f = (v) => (v >= 0 ? '+' : '') + v.toFixed(2);
+  const dot = (b) => (b ? '●' : '·');
+  g.clearRect(0, 0, 512, 384);
+  g.fillStyle = 'rgba(8,6,20,0.82)'; g.fillRect(0, 0, 512, 384);
+  g.lineWidth = 3; g.strokeStyle = '#27e8ff'; g.strokeRect(4, 4, 504, 376);
+  g.font = '700 22px monospace'; g.textAlign = 'left';
+  g.fillStyle = '#27e8ff';
+  g.fillText('XR INPUT ' + (x.presenting ? '[LIVE]' : '[NOT PRESENTING]'), 16, 34);
+  g.font = '400 20px monospace'; g.fillStyle = '#eaf6ff';
+  g.fillText('src ' + x.sources + '  L:' + (x.seenL ? 'YES' : 'no') + '  R:' + (x.seenR ? 'YES' : 'no'), 16, 64);
+  g.fillText('STEER raw L ' + f(x.lx) + ' R ' + f(x.rx), 16, 94);
+  g.fillText('STEER sel ' + f(dbgInputSteer) + ' (' + (steerHand || '-') + ')  smooth ' + f(steerSmooth), 16, 124);
+  g.fillText('GAS ' + f(x.gas) + '   BRAKE ' + f(x.brake), 16, 154);
+  g.fillText('SQ L' + dot(x.sqL) + ' R' + dot(x.sqR) + '  A' + dot(x.btnA) + ' B' + dot(x.btnB) + ' Y' + dot(x.btnY) + ' TRIG' + dot(x.trigR), 16, 184);
+  const age = x.lastEdgeT ? ((performance.now() - x.lastEdgeT) / 1000).toFixed(1) + 's ago' : 'never';
+  g.fillText('last edge: ' + x.lastEdge + ' ' + age, 16, 214);
+  g.fillText('menuY ' + f(x.menuY) + '  menuX ' + f(x.menuX), 16, 244);
+  if (x.presenting && x.sources === 0) {
+    g.fillStyle = '#ff5555'; g.font = '700 22px monospace';
+    g.fillText('NO INPUT SOURCES!', 16, 284);
+    g.font = '400 20px monospace'; g.fillStyle = '#eaf6ff';
+    g.fillText('controllers not seen by', 16, 314);
+    g.fillText('the XR session', 16, 344);
+  }
+  dbgInputTex.needsUpdate = true;
 }
 
 // ============================== ENTER VR flow ==============================
@@ -3956,6 +4084,7 @@ const hudL1 = document.getElementById('hudL1');
 const hudL2 = document.getElementById('hudL2');
 const hudL3 = document.getElementById('hudL3');
 let xrSupported = false;
+let xrSupportPromise = null;   // Round 3 (R1): the click handler awaits this (Skybound Phase 5 fix, ported)
 
 function setStatus(msg) { statusEl.textContent = msg; }
 const todBtn = document.getElementById('todBtn');
@@ -4044,7 +4173,7 @@ updateBestDisplays();
 renderPerfSummary();
 
 if (navigator.xr && navigator.xr.isSessionSupported) {
-  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+  xrSupportPromise = navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     xrSupported = ok;
     if (!ok) {
       vrBtn.textContent = 'START DESKTOP PREVIEW';
@@ -4058,6 +4187,12 @@ if (navigator.xr && navigator.xr.isSessionSupported) {
 
 vrBtn.addEventListener('click', async () => {
   startAudio();
+  // Round 3 (R1): await the support check before branching — a fast tap
+  // before isSessionSupported resolves would otherwise take the desktop
+  // path on a Quest (xrSupported still false), leaving isPresenting false
+  // and pollXRInput returning zeros forever. The awaited promise never
+  // rejects (it carries the .catch below).
+  if (xrSupportPromise) await xrSupportPromise;
   if (!xrSupported) { hidePanel(); return; }
   vrBtn.disabled = true;
   try {
@@ -4074,7 +4209,7 @@ vrBtn.addEventListener('click', async () => {
       await renderer.xr.setSession(session);
       hidePanel();
       perfWarmup = 2;
-      session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
@@ -4457,7 +4592,7 @@ const clock = new THREE.Clock();
 let dashTimer = 0, hudMph = -1;
 
 let prevMenuDir = 0;   // pause-menu thumbstick edge detection
-let prevMenuXDir = 0;  // pause-menu Left/Right arrow edge detection
+let prevMenuXDir = 0;  // pause-menu right-stick X edge detection (Round 3 R5)
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   // Frame-time guard: hold difficulty progression while frames degrade
@@ -4477,15 +4612,16 @@ function tick() {
   if (input.pause) setPaused(!paused);
   if (input.mute) setMuted(!muted);
   if (paused) {
-    // Menu navigation: thumbstick/arrows move one item per deflection edge.
+    // Menu navigation (XR thumbstick): one item per deflection edge.
+    // Keyboard arrows are handled in the keydown listener (Round 3).
     const dir = input.menuY < -0.5 ? -1 : input.menuY > 0.5 ? 1 : 0;
-    if (dir !== 0 && dir !== prevMenuDir) {
-      pauseSel = (pauseSel + dir + PAUSE_ITEMS.length) % PAUSE_ITEMS.length;
-      drawPauseMenu(); clickSound();
-    }
+    if (dir !== 0 && dir !== prevMenuDir) movePauseSelection(dir);
     prevMenuDir = dir;
-    // Left/Right arrows cycle the location while LOCATION is selected
-    // (desktop). Stays paused so the new location shows in the menu.
+    // Round 3 (R5): right-stick X cycles the location while LOCATION is
+    // selected (VR). Sticks don't steer while paused, so there is no
+    // conflict. Stays paused so the new location shows in the menu.
+    // Desktop arrows take the same cyclePauseLocation path via the
+    // keydown listener; trigger/A still cycles +1 via activatePauseItem.
     const dirX = input.menuX < -0.5 ? -1 : input.menuX > 0.5 ? 1 : 0;
     if (dirX !== 0 && dirX !== prevMenuXDir && pauseSel === 1) {
       cyclePauseLocation(dirX);
@@ -4496,6 +4632,7 @@ function tick() {
     // Frozen world: idle engine hum, vignette off, still render the scene
     // (the headset can still look around the frozen world).
     updateAudio(0, 0);
+    updateInputDebug(dt);   // Round 3 (R2): the readout stays live while paused (menu nav uses the sticks)
     vignetteMat.opacity = 0;
     renderer.render(scene, camera);
     return;
@@ -4731,9 +4868,11 @@ function tick() {
   updateAudio(speedPercent, input.gas);
 
   updateAimDebug();
+  updateInputDebug(dt);   // Round 3 (R2): in-VR input readout (?debug=aim)
   renderer.render(scene, camera);
 }
 buildAimDebug();   // no-op unless ?debug=aim
+buildInputDebug();   // no-op unless ?debug=aim (Round 3 R2)
 renderer.setAnimationLoop(tick);
 
 window.addEventListener('resize', () => {
