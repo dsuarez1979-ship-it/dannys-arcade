@@ -32,6 +32,9 @@
   #panel .sub { font-size:15px; letter-spacing:3px; color:#ffd9ec; margin-bottom:10px; text-transform:uppercase; }
   #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#ffeef8; }
   #panel p.small { font-size:13px; color:#e8c9e2; }
+  #panel .backlink { margin-top:20px; font-size:13px; }
+  #panel .backlink a { color:#7d72a8; text-decoration:none; }
+  #panel .backlink a:hover { color:#bdb2e8; }
   #vrBtn {
     margin-top:16px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
@@ -165,6 +168,7 @@
     <p class="small">In game: press <b>A</b> on the right controller (or <b>T</b> on desktop) to cycle Day → Sunset → Night.</p>
     <p class="small">In VR: <b>B</b> pauses (menu: resume · location · mute · comfort vignette · restart) · <b>Y</b> mutes. Desktop: <b>P</b> pauses, <b>M</b> mutes.</p>
     <p class="small"><button class="todOpt" id="vigBtn">◐ COMFORT VIGNETTE: OFF</button></p>
+    <p class="backlink"><a href="./">← Danny's Arcade</a></p>
   </div>
 </div>
 
@@ -3350,7 +3354,9 @@ drawScoreCell('0 PTS · 0 MPH', '0.00 MI · TIER 1', 'NEXT TIER 1500m · RUSH IN
 // ============================== pause menu (in-VR) ==============================
 // B (right controller) / P (desktop) pauses. The menu is a camera-attached
 // canvas plane: thumbstick up/down (or arrow keys) moves the selection,
-// right trigger / A / Enter activates. While paused the world freezes —
+// right trigger / A / Enter activates. Left/Right arrows cycle the location
+// while LOCATION is selected; on desktop a mouse click on a row selects and
+// activates it. While paused the world freezes —
 // only the menu, the render loop, and idle engine audio keep running.
 let paused = false;
 let pauseSel = 0;
@@ -3386,16 +3392,27 @@ function drawPauseMenu() {
   g.strokeRect(6, 6, 628, 388);
   g.textAlign = 'center';
   g.font = '900 52px Arial'; g.fillStyle = '#ffffff';
-  g.fillText('PAUSED', 320, 72);
-  g.font = '700 24px Arial'; g.fillStyle = '#27e8ff';
-  g.fillText('B / P resume  ·  thumbstick or arrows move  ·  trigger / A / Enter selects', 320, 108);
-  // Location + mode + licensed-asset status line.
+  g.fillText('PAUSED', 320, 66);
+  // Hint line: kept short (20px, ~590px max) so it fits the 640px canvas —
+  // the old 24px line measured ~968px and was clipped at both panel edges.
+  g.font = '700 20px Arial'; g.fillStyle = '#27e8ff';
+  g.fillText('B / P resume · ↑↓ move · ←→ location · Enter selects', 320, 98);
+  // Location + mode + licensed-asset status line. Auto-fit: the longest
+  // combination ('NEON METROPOLIS · JOURNEY · SCENIC · ASSETS FALLBACK')
+  // measures ~736px at 22px, so shrink until it fits the 600px inner width.
   const assetShort = assetLoadStatus === 'ok' ? 'ASSETS OK' : assetLoadStatus === 'pending' ? 'ASSETS LOADING' : 'ASSETS FALLBACK';
-  g.font = '700 22px Arial'; g.fillStyle = '#ffd319';
-  g.fillText(LOCATIONS[currentLocIdx()].name.toUpperCase() + (expPrefs.journey ? ' · JOURNEY' : '') + (expPrefs.scenic ? ' · SCENIC' : '') + ' · ' + assetShort, 320, 136);
+  const statusLine = LOCATIONS[currentLocIdx()].name.toUpperCase() + (expPrefs.journey ? ' · JOURNEY' : '') + (expPrefs.scenic ? ' · SCENIC' : '') + ' · ' + assetShort;
+  let statusPx = 22;
+  g.font = '700 ' + statusPx + 'px Arial';
+  while (g.measureText(statusLine).width > 600 && statusPx > 16) { statusPx -= 2; g.font = '700 ' + statusPx + 'px Arial'; }
+  g.fillStyle = '#ffd319';
+  g.fillText(statusLine, 320, 126);
+  // Item rows start at y=162 (was 156): the old rows sat 20px below the
+  // status line, so the selected row's highlight band painted over it and
+  // the 30px RESUME glyphs touched it. Rows now clear it by 6px+.
   PAUSE_ITEMS.forEach((it, i) => {
-    const y = 156 + i * 44;
-    if (i === pauseSel) { g.fillStyle = 'rgba(39,232,255,0.22)'; g.fillRect(70, y - 30, 500, 40); }
+    const y = 162 + i * 40;
+    if (i === pauseSel) { g.fillStyle = 'rgba(39,232,255,0.22)'; g.fillRect(40, y - 30, 560, 40); }
     g.font = '900 30px Arial';
     g.fillStyle = i === pauseSel ? '#ffd319' : '#eaf6ff';
     g.fillText((i === pauseSel ? '▶ ' : '') + pauseItemLabel(i), 320, y);
@@ -3413,23 +3430,31 @@ function setPaused(p) {
   if (p) { pauseSel = 0; drawPauseMenu(); }
   else { perfWarmup = 2; }   // resume hitch is not gameplay frame time
 }
+// Pause-menu LOCATION cycling, shared by Enter/trigger activation (+1, then
+// resume) and the desktop Left/Right arrows (+/-1, stay paused so the new
+// location shows in the menu). Single mode reuses the main menu's
+// selectLocation (same track rebuild + run reset); journey mode jumps to
+// the neighbouring block's start. The controller path is unchanged.
+function cyclePauseLocation(dir) {
+  if (expPrefs.journey) {
+    const next = (currentLocIdx() + dir + 4) % 4;
+    position = locBounds[next].startZ;
+    lastLocIdx = next;
+    startLocationAtmosphere(next);
+    refreshTrafficActivation();
+    tierMsg = 'ENTERING ' + LOCATIONS[next].name.toUpperCase();
+    tierMsgT = 3;
+  } else {
+    const nextIdx = (LOC_INDEX[expPrefs.location] + dir + 4) % 4;
+    selectLocation(LOCATIONS[nextIdx].id);
+  }
+}
 function activatePauseItem() {
   if (pauseSel === 0) setPaused(false);
   else if (pauseSel === 1) {
     // LOCATION: in journey mode the world already contains all four, so this
     // jumps to the next block's start; in single mode it cycles the location.
-    if (expPrefs.journey) {
-      const next = (currentLocIdx() + 1) % 4;
-      position = locBounds[next].startZ;
-      lastLocIdx = next;
-      startLocationAtmosphere(next);
-      refreshTrafficActivation();
-      tierMsg = 'ENTERING ' + LOCATIONS[next].name.toUpperCase();
-      tierMsgT = 3;
-    } else {
-      const nextIdx = (LOC_INDEX[expPrefs.location] + 1) % 4;
-      selectLocation(LOCATIONS[nextIdx].id);
-    }
+    cyclePauseLocation(1);
     setPaused(false);
   }
   else if (pauseSel === 2) { setMuted(!muted); drawPauseMenu(); }
@@ -3437,6 +3462,33 @@ function activatePauseItem() {
   else if (pauseSel === 4) { resetRun(); setPaused(false); }
   clickSound();
 }
+// Desktop mouse: the pause menu is a 3D canvas plane, not DOM, so clicks
+// need a raycast — clicking a row did nothing before this handler existed.
+// Clicking a row selects AND activates it (clicking LOCATION cycles the
+// location, same as Enter). VR is untouched: no mouse exists while
+// presenting, and the guard below enforces that.
+const pauseRaycaster = new THREE.Raycaster();
+const pausePointer = new THREE.Vector2();
+renderer.domElement.addEventListener('click', (e) => {
+  if (!paused || renderer.xr.isPresenting) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pausePointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  pauseRaycaster.setFromCamera(pausePointer, camera);
+  const hit = pauseRaycaster.intersectObject(pausePanel, false)[0];
+  if (!hit || !hit.uv) return;
+  const canvasY = (1 - hit.uv.y) * 400;
+  // Item rows: baseline 162 + i*40, highlight band y-30..y+10 (must match
+  // the row geometry in drawPauseMenu).
+  for (let i = 0; i < PAUSE_ITEMS.length; i++) {
+    const y = 162 + i * 40;
+    if (canvasY >= y - 30 && canvasY < y + 10) {
+      pauseSel = i;
+      drawPauseMenu();
+      activatePauseItem();
+      return;
+    }
+  }
+});
 // Expansion run state: guardrail scrape feedback (challenge state lives on
 // the activeChallenges zone objects themselves — see buildTrack).
 let scraping = false;
@@ -3811,6 +3863,12 @@ function readInputs() {
   let keyMenuY = 0;
   if (keys['ArrowUp'] || keys['KeyW']) keyMenuY = -1;
   else if (keys['ArrowDown'] || keys['KeyS']) keyMenuY = 1;
+  // Menu left/right on desktop: Left/Right arrows cycle the location while
+  // the LOCATION row is selected (the tick gates on that). No XR source:
+  // the sticks steer, and the controller path is unchanged.
+  let keyMenuX = 0;
+  if (keys['ArrowLeft']) keyMenuX = -1;
+  else if (keys['ArrowRight']) keyMenuX = 1;
   prevKeyB = !!keys['KeyB']; prevKeyH = !!keys['KeyH']; prevKeyO = !!keys['KeyO']; prevKeyT = !!keys['KeyT'];
   prevKeyP = !!keys['KeyP']; prevKeyEnter = !!keys['Enter'];
   return {
@@ -3824,6 +3882,7 @@ function readInputs() {
     pause: xr.pause || keyPause,
     mute: xr.mute,
     menuY: keyMenuY !== 0 ? keyMenuY : xr.menuY,
+    menuX: keyMenuX,
     menuAct: xr.menuAct || keyMenuAct
   };
 }
@@ -4398,6 +4457,7 @@ const clock = new THREE.Clock();
 let dashTimer = 0, hudMph = -1;
 
 let prevMenuDir = 0;   // pause-menu thumbstick edge detection
+let prevMenuXDir = 0;  // pause-menu Left/Right arrow edge detection
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   // Frame-time guard: hold difficulty progression while frames degrade
@@ -4424,6 +4484,14 @@ function tick() {
       drawPauseMenu(); clickSound();
     }
     prevMenuDir = dir;
+    // Left/Right arrows cycle the location while LOCATION is selected
+    // (desktop). Stays paused so the new location shows in the menu.
+    const dirX = input.menuX < -0.5 ? -1 : input.menuX > 0.5 ? 1 : 0;
+    if (dirX !== 0 && dirX !== prevMenuXDir && pauseSel === 1) {
+      cyclePauseLocation(dirX);
+      drawPauseMenu(); clickSound();
+    }
+    prevMenuXDir = dirX;
     if (input.menuAct) activatePauseItem();
     // Frozen world: idle engine hum, vignette off, still render the scene
     // (the headset can still look around the frozen world).

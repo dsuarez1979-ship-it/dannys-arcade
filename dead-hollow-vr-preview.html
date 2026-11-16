@@ -61,6 +61,9 @@
   }
   #menu button.secondary { background: #e8e2ff; }
   #menu button:active { transform: scale(0.97); }
+  #menu .backlink { margin-top:20px; font-size:13px; }
+  #menu .backlink a { color:#9d8fd0; text-decoration:none; }
+  #menu .backlink a:hover { color:#c9c0ee; }
   #mutebtn {
     position: fixed; top: 12px; right: 12px; z-index: 20;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px; font-weight: 700;
@@ -119,12 +122,13 @@
     <p id="perflogline" style="font-size:12.5px;color:#9d8fd0">No performance sessions logged yet.</p>
     <p style="font-size:11.5px;color:#8d82b8">Performance note: frame times + quality level are logged locally on this device only (localStorage) to help tune Quest 2 performance. Nothing is sent anywhere; no personal data is collected.</p>
     <p style="font-size:11px;color:#6d6290">3D models: Poly Pizza contributors — Quaternius, Kay Lousberg, J-Toastie, dook, CreativeTrio, Poly by Google (CC BY 3.0). Textures: Poly Haven (CC0).</p>
+    <p class="backlink"><a href="./">← Danny's Arcade</a></p>
   </div>
 </div>
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js'; // namespace import: r160 exports { retarget, retargetClip, clone } — no `SkeletonUtils` named export (a named import fails module linking and kills the whole script, incl. the menu buttons)
 
 // ============ helpers ============
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

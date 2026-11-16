@@ -30,6 +30,9 @@
   #panel .sub { font-size:15px; letter-spacing:3px; color:#ffe9a8; margin-bottom:22px; text-transform:uppercase; }
   #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#fdf3dd; }
   #panel p.small { font-size:13px; color:#d8c9a8; }
+  #panel .backlink { margin-top:20px; font-size:13px; }
+  #panel .backlink a { color:#7d72a8; text-decoration:none; }
+  #panel .backlink a:hover { color:#bdb2e8; }
   #vrBtn {
     margin-top:18px; font-size:clamp(18px, 2.6vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
     color:#231303; background:linear-gradient(92deg,#ffe9a8,#ffb347); border:none; border-radius:12px;
@@ -103,6 +106,7 @@
     <p><b>VR:</b> ride the solwing Aurea over Solmere Vale and beyond — canyon, sea, and moonlit forest. Choose <b>GUIDED ADVENTURE</b> in the menu for the six-scene cinematic journey, or fly free. <b>Left stick</b> steers (pitch + bank), <b>right trigger</b> speeds up, <b>left trigger</b> slows down, <b>right stick</b> up/down trims speed and flicking it sideways snap-turns. To land, fly slow and low over flat ground and hold the stick down — Aurea settles, and a trigger pull takes off again. Look around freely — the world banks with your wings, never your head. <b>B/Y</b> pauses, <b>A/X</b> recenters.</p>
     <p><b>Desktop:</b> W/S speed, A/D bank, arrow keys pitch/turn, drag the mouse to look. Space launches. P pauses. M mutes.</p>
     <p class="small">No lives, no game over, ever — this is a flight experience. All music and sound is synthesized live in your browser. Surface textures: licensed CC0 (Poly Haven). Session performance (frame times + quality level) is logged locally on this device only — nothing is sent anywhere.</p>
+    <p class="backlink"><a href="./">← Danny's Arcade</a></p>
   </div>
 </div>
 
@@ -3810,7 +3814,15 @@ const menuTex = new THREE.CanvasTexture(menuCanvas);
 menuTex.colorSpace = THREE.SRGBColorSpace;
 const menuPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.06),
   new THREE.MeshBasicMaterial({ map: menuTex, transparent: true, toneMapped: false }));
-menuPlane.position.set(0, 0, -2.2);
+// Phase D fix (2026-11-15): the panel used to sit at y=0, centred on
+// Aurea's neck — the neck tube (curve through y 0.15→0.95 at z -1.3→-2.2,
+// radius 0.16) pierces the panel plane (rig z -1.65) at y≈0.43, i.e. on
+// the old bottom edge, covering the bottom canvas lines. Lifting the
+// panel 0.4 m puts its bottom edge at rig y 0.82, ~0.12 m clear of the
+// neck's highest reach (incl. idle sway + breathing); the bird stays
+// fully visible below the panel. Same distance, so angular size and all
+// raycast input (VR laser + desktop click) are unchanged.
+menuPlane.position.set(0, 0.4, -2.2);
 menuPlane.visible = false;
 camera.add(menuPlane);
 let menuButtons = [];
