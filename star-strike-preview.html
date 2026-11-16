@@ -77,9 +77,13 @@
     text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap;
     background:rgba(2,8,24,.72); border:2px solid #27e8ff; border-radius:8px; padding:8px 12px; max-width:calc(100vw - 24px);
   }
-  /* D6: DOM perf overlay (?debug=perf) — top-right, out of the HUD's way. */
+  /* D6: DOM perf overlay (?debug=perf) — top-right, out of the HUD's way.
+     D6b: z-index 30, ABOVE the launch panel (z-index 10) — at z-index 5
+     the overlay rendered behind the opaque panel and was invisible in the
+     menu even though tick updated it. pointer-events:none, so it never
+     blocks menu clicks. */
   #perf {
-    position:fixed; right:12px; top:12px; z-index:5; display:none;
+    position:fixed; right:12px; top:12px; z-index:30; display:none;
     color:#8fb8ff; font:700 13px/1.5 monospace; letter-spacing:0.5px; white-space:nowrap;
     background:rgba(2,8,24,.78); border:1px solid #27e8ff; border-radius:8px; padding:6px 10px;
     pointer-events:none;
@@ -3495,6 +3499,10 @@ const keys = {};
 // consumes them (one action per press, like the XR rising edges).
 // pauseActivateQueued is the same pattern for Enter on the pause menu.
 let secondaryKeyQueued = false, cycleKeyQueued = false, pauseActivateQueued = false;
+// D5b: edge-triggered desktop pause nav — one row per arrow press, queued
+// by the keydown handler and consumed in tick (accumulated, so no press
+// is lost if several land between frames on a slow machine).
+let pauseNavDelta = 0, pauseAdjustDelta = 0;
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
@@ -3503,6 +3511,15 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyP') togglePause();
   if (e.code === 'Escape') togglePause(); // D5: desktop pause (was: no binding — reload was the only exit)
   if (e.code === 'Enter' && paused) pauseActivateQueued = true; // D5: activate the selected pause-menu row
+  // D5b: desktop pause-menu arrows — queued here (one step per press),
+  // consumed in tick. The old level-based keys[] read + 0.3 s repeat
+  // timer swallowed quick taps on slow frames.
+  if (paused && S.mode === 'play') {
+    if (e.code === 'ArrowDown') pauseNavDelta += 1;
+    else if (e.code === 'ArrowUp') pauseNavDelta -= 1;
+    else if (e.code === 'ArrowRight') pauseAdjustDelta += 1;
+    else if (e.code === 'ArrowLeft') pauseAdjustDelta -= 1;
+  }
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') triggerRollOrDash();
   if (e.code === 'KeyN') tryNova();
   if (e.code === 'KeyQ') secondaryKeyQueued = true; // desktop secondary weapon
@@ -5766,7 +5783,7 @@ function togglePause() {
   if (S.mode !== 'play') return;
   paused = !paused;
   if (paused) pauseSel = 0; // the menu opens at the top (D5)
-  else pauseActivateQueued = false; // resuming drops a stale Enter queue
+  else { pauseActivateQueued = false; pauseNavDelta = 0; pauseAdjustDelta = 0; } // resuming drops stale queues (D5/D5b)
   if (!paused) hidePanel(); // resuming from the post-session-end panel
   drawPausePanel(); // refresh the settings display (selection + values)
   hudDirty = true;
@@ -7081,7 +7098,12 @@ let time = 0, perfHudT = 0, proxToneT = 0;
 let perfDomT = 0, perfDomEma = 0; // D6: DOM perf overlay cadence + frame-time EMA (menu included — perfValve only runs in play)
 const _waypointPos = new THREE.Vector3();
 function tick() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  // D6b: the gameplay dt stays CLAMPED at 50 ms — a hitch must never
+  // explode the physics. But the clamp PINNED every dt-derived frame-time
+  // readout at exactly 50.0 ms on machines slower than 20 fps (the
+  // desktop VM), so the perf instruments below read the RAW delta.
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
   time += dt;
   const xr = pollXR(dt);
 
@@ -7103,20 +7125,29 @@ function tick() {
     // Pause-menu settings (2.0): left stick up/down (or desktop arrows)
     // moves the selection; right stick left/right (or arrows) changes the
     // value. Changes apply immediately + save + redraw the panel.
+    // D5b: desktop arrows are edge-triggered (queued by the keydown
+    // handler — one row per press); XR sticks stay level-based with
+    // the 0.3 s repeat, because analog input needs hold-to-scroll.
     pauseNavT -= dt;
-    let navY = 0, navX = 0;
-    if (renderer.xr.isPresenting) { navY = xr.thrust; navX = xr.yaw; }
-    else {
-      if (keys['ArrowUp']) navY = 1; else if (keys['ArrowDown']) navY = -1;
-      if (keys['ArrowRight']) navX = 1; else if (keys['ArrowLeft']) navX = -1;
+    if (pauseNavDelta !== 0) {
+      pauseSel = (((pauseSel + pauseNavDelta) % 7) + 7) % 7; // 7 rows: 4 settings + 3 actions
+      pauseNavDelta = 0;
+      drawPausePanel();
     }
-    if (navY !== 0 && pauseNavT <= 0) {
-      pauseSel = (pauseSel + (navY < 0 ? 1 : 6)) % 7; // push down = next row (7 rows: 4 settings + 3 actions)
-      pauseNavT = 0.3; drawPausePanel();
-    } else if (navX !== 0 && pauseNavT <= 0) {
-      pauseAdjust(navX > 0 ? 1 : -1);
-      pauseNavT = 0.3;
-    } else if (navY === 0 && navX === 0) pauseNavT = 0; // re-arm instantly on release
+    if (pauseAdjustDelta !== 0) {
+      while (pauseAdjustDelta > 0) { pauseAdjust(1); pauseAdjustDelta--; }
+      while (pauseAdjustDelta < 0) { pauseAdjust(-1); pauseAdjustDelta++; }
+    }
+    if (renderer.xr.isPresenting) {
+      const navY = xr.thrust, navX = xr.yaw;
+      if (navY !== 0 && pauseNavT <= 0) {
+        pauseSel = (pauseSel + (navY < 0 ? 1 : 6)) % 7; // push down = next row
+        pauseNavT = 0.3; drawPausePanel();
+      } else if (navX !== 0 && pauseNavT <= 0) {
+        pauseAdjust(navX > 0 ? 1 : -1);
+        pauseNavT = 0.3;
+      } else if (navY === 0 && navX === 0) pauseNavT = 0; // re-arm instantly on release
+    }
     // Activate the selected action row (D5): Enter on desktop, right
     // trigger (rising edge) in VR. pauseSel resets to 0 on pause, so a
     // trigger held through the pause press only ever "activates" row 0
@@ -7639,7 +7670,7 @@ function tick() {
     // start/resume is not gameplay frame time). Tier progression still
     // holds while degraded (see checkTier).
     if (perfWarmup > 0) perfWarmup -= dt;
-    else { perfValve.update(dt); perfSessionTick(dt); }
+    else { perfValve.update(rawDt); perfSessionTick(rawDt); } // D6b: instruments read true frame time (rawDt), not the clamped gameplay dt
     // Phase 3 per-frame systems: lock maintenance, mission progress,
     // missile warning, targeting HUD, cockpit instruments, aim debug.
     updateLock(dt);
@@ -7782,10 +7813,12 @@ function tick() {
   // readout at all. Updated at 2 Hz in every mode (menu included); the
   // frame time is a local EMA because perfValve only runs in play.
   // renderer.info.reset() runs at the START of render() (r160), so the
-  // count read here is the just-completed frame's.
+  // count read here is the just-completed frame's. D6b: the EMA and the
+  // cadence use rawDt (true frame time) — the clamped gameplay dt pinned
+  // the readout at exactly 50.0 ms on machines slower than 20 fps.
   if (perfDebug) {
-    perfDomEma = perfDomEma === 0 ? dt : perfDomEma * 0.9 + dt * 0.1;
-    perfDomT += dt;
+    perfDomEma = perfDomEma === 0 ? rawDt : perfDomEma * 0.9 + rawDt * 0.1;
+    perfDomT += rawDt;
     if (perfDomT > 0.5) {
       perfDomT = 0;
       const calls = renderer.info && renderer.info.render ? renderer.info.render.calls : 0;
