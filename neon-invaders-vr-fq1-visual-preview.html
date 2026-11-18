@@ -1,0 +1,3041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
+<title>NEON INVADERS VR — Danny's Arcade</title>
+<style>
+  *, *::before, *::after { box-sizing:border-box; }
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#040110;
+    font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
+  canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (plain
+     align-items:center would clip the top). The ENTER VR button sits above
+     the detail paragraphs in the DOM so it is visible on load. */
+  #panel {
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
+    z-index:10; text-align:center; color:#fff;
+  }
+  #panel .box { width:100%; max-width:580px; margin:auto; min-width:0; }
+  #panel h1 {
+    font-size:clamp(28px, 8vw, 58px); letter-spacing:clamp(2px, 1vw, 5px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
+    background:linear-gradient(92deg,#27e8ff 10%,#2bff88 55%,#ff3df0 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    text-shadow:0 0 34px rgba(39,232,255,.25);
+  }
+  #panel .sub { font-size:15px; letter-spacing:3px; color:#bfeaff; margin-bottom:22px; text-transform:uppercase; }
+  #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#eaf6ff; }
+  #panel p.small { font-size:13px; color:#a9c6e8; }
+  #panel .backlink { margin-top:20px; font-size:13px; }
+  #panel .backlink a { color:#7d72a8; text-decoration:none; }
+  #panel .backlink a:hover { color:#bdb2e8; }
+  #vrBtn {
+    margin-top:20px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
+    color:#06121f; background:linear-gradient(92deg,#27e8ff,#2bff88); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+    min-height:56px; width:min(100%, 340px);
+  }
+  #vrBtn:disabled { opacity:.55; cursor:wait; }
+  /* FQ1: perf-log export button — small outlined button, visually quieter
+     than ENTER VR (it is a diagnostics action, not the main call to action). */
+  #exportPerfBtn {
+    margin-top:10px; cursor:pointer; font-size:13px; letter-spacing:1px;
+    background:rgba(10,16,38,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
+    padding:10px 18px; min-height:44px;
+  }
+  #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  #hud {
+    /* Shared arcade scoreboard cell (desktop form): small dark translucent
+       rectangle with a thin neon border, top-left. Mirrors the VR cell. */
+    position:fixed; left:12px; top:12px; z-index:5;
+    background:rgba(8,10,26,.78); border:1px solid #27e8ff; border-radius:8px;
+    padding:8px 12px;
+    color:#7df9ff; font-size:15px; font-weight:800; letter-spacing:1px;
+    text-shadow:0 2px 8px #000; pointer-events:none; display:none; white-space:nowrap; max-width:calc(100vw - 24px);
+  }
+  #muteBtn {
+    position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
+    background:rgba(10,16,38,.72); color:#bfeaff; border:1px solid #27e8ff; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+  }
+  @media (max-width:520px) {
+    #hud { font-size:12px; }
+  }
+
+  #vrBtn, #startBtn { max-inline-size: 100%; min-block-size: 44px; margin-inline: auto; }
+  #vrBtn:focus-visible, #startBtn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<meta name="arcade-revision" content="CR1-preview">
+</head>
+<body>
+
+<div id="panel">
+  <div class="box">
+    <h1>NEON INVADERS VR</h1>
+    <div class="sub">Space Invaders in VR — unlimited ships &amp; upgrades, 1 weapon at a time, Iron Man hand cannons</div>
+    <p>Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b> below.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+    <p><b>Thumbstick</b> slides the cannon &nbsp;·&nbsp; <b>Point</b> the right controller to aim &nbsp;·&nbsp; <b>Trigger</b> fires</p>
+    <p class="small">In VR: <b>A / X</b> pauses &nbsp;·&nbsp; <b>B / Y</b> mutes &nbsp;·&nbsp; while paused, <b>grip</b> restarts the run. Kills, pickups, and hits buzz the controllers.</p>
+    <p class="small">Invaders surround you from every angle in deep space. Blast them all — if a flyer reaches you, or a bomb finds you, you lose a ship… and get another. Forever. There is no game over.</p>
+    <p class="small">You start with the base bolt only. Floating pickups — shoot them to collect: Spread Shot, Twin Laser, Rail Beam, Seeker Missiles, Spartan Laser, Fire Rate, Shield Layers, Cannon Power, Move Speed. One weapon at a time — a new weapon replaces the one you have. Upgrades stack forever, no caps. Flyers lunge at you about every 2 seconds, and every wave gets harder. Asteroids drift around you and shooting stars cross the sky — pure scenery.</p>
+    <p class="small">No headset handy? Desktop preview works too — mouse aims, A/D or mouse slides the cannon, click / Space fires, M mutes, P pauses, R restarts.</p>
+    <p class="small" id="perfLast" style="color:#9fd8ff">Performance: no session logged yet.</p>
+    <p class="small" id="perfLive" style="color:#9fd8ff">Build NEON-FQ1-20261116-VISUAL1-20261117 · no frames recorded yet.</p>
+    <p class="small">Session performance (frame times + degraded state) is logged locally on this device only — nothing is sent anywhere.</p>
+    <button id="exportPerfBtn">EXPORT PERF LOG</button>
+    <p class="small" id="buildIdLine" style="color:#7d72a8">Build NEON-FQ1-20261116-VISUAL1-20261117</p>
+    <p class="backlink"><a href="./">← Danny's Arcade</a></p>
+  </div>
+</div>
+
+<div id="hud">SCORE 0 · WAVE 1 · SHIPS LOST 0</div>
+<button id="muteBtn">SOUND: ON</button>
+
+<script type="module">
+import * as THREE from 'three';
+
+// FQ1 build ID (Finished-Quality Program, 2026-11-16): shown in the menu
+// footer + the perf line + the perf-log export, so Danny can confirm which
+// build he is testing. Bump on every shipped change to this file.
+const BUILD_ID = 'NEON-FQ1-20261116-VISUAL1-20261117';
+
+// CINEMATIC UPGRADE PROTOTYPE — Nov 15, 2026 (Danny's Arcade Cinematic
+// Realism Standard v1.0 + Production Bible v1.0). PROTOTYPE ONLY — the live
+// file is untouched until Danny validates this build on the headset.
+// Changes vs live (full list in the build notes):
+//  visuals: cabinet-frame environment (pylons + beam + marquee + platform
+//    posts), edge-frame materials (Bible §3.2) on shields + cabinet,
+//    richer invader materials, beat-reactive starfield/nebula/light pulse,
+//    pooled kill rings, visibility gating for zero-opacity sprites/quads;
+//  audio: stereo-panned SFX (position-aware), in-VR mute (B/Y);
+//  haptics: guarded Quest 2 pulses on kills/pickups/hits (Rhythm Slicer pattern);
+//  UX: in-VR pause (A/X) + restart (grip while paused), desktop P/R;
+//  perf: valve EXTENDED (fixed foveation 0.5 when degraded + kill-ring /
+//    shockwave / pulse shedding) — valve thresholds and hysteresis unchanged;
+//  cleanup: dead helpers slotString/slotShortString/gearString + WEAPON_SHORT
+//    removed. Gameplay, weapons, waves, scoring, unlimited ships unchanged.
+//
+// GRAPHICS NOTE (honest): this upgrade is a procedural visual lift inside the
+// EXACT same neon style — same palette, same glow treatment, same modern feel.
+// No restyle, no external assets, and no console realism: a Quest browser still
+// renders stylised neon, just richer, denser and more polished than before.
+//
+// FREEZE FIX (Quest): the old build ran at pixelRatio min(dpr, 2) with
+// antialiasing while pushing ~250 draw calls in stereo — the Quest GPU choked
+// and the game froze. Fixes here: pixelRatio capped at 1.5 (1.25 while an XR
+// session is presenting), antialias OFF, every projectile/pickup/particle/
+// shockwave pooled with a hard cap and recycle-oldest overflow, swarm
+// approach speed capped, frame dt clamped, and zero allocation in the hot loop
+// (all temps are module-level vectors reused every frame).
+// ROUND-2 FREEZE FIX (Danny: froze again after round 1): the remaining
+// culprits were (a) updateBolts ran a 2nd collision substep on slow frames,
+// making slow frames slower until freeze — now a single step, always;
+// (b) the score panel canvas re-uploaded to the GPU on every kill — now a
+// dirty flag flushed at most 4x/second; (c) uncapped weapon levels launched
+// an unbounded volley 20x/second — the fire interval now scales with volley
+// size so launches/second stay bounded; (d) an adaptive safety valve halves
+// particle spawns and skips the shield check on alternate frames whenever
+// the rolling average frame time exceeds ~20ms, recovering automatically.
+
+// ============================== helpers ==============================
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp  = (a, b, t) => a + (b - a) * t;
+const rand  = (a, b) => a + Math.random() * (b - a);
+
+// ============================== renderer / scene ==============================
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+// ROUND-2 FREEZE FIX: antialias was still true — MSAA in stereo VR is very
+// expensive on Quest. The neon glow aesthetic carries the look without it.
+// FREEZE FIX: was min(dpr, 2) — far too heavy for stereo Quest rendering.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+
+// Small, deterministic surface detail. Linear color space also lets the map drive roughness.
+const crSurface = (() => {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  let seed = 82741;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      const grain = seed >>> 27;
+      const band = Math.round(12 * Math.sin(y * Math.PI / 16));
+      const value = 204 + band + grain;
+      const offset = (y * size + x) * 4;
+      data[offset] = data[offset + 1] = data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+})();
+
+// Service dock ribs
+{
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const finish = new THREE.MeshStandardMaterial({
+    color: 0x28364a, map: crSurface, roughness: 0.86
+  });
+  const scenery = new THREE.InstancedMesh(geometry, finish, 24);
+  const object = new THREE.Object3D();
+  for (let i = 0; i < scenery.count; i++) {
+    const side = i % 2 ? 1 : -1;
+    object.position.set(side * (16 + i % 3), 4, -15 - Math.floor(i / 2) * 6);
+    object.scale.set(0.55, 9, 1.4);
+    object.rotation.z = -side * 0.16;
+    object.updateMatrix();
+    scenery.setMatrixAt(i, object.matrix);
+  }
+  scenery.instanceMatrix.needsUpdate = true;
+  scene.add(scenery);
+}
+
+scene.background = new THREE.Color(0x040110);
+scene.fog = new THREE.Fog(0x040110, 30, 175);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 900);
+
+// Player rig: dolly -> shake -> tilt (desktop look-up only) -> height holder -> camera.
+// Mirrors Rad VR's proven hierarchy; in VR the headset pose drives the camera and
+// the tilt stays at zero, on desktop the tilt aims the view up at the formation.
+const dolly = new THREE.Group();
+const shakeGroup = new THREE.Group();
+const tiltGroup = new THREE.Group();
+const heightHolder = new THREE.Group();
+dolly.add(shakeGroup); shakeGroup.add(tiltGroup); tiltGroup.add(heightHolder); heightHolder.add(camera);
+scene.add(dolly);
+
+// Lights: hemisphere + one directional; emissives and glow sprites carry the neon look
+scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.75));
+const keyLight = new THREE.DirectionalLight(0xbfd8ff, 1.15);
+keyLight.position.set(30, 60, -40);
+scene.add(keyLight);
+
+// Shared radial glow texture (every fake glow in the game uses it)
+function makeGlowTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  gr.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const glowTex = makeGlowTexture();
+function glowSprite(color, scale, opacity) {
+  const m = new THREE.SpriteMaterial({
+    map: glowTex, color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false
+  });
+  const s = new THREE.Sprite(m);
+  s.scale.set(scale, scale, 1);
+  return s;
+}
+
+// Edge-frame texture (Bible §3.2): dark glassy base + bold white frame +
+// thin inner frame. Used as BOTH map and emissiveMap on box-UV objects
+// (shield cubes, cabinet frame): edges glow in the material's emissive
+// color, the center stays dark. Zero extra draw calls, one shared texture.
+// NOT used on invader bodies: ExtrudeGeometry UVs are raw shape coords
+// (not 0-1), so the frame would not land on the edges there.
+function makeEdgeFrameTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 8, 64, 64, 90);
+  grad.addColorStop(0, '#0a0e1e');
+  grad.addColorStop(1, '#05070f');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 10; g.strokeRect(6, 6, 116, 116);
+  g.lineWidth = 3; g.globalAlpha = 0.7; g.strokeRect(20, 20, 88, 88);
+  g.globalAlpha = 1;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const edgeFrameTex = makeEdgeFrameTexture();
+// Combat-pulse targets (assigned in the environment blocks below): the
+// starfield material, the grid material, and the nebula sprites with their
+// base opacities. The pulse lifts them on kills/waves/tier-ups (Bible §3.5);
+// the valve freezes the pulse at base values while degraded.
+let starsMat = null, gridMat = null;
+const nebulaSprites = [];
+
+// ============================== environment: skybox, stars, nebulas, planets, grid, platform ==============================
+// Nebula skybox: one big inverted sphere with a painted gradient + soft nebula
+// blobs. One draw call, fog-exempt, drawn behind everything.
+{
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 512;
+  const g = cv.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, '#03010c');
+  grad.addColorStop(0.45, '#0d0624');
+  grad.addColorStop(0.75, '#1b0f3d');
+  grad.addColorStop(1, '#040110');
+  g.fillStyle = grad; g.fillRect(0, 0, 1024, 512);
+  g.globalCompositeOperation = 'lighter';
+  const blobs = [
+    [180, 150, 150, 'rgba(255,46,136,0.20)'], [520, 110, 190, 'rgba(39,232,255,0.16)'],
+    [820, 200, 170, 'rgba(123,45,139,0.22)'], [320, 300, 130, 'rgba(255,126,71,0.12)'],
+    [680, 320, 150, 'rgba(90,63,191,0.16)'], [60, 260, 110, 'rgba(43,255,136,0.10)'],
+    [940, 90, 120, 'rgba(39,232,255,0.12)'], [430, 220, 100, 'rgba(255,211,25,0.08)']
+  ];
+  for (const [x, y, r, col] of blobs) {
+    const rg = g.createRadialGradient(x, y, 4, x, y, r);
+    rg.addColorStop(0, col);
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(380, 24, 16),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false, toneMapped: false }));
+  sky.renderOrder = -1;
+  sky.frustumCulled = false;
+  scene.add(sky);
+}
+{ // Starfield: points on a far shell, slight colour variety, fog-exempt
+  const N = 2600;
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  const palette = [new THREE.Color(0xffffff), new THREE.Color(0xbfeaff), new THREE.Color(0xffd9ec), new THREE.Color(0x9fd8ff)];
+  const c = new THREE.Color();
+  for (let i = 0; i < N; i++) {
+    const r = rand(240, 340);
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1));
+    pos[i * 3]     = r * Math.sin(ph) * Math.cos(th);
+    pos[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * (Math.random() < 0.85 ? 1 : -0.4);
+    pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+    c.copy(palette[i % palette.length]).multiplyScalar(rand(0.35, 1));
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  starsMat = new THREE.PointsMaterial({
+    size: 1.7, sizeAttenuation: false, vertexColors: true, transparent: true,
+    opacity: 0.9, depthWrite: false, fog: false, toneMapped: false
+  });
+  const stars = new THREE.Points(g, starsMat);
+  stars.frustumCulled = false;
+  scene.add(stars);
+}
+// Nebula clouds: a handful of huge glow sprites — the three in the main
+// view are bright enough to read in-frame, plus two framing the view.
+[[-120, 55, -230, 0xff2e88, 300, 0.22], [140, 35, -250, 0x1fb6d9, 260, 0.20],
+ [0, 95, -270, 0x7b2d8b, 360, 0.24], [-190, -15, -130, 0xff7e47, 170, 0.08],
+ [70, -50, 190, 0x5a3fbf, 210, 0.07], [190, 80, 120, 0x27e8ff, 150, 0.06],
+ [-45, 20, -180, 0xff2e88, 200, 0.18], [50, 45, -190, 0x27e8ff, 220, 0.16]
+].forEach(n => {
+  const s = glowSprite(n[3], n[4], n[5]);
+  s.position.set(n[0], n[1], n[2]);
+  nebulaSprites.push({ sprite: s, base: n[5] });
+  scene.add(s);
+});
+// Animated background planets: banded canvas textures, slow rotation, fog-exempt.
+function makePlanetTexture(base, bands) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, 512, 256);
+  for (const [y, h, col] of bands) { g.fillStyle = col; g.fillRect(0, y, 512, h); }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const planetA = new THREE.Mesh(new THREE.SphereGeometry(30, 28, 20),
+  new THREE.MeshBasicMaterial({ map: makePlanetTexture('#2a1650', [[30, 14, 'rgba(123,45,139,0.55)'], [80, 22, 'rgba(39,232,255,0.28)'], [140, 12, 'rgba(255,46,136,0.35)'], [190, 18, 'rgba(20,8,50,0.6)']]), fog: false, toneMapped: false }));
+planetA.position.set(-55, 30, -150);
+scene.add(planetA);
+const planetB = new THREE.Group();
+{
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(22, 28, 20),
+    new THREE.MeshBasicMaterial({ map: makePlanetTexture('#7a3a10', [[40, 16, 'rgba(255,126,71,0.5)'], [100, 20, 'rgba(255,211,25,0.3)'], [160, 14, 'rgba(60,20,5,0.55)']]), fog: false, toneMapped: false }));
+  planetB.add(globe);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(30, 46, 48),
+    new THREE.MeshBasicMaterial({ color: 0xcaa06a, transparent: true, opacity: 0.55, side: THREE.DoubleSide, fog: false, toneMapped: false }));
+  ring.rotation.x = Math.PI / 2 - 0.42;
+  planetB.add(ring);
+  planetB.position.set(60, -8, -160);
+  scene.add(planetB);
+}
+// Cratered rock world: speckled canvas texture with crater dots.
+function makeCraterTexture(base) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, 512, 256);
+  for (let i = 0; i < 90; i++) {
+    const x = Math.random() * 512, y = Math.random() * 256, r = 2 + Math.random() * 9;
+    g.fillStyle = 'rgba(15,25,15,0.35)'; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(140,165,130,0.25)'; g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.5, 0, Math.PI * 2); g.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const planetC = new THREE.Mesh(new THREE.SphereGeometry(14, 20, 14),
+  new THREE.MeshBasicMaterial({ map: makeCraterTexture('#3d4a3a'), fog: false, toneMapped: false }));
+planetC.position.set(-8, 70, -170);
+scene.add(planetC);
+// Shooting stars: frequent bright streaks across the far sky, all around you —
+// pure scenery, no gameplay effect. (Boosted 2026-10-27: the old one was a
+// rare slow streak straight ahead, easy to never notice mid-fight.)
+const shootStar = glowSprite(0xbfeaff, 1, 0);
+shootStar.scale.set(14, 1.0, 1);
+shootStar.material.rotation = -0.35;
+shootStar.position.set(0, 60, -200);
+shootStar.visible = false; // visibility-gated: only drawn mid-streak (tick)
+scene.add(shootStar);
+let shootTimer = rand(6, 12), shootT = 0, shootX0 = 0, shootY0 = 60, shootZ0 = -200, shootDX = 1, shootDZ = 0;
+// Asteroids (Danny 2026-10-27): a belt of tumbling rocks on a far shell
+// (radius 28-45, always behind the swarm) — pure scenery, NO collision, so
+// your shots fly straight past them to the invaders. One instanced draw call.
+const AST_COUNT = 36;
+const astMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
+  new THREE.MeshStandardMaterial({ color: 0x6a6258, roughness: 1, metalness: 0, fog: false }), AST_COUNT);
+astMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+astMesh.frustumCulled = false;
+scene.add(astMesh);
+const astDummy = new THREE.Object3D();
+const asteroids = [];
+for (let i = 0; i < AST_COUNT; i++) {
+  asteroids.push({ a: Math.random() * Math.PI * 2, r: rand(28, 45), y: rand(-3, 30),
+    sx: rand(0.6, 2.4), sy: rand(0.6, 2.4), sz: rand(0.6, 2.4),
+    orbit: rand(0.005, 0.02) * (Math.random() < 0.5 ? 1 : -1),
+    tax: rand(-1, 1), tay: rand(-1, 1), taz: rand(-1, 1), tsp: rand(0.05, 0.3), ph: Math.random() * Math.PI * 2 });
+}
+function updateAsteroids(dt) {
+  for (let i = 0; i < asteroids.length; i++) {
+    const a = asteroids[i];
+    a.a += a.orbit * dt;
+    astDummy.position.set(Math.cos(a.a) * a.r, a.y + Math.sin(elapsed * 0.1 + a.ph) * 0.5, Math.sin(a.a) * a.r);
+    astDummy.rotation.set(a.tax * elapsed * a.tsp, a.tay * elapsed * a.tsp, a.taz * elapsed * a.tsp);
+    astDummy.scale.set(a.sx, a.sy, a.sz);
+    astDummy.updateMatrix();
+    astMesh.setMatrixAt(i, astDummy.matrix);
+  }
+  astMesh.instanceMatrix.needsUpdate = true;
+}
+{ // Synthwave grid floor far below, faded by fog
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#000000'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#154a66'; g.fillRect(0, 0, 256, 5); g.fillRect(0, 0, 5, 256);
+  g.fillStyle = '#27e8ff'; g.fillRect(0, 0, 256, 2); g.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(70, 70);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  gridMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const grid = new THREE.Mesh(new THREE.PlaneGeometry(700, 700), gridMat);
+  grid.rotation.x = -Math.PI / 2;
+  grid.position.y = -6;
+  scene.add(grid);
+}
+// Player platform: dark cylinder + glowing rim + patterned top disc
+const PLAT_R = 4.6;
+{
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(PLAT_R, PLAT_R + 0.45, 0.35, 40),
+    new THREE.MeshStandardMaterial({ color: 0x11162a, roughness: 0.6, metalness: 0.5 }));
+  drum.position.y = 0;
+  scene.add(drum);
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#0a0e1e'; g.fillRect(0, 0, 512, 512);
+  g.strokeStyle = '#27e8ff';
+  [230, 170, 110, 55].forEach((r, i) => { g.lineWidth = i % 2 ? 3 : 5; g.globalAlpha = 0.55 - i * 0.09; g.beginPath(); g.arc(256, 256, r, 0, Math.PI * 2); g.stroke(); });
+  g.globalAlpha = 0.35; g.lineWidth = 3;
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    g.beginPath(); g.moveTo(256 + Math.cos(a) * 55, 256 + Math.sin(a) * 55);
+    g.lineTo(256 + Math.cos(a) * 230, 256 + Math.sin(a) * 230); g.stroke();
+  }
+  g.globalAlpha = 1;
+  const topTex = new THREE.CanvasTexture(cv); topTex.colorSpace = THREE.SRGBColorSpace;
+  const top = new THREE.Mesh(new THREE.CircleGeometry(PLAT_R, 40),
+    new THREE.MeshBasicMaterial({ map: topTex, toneMapped: false }));
+  top.rotation.x = -Math.PI / 2; top.position.y = 0.178;
+  scene.add(top);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(PLAT_R + 0.02, 0.05, 10, 48),
+    new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false }));
+  rim.rotation.x = Math.PI / 2; rim.position.y = 0.18;
+  scene.add(rim);
+  const under = glowSprite(0x27e8ff, 13, 0.16); under.position.y = -0.7; scene.add(under);
+}
+// ============================== cabinet frame (cinematic upgrade) ==============================
+// The "deep-space arcade cabinet": a physical frame around the play field —
+// two pylons + a top beam + a marquee — so the action reads as a cabinet
+// brought to life, not a swarm floating in a void. All static, shared
+// materials, 7 draw calls + 1 for the platform posts. The pylons/beam use
+// the edge-frame texture (Bible §3.2) as map + emissiveMap: dark metal
+// centers, glowing cyan edges. Nothing here moves, collides, or affects
+// gameplay; the valve never sheds it (Bible §2: never shed geometry).
+{
+  const cabinetMat = new THREE.MeshStandardMaterial({
+    map: edgeFrameTex, emissiveMap: edgeFrameTex,
+    color: 0x8a93b8, emissive: 0x27e8ff, emissiveIntensity: 0.55,
+    roughness: 0.4, metalness: 0.7
+  });
+  const stripMatC = new THREE.MeshBasicMaterial({ color: 0x27e8ff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
+  const stripMatM = new THREE.MeshBasicMaterial({ color: 0xff3df0, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
+  const pylonGeo = new THREE.BoxGeometry(0.9, 13, 0.9);
+  [-10.5, 10.5].forEach(x => {
+    const pylon = new THREE.Mesh(pylonGeo, cabinetMat);
+    pylon.position.set(x, 6.5, -19);
+    scene.add(pylon);
+  });
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(21.9, 0.9, 0.9), cabinetMat);
+  beam.position.set(0, 13.4, -19);
+  scene.add(beam);
+  const stripGeoV = new THREE.BoxGeometry(0.1, 12.2, 0.1);
+  const stripL = new THREE.Mesh(stripGeoV, stripMatC);
+  stripL.position.set(-10.0, 6.5, -18.5);
+  scene.add(stripL);
+  const stripR = new THREE.Mesh(stripGeoV, stripMatM);
+  stripR.position.set(10.0, 6.5, -18.5);
+  scene.add(stripR);
+  const stripTop = new THREE.Mesh(new THREE.BoxGeometry(21, 0.1, 0.1), stripMatC);
+  stripTop.position.set(0, 12.9, -18.5);
+  scene.add(stripTop);
+  // Marquee: canvas-painted cabinet sign above the play field.
+  const mcv = document.createElement('canvas'); mcv.width = 1024; mcv.height = 256;
+  const mg = mcv.getContext('2d');
+  mg.fillStyle = '#070a1c'; mg.fillRect(0, 0, 1024, 256);
+  mg.strokeStyle = '#27e8ff'; mg.lineWidth = 8; mg.strokeRect(8, 8, 1008, 240);
+  mg.textAlign = 'center';
+  const mgrad = mg.createLinearGradient(60, 0, 964, 0);
+  mgrad.addColorStop(0, '#27e8ff'); mgrad.addColorStop(0.5, '#2bff88'); mgrad.addColorStop(1, '#ff3df0');
+  mg.fillStyle = mgrad;
+  mg.shadowColor = '#27e8ff'; mg.shadowBlur = 30;
+  mg.font = '900 110px Arial';
+  mg.fillText('NEON INVADERS', 512, 140);
+  mg.shadowBlur = 10; mg.fillStyle = '#bfeaff'; mg.font = '700 44px Arial';
+  mg.fillText("DANNY'S ARCADE", 512, 210);
+  const marqueeTex = new THREE.CanvasTexture(mcv);
+  marqueeTex.colorSpace = THREE.SRGBColorSpace;
+  const marquee = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.25),
+    new THREE.MeshBasicMaterial({ map: marqueeTex, fog: false, toneMapped: false }));
+  marquee.position.set(0, 11.1, -18.4);
+  scene.add(marquee);
+}
+// Platform edge posts: 8 small emissive bollards around the rim, one
+// instanced draw call, static (matrix set once — no per-frame cost).
+{
+  const postMesh = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.06, 0.08, 0.55, 8),
+    new THREE.MeshStandardMaterial({ color: 0x0d2b33, emissive: 0x27e8ff, emissiveIntensity: 1.2, roughness: 0.4, metalness: 0.3 }),
+    8
+  );
+  const postDummy = new THREE.Object3D();
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * Math.PI * 2 + Math.PI / 8;
+    postDummy.position.set(Math.cos(a) * (PLAT_R + 0.15), 0.35, Math.sin(a) * (PLAT_R + 0.15));
+    postDummy.rotation.set(0, 0, 0);
+    postDummy.scale.setScalar(1);
+    postDummy.updateMatrix();
+    postMesh.setMatrixAt(i, postDummy.matrix);
+  }
+  postMesh.instanceMatrix.needsUpdate = true;
+  scene.add(postMesh);
+}
+// Rail REMOVED 2026-10-27 (Danny: hands are the guns now) — meshes are built
+// into a hidden group instead of deleted, so restoring them is one line.
+const RAIL_Z = -1.6, RAIL_MIN = -5, RAIL_MAX = 5;
+const railGroup = new THREE.Group();
+{
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x39415e, roughness: 0.35, metalness: 0.85 });
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.08, 0.14), railMat);
+  rail.position.set(0, 0.78, RAIL_Z);
+  railGroup.add(rail);
+  const capMat = new THREE.MeshBasicMaterial({ color: 0x2bff88, toneMapped: false });
+  [-5.65, 5.65].forEach(x => {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), capMat);
+    cap.position.set(x, 0.78, RAIL_Z);
+    railGroup.add(cap);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.78, 8), railMat);
+    post.position.set(x * 0.92, 0.39, RAIL_Z);
+    railGroup.add(post);
+  });
+  railGroup.visible = false;
+  scene.add(railGroup);
+}
+
+// ============================== the cannon ==============================
+const cannon = new THREE.Group();          // slides along the rail (x only)
+const barrel = new THREE.Group();          // pivots to aim
+let cannonX = 0;
+let dodgeX = 0; // VR thumbstick sidestep offset, springs back to 0 in tick
+{
+  const hullMat = new THREE.MeshStandardMaterial({ color: 0x465769, roughness: 0.56, metalness: 0.55, roughnessMap: crSurface });
+  const accentMat = new THREE.MeshBasicMaterial({ color: 0x27e8ff, toneMapped: false });
+  const sled = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.16, 0.8), hullMat);
+  sled.position.y = 0.88; cannon.add(sled);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.05, 0.5), accentMat);
+  stripe.position.y = 0.82; cannon.add(stripe);
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.22, 14), hullMat);
+  pedestal.position.y = 1.05; cannon.add(pedestal);
+  barrel.position.set(0, 1.16, 0);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12),
+    new THREE.MeshBasicMaterial({ color: 0x2bff88, toneMapped: false }));
+  barrel.add(core);
+  const tubeMat = new THREE.MeshStandardMaterial({ color: 0x99adb8, roughness: 0.46, metalness: 0.72, roughnessMap: crSurface });
+  [-0.1, 0.1].forEach(x => {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.78, 10), tubeMat);
+    tube.rotation.x = Math.PI / 2;              // cylinder axis -> Z
+    tube.position.set(x, 0.03, 0.42);
+    barrel.add(tube);
+    const tip = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.016, 8, 14), accentMat);
+    tip.position.set(x, 0.03, 0.8);
+    barrel.add(tip);
+  });
+  cannon.add(barrel);
+  cannon.position.set(0, 0, RAIL_Z);
+  scene.add(cannon);
+  cannon.visible = false; // CANNON REMOVED 2026-10-27 (Danny: hands are the guns now) — the group still tracks cannonX for hit logic, just never renders
+}
+const muzzleFlash = glowSprite(0xbffcff, 0.85, 0);
+muzzleFlash.position.set(0, 1.2, RAIL_Z - 0.9);
+muzzleFlash.visible = false; // visibility-gated: only drawn while flashing (tick)
+scene.add(muzzleFlash);
+let flashT = 0;
+// Thruster glow under the cannon sled, pulsing gently — hidden with the cannon
+const thruster = glowSprite(0x27e8ff, 0.7, 0.5);
+thruster.position.set(0, 0.72, RAIL_Z + 0.55);
+thruster.visible = false;
+scene.add(thruster);
+// Shield shimmer bubble: flashes after a hit, and stays faintly visible while
+// shield layers remain (opacity grows with layers).
+const shimmer = new THREE.Mesh(new THREE.SphereGeometry(5.4, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0x27e8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false }));
+shimmer.position.set(0, 0.6, 0);
+scene.add(shimmer);
+let shimmerT = 0;
+// Red hit flash (camera-space quad, same trick as Rad VR)
+const flashMat = new THREE.MeshBasicMaterial({ color: 0xff2233, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
+const flashQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), flashMat);
+flashQuad.position.z = -0.35; flashQuad.renderOrder = 999;
+camera.add(flashQuad);
+let flash = 0, shakeT = 0;
+// Amber lunge-warning flash (camera-space quad, same trick as the hit flash)
+const lungeFlashMat = new THREE.MeshBasicMaterial({ color: 0xffb02e, transparent: true, opacity: 0, depthTest: false, toneMapped: false });
+const lungeFlashQuad = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), lungeFlashMat);
+lungeFlashQuad.position.z = -0.36; lungeFlashQuad.renderOrder = 998;
+camera.add(lungeFlashQuad);
+let lungeFlash = 0;
+// Direction indicators (Danny 2026-10-27): edge arrows in your view showing
+// which direction the swarm is coming from. White-drawn canvas textures,
+// tinted per frame: cyan for nearby invaders, red pulsing for a lunging
+// flyer in that direction, orange-red U-turn for threats behind you.
+function makeArrowTexture(draw) {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#ffffff'; g.strokeStyle = '#ffffff';
+  draw(g);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const chevronTex = makeArrowTexture(g => { g.beginPath(); g.moveTo(64, 8); g.lineTo(112, 104); g.lineTo(16, 104); g.closePath(); g.fill(); });
+const uturnTex = makeArrowTexture(g => {
+  g.lineWidth = 14; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(28, 96); g.quadraticCurveTo(28, 24, 64, 24); g.quadraticCurveTo(100, 24, 100, 62); g.stroke();
+  g.beginPath(); g.moveTo(84, 50); g.lineTo(114, 50); g.lineTo(99, 82); g.closePath(); g.fill();
+});
+function makeInd(tex, x, y, rot) {
+  const m = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthTest: false, toneMapped: false, fog: false });
+  m.rotation = rot;
+  const s = new THREE.Sprite(m);
+  s.scale.set(0.14, 0.14, 1);
+  s.position.set(x, y, -0.9);
+  s.renderOrder = 997;
+  camera.add(s);
+  return s;
+}
+const indL = makeInd(chevronTex, -0.62, 0, Math.PI / 2);
+const indR = makeInd(chevronTex, 0.62, 0, -Math.PI / 2);
+const indU = makeInd(chevronTex, 0, 0.42, 0);
+const indD = makeInd(chevronTex, 0, -0.38, Math.PI);
+const indB = makeInd(uturnTex, 0, -0.60, 0);
+const indQ = new THREE.Quaternion();
+function setInd(spr, strength, isLunge, pulse, baseColor) {
+  if (strength <= 0) { spr.material.opacity = 0; spr.visible = false; return; }
+  spr.visible = true;
+  spr.material.opacity = Math.min(0.95, strength * 0.6) * (isLunge ? pulse : 1);
+  spr.material.color.setHex(isLunge ? 0xff2233 : baseColor);
+}
+
+// ============================== diegetic panels (canvas textures) ==============================
+function makePanel(w, h) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = Math.round(512 * h / w);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { cv, ctx: cv.getContext('2d'), tex };
+}
+// SCOREBOARD CELL (shared arcade design, the game's ONLY scoreboard):
+// a small dark translucent rectangle with a thin neon border, top-left.
+// VR form: a camera-attached plane (same trick as the hit-flash quads, so it
+// follows the headset). Desktop form: the #hud DOM cell, same numbers.
+// VIEW-MARGIN MATH (Marsh Shot lesson): at depth -1.5, camera FOV 72 gives a
+// visible half-height of tan(36deg) x 1.5 = ~1.09 and a visible half-width of
+// only ~1.05. Cell 0.8 wide x 0.26 tall, centred at (-0.55, 0.88, -1.5):
+// left edge -0.95 (0.10 margin from the -1.05 left edge), right edge -0.15,
+// top edge 1.01 (0.08 margin below the 1.09 view top), bottom edge 0.75.
+// The whole cell fits inside the view on Quest and desktop — never parked
+// half off-screen. Visible only while an XR session is presenting; on
+// desktop the DOM cell is shown instead (see tick()).
+const scorePanel = makePanel(0.8, 0.26);
+const scoreMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.26),
+  new THREE.MeshBasicMaterial({ map: scorePanel.tex, transparent: true, toneMapped: false, fog: false, depthTest: false }));
+scoreMesh.position.set(-0.55, 0.88, -1.5);
+scoreMesh.renderOrder = 997;
+scoreMesh.visible = false;
+camera.add(scoreMesh);
+// Announcement panel, centre above the action (WAVE N / warnings / bonuses)
+const annPanel = makePanel(7.2, 1.8);
+const annMesh = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 1.8),
+  new THREE.MeshBasicMaterial({ map: annPanel.tex, transparent: true, opacity: 0, toneMapped: false, fog: false, depthWrite: false }));
+annMesh.position.set(0, 10.1, -13.2);
+scene.add(annMesh);
+let annT = 0, annDur = 0;
+function fitFont(g, text, size, weight, maxW) {
+  let s = size;
+  g.font = weight + ' ' + s + 'px Arial';
+  while (s > 20 && g.measureText(text).width > maxW) { s -= 4; g.font = weight + ' ' + s + 'px Arial'; }
+}
+function showAnnouncement(main, sub, dur) {
+  const g = annPanel.ctx, W = annPanel.cv.width, H = annPanel.cv.height;
+  g.clearRect(0, 0, W, H);
+  g.textAlign = 'center';
+  g.shadowColor = '#27e8ff'; g.shadowBlur = 26;
+  g.fillStyle = '#eaf6ff';
+  fitFont(g, main, 74, '900', W - 20);
+  g.fillText(main, W / 2, sub ? 92 : 118);
+  if (sub) {
+    g.shadowBlur = 12; g.fillStyle = '#ffd319';
+    fitFont(g, sub, 40, '700', W - 20);
+    g.fillText(sub, W / 2, 152);
+  }
+  annPanel.tex.needsUpdate = true;
+  annDur = dur; annT = dur;
+}
+
+// PAUSE PANEL (cinematic upgrade): camera-attached, same trick as the score
+// cell, so it is readable in VR and on desktop. Static canvas (drawn once) —
+// no per-frame cost. Visible only while paused in play mode (see tick).
+const pausePanel = makePanel(1.15, 0.575);
+const pauseMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.575),
+  new THREE.MeshBasicMaterial({ map: pausePanel.tex, transparent: true, toneMapped: false, fog: false, depthTest: false }));
+pauseMesh.position.set(0, 0, -1.5);
+pauseMesh.renderOrder = 1000;
+pauseMesh.visible = false;
+camera.add(pauseMesh);
+{
+  const g = pausePanel.ctx, W2 = pausePanel.cv.width, H = pausePanel.cv.height;
+  g.fillStyle = 'rgba(8,10,26,0.92)'; g.fillRect(0, 0, W2, H);
+  g.strokeStyle = '#27e8ff'; g.lineWidth = 6; g.strokeRect(4, 4, W2 - 8, H - 8);
+  g.textAlign = 'center';
+  g.fillStyle = '#eaf6ff'; g.font = '900 64px Arial';
+  g.fillText('PAUSED', W2 / 2, 76);
+  g.font = '700 30px Arial'; g.fillStyle = '#bfeaff';
+  g.fillText('A / X — resume      B / Y — sound', W2 / 2, 140);
+  g.fillText('Grip — restart run      P / R on desktop', W2 / 2, 190);
+  pausePanel.tex.needsUpdate = true;
+}
+
+// ============================== game state ==============================
+// NOTE: there is deliberately no lives counter and no end state — SHIPS LOST is a
+// scoreboard stat only. The state machine has exactly two modes: 'menu' and 'play'.
+let mode = 'menu';
+let started = false;
+let score = 0, wave = 1, shipsLost = 0;
+// Pause state (cinematic upgrade): freezes gameplay updates in tick; the
+// ambient scene (planets, asteroids, shooting stars) keeps drifting behind
+// the pause panel. Toggled by A/X in VR, P on desktop. Never auto-pauses
+// mid-play except on XR session end (see the session end handlers).
+let paused = false;
+function togglePause() {
+  if (!started || mode !== 'play') return;
+  paused = !paused;
+}
+// ============================== goal-based difficulty tiers ==============================
+// Every 2500 score = one tier up, on top of the existing per-wave escalation.
+// Tiers never decrease within a run. Each tier: swarm approach +4%,
+// enemy bomb rate +5% (0.38s floor respected). From tier 3, one
+// random invader per row becomes an elite: brighter core, 2 HP, double points.
+// Every 5th wave is a SURGE wave: faster approach, double bomb rate, double points.
+// FREEZE GUARD: tiers add no entities and change no pools or caps; while the
+// adaptive valve reports degraded frames, new tier-ups pause until recovery.
+const TIER_POINTS = 2500;
+let tier = 0, surgeWave = false;
+function addScore(n) {
+  score += surgeWave ? n * 2 : n;
+  checkTierUp();
+}
+function checkTierUp() {
+  const target = Math.floor(score / TIER_POINTS);
+  if (target <= tier) return;
+  if (degraded) return; // pause escalation while frames degrade; retries on the next score gain
+  tier = target;
+  markScoreDirty();
+  bumpPulse(0.8);
+  showAnnouncement('TIER ' + tier, tier >= 3 ? 'Faster approach - more bombs - ELITES inbound' : 'Faster approach - more bombs', 1.8);
+  pickupSound();
+  assignElites();
+}
+function assignElites() {
+  if (tier < 3) return;
+  for (let row = 0; row < ROW_DEFS.length; row++) {
+    const alive = invaders.filter(v => v.row === row && v.alive);
+    if (!alive.length || alive.some(v => v.elite)) continue;
+    const pick = alive[Math.floor(Math.random() * alive.length)];
+    pick.elite = true; pick.hp = 2; pick.points = pick.def.points * 2;
+  }
+}
+let drawnScore = -1, drawnWave = -1, drawnLost = -1, drawnMuted = false, drawnTrackingLost = false;
+// Round 3 (X-1): true while either connected hand's input pose is lost
+// (its target-ray Group is invisible — r160 hides the Group when the pose
+// is null). Declared HERE, not with the input section: drawScorePanel()
+// runs once at module load (below), so anything it reads must already
+// exist — same TDZ reason the `muted` flag lives here.
+let trackingLost = false;
+// Mute flag lives here (not in the audio section) because drawScorePanel()
+// runs once at module load, before the audio section executes — declaring
+// `muted` later would throw a TDZ ReferenceError on that first draw.
+let muted = false;
+const hud = document.getElementById('hud');
+let hudText = '';
+// Weapons: PICKUPS ONLY, ONE at a time (Danny 2026-10-27 — even when a
+// weapon pickup is collected, it replaces the one you have instead of
+// stacking). The base bolt always fires. Each weapon is a binary flag:
+// 0 = not equipped, 1 = equipped. `equipped` holds at most one key.
+// Upgrades (U) still stack WITHOUT a maximum — only weapons are capped.
+// Pools (below) are the only other physical limits, and they recycle the
+// oldest live item instead of failing.
+const W = { spread: 0, twin: 0, rail: 0, seeker: 0, spartan: 0 };
+const equipped = []; // weapon keys, at most one
+const WEAPON_LABELS = { spread: 'SPREAD SHOT', twin: 'TWIN LASER', rail: 'RAIL BEAM', seeker: 'SEEKER MISSILES', spartan: 'SPARTAN LASER' };
+const U = { rate: 0, shield: 0, power: 0, speed: 0 };
+// (Dead helpers slotString/slotShortString/gearString and the WEAPON_SHORT
+// table they alone used were removed in the Nov 15 cinematic upgrade —
+// nothing in the game ever called them.)
+// ROUND-2 FREEZE FIX: the scoreboard cell canvas re-uploads its texture to
+// the GPU on every redraw, so per-kill redraws stalled VR at high kill rates.
+// Score changes now only mark the cell dirty (markScoreDirty), and tick()
+// flushes the redraw at most 4 times per second — never per kill.
+let scorePanelDirty = true;
+let scorePanelTimer = 0;
+function markScoreDirty() { scorePanelDirty = true; }
+function flushScorePanel(dt) {
+  scorePanelTimer += dt;
+  if (scorePanelDirty && scorePanelTimer >= 0.25) {
+    scorePanelTimer = 0;
+    scorePanelDirty = false;
+    drawScorePanel();
+  }
+}
+function drawScorePanel() {
+  // The cell shows key numbers only — score, wave, and ships lost (the one
+  // extra stat the game already tracks). No new scoring, no scoring-logic
+  // change: tier/SURGE/gear info still arrives via announcements and pickup
+  // labels, exactly as before. Same numbers go to both forms of the cell.
+  if (score === drawnScore && wave === drawnWave && shipsLost === drawnLost && muted === drawnMuted && trackingLost === drawnTrackingLost) return;
+  drawnScore = score; drawnWave = wave; drawnLost = shipsLost; drawnMuted = muted; drawnTrackingLost = trackingLost;
+  const g = scorePanel.ctx, W2 = scorePanel.cv.width, H = scorePanel.cv.height;
+  g.clearRect(0, 0, W2, H);
+  g.fillStyle = 'rgba(8,10,26,0.78)'; g.fillRect(0, 0, W2, H);
+  g.strokeStyle = muted ? '#ff3355' : '#27e8ff'; g.lineWidth = 4; g.strokeRect(3, 3, W2 - 6, H - 6);
+  g.textAlign = 'left';
+  g.fillStyle = '#eaf6ff'; g.font = '900 52px Arial';
+  g.fillText('SCORE ' + String(score).padStart(6, '0'), 24, 68);
+  if (muted) {
+    g.textAlign = 'right';
+    g.fillStyle = '#ff3355'; g.font = '900 36px Arial';
+    g.fillText('MUTED', W2 - 24, 62);
+    g.textAlign = 'left';
+  }
+  // Round 3 (X-1): one-line notice while a hand's tracking is lost.
+  // Parked below MUTED when both show, so the tags never overlap.
+  if (trackingLost) {
+    g.textAlign = 'right';
+    g.fillStyle = '#ffaa00'; g.font = '900 30px Arial';
+    g.fillText('TRACKING LOST', W2 - 24, muted ? 108 : 62);
+    g.textAlign = 'left';
+  }
+  g.font = '700 32px Arial';
+  g.fillStyle = '#2bff88';
+  const waveText = 'WAVE ' + wave;
+  g.fillText(waveText, 24, 128);
+  g.fillStyle = '#ffb3d9';
+  g.fillText(' · SHIPS LOST ' + shipsLost, 24 + g.measureText(waveText).width, 128);
+  scorePanel.tex.needsUpdate = true;
+  const t = 'SCORE ' + score + ' · WAVE ' + wave + ' · SHIPS LOST ' + shipsLost + (muted ? ' · MUTED' : '') + (trackingLost ? ' · TRACKING LOST' : '');
+  if (t !== hudText) { hudText = t; hud.textContent = t; }
+}
+drawScorePanel();
+
+// ============================== invaders: 5 neon designs + instanced detail ==============================
+// Detail upgrade, same style: glowing eyes, cockpit canopies and core rings are
+// added as THREE InstancedMeshes (3 extra draw calls total for all 50 invaders,
+// instead of ~150) so the Quest stays smooth. Colours match each row's neon.
+const ROW_DEFS = [
+  { color: 0xff3df0, points: 30, kind: 'dart' },      // top row — magenta dart
+  { color: 0x9d5cff, points: 20, kind: 'cruiser' },   // violet cruiser
+  { color: 0x27e8ff, points: 20, kind: 'stingray' },  // cyan stingray
+  { color: 0x2bff88, points: 10, kind: 'beetle' },    // green beetle-drone
+  { color: 0xffb02e, points: 10, kind: 'saucer' }     // amber saucer-drone
+];
+function extrude(shape, depth) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1, curveSegments: 6
+  });
+  geo.translate(0, 0, -depth / 2);
+  return geo;
+}
+function shapeFrom(pts) {
+  const s = new THREE.Shape();
+  s.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
+  s.closePath();
+  return s;
+}
+function invaderBodyGeo(kind) {
+  switch (kind) {
+    case 'dart':
+      return extrude(shapeFrom([[0, 0.44], [0.4, -0.3], [0.12, -0.18], [0.12, -0.44], [-0.12, -0.44], [-0.12, -0.18], [-0.4, -0.3]]), 0.3);
+    case 'cruiser': {
+      const s = new THREE.Shape();
+      s.moveTo(-0.5, 0.02);
+      s.quadraticCurveTo(-0.3, 0.3, 0, 0.4);
+      s.quadraticCurveTo(0.3, 0.3, 0.5, 0.02);
+      s.lineTo(0.32, -0.34); s.lineTo(0.1, -0.2); s.lineTo(-0.1, -0.2); s.lineTo(-0.32, -0.34);
+      s.closePath();
+      return extrude(s, 0.3);
+    }
+    case 'stingray':
+      return extrude(shapeFrom([[0, 0.46], [0.5, 0.02], [0.2, -0.16], [0, -0.46], [-0.2, -0.16], [-0.5, 0.02]]), 0.3);
+    case 'beetle': {
+      const s = new THREE.Shape();
+      s.absellipse(0, 0, 0.44, 0.34, 0, Math.PI * 2);
+      return extrude(s, 0.32);
+    }
+    default: return null; // saucer is built from primitives
+  }
+}
+const SWARM_COUNT = 24; // invaders at once (Danny 2026-10-27: cut from 50 —
+// 50 all around was visual overload). The SURROUND SWARM replaces the flat
+// formation entirely: invaders spawn on a shell around you and close in
+// from every angle.
+const FORM_Z = -18; // kept only for the (disabled) mothership warm-up position
+const invaders = [];
+const coreGeo = new THREE.SphereGeometry(0.1, 10, 8);
+{
+  const saucerBeltGeo = new THREE.CylinderGeometry(0.47, 0.53, 0.15, 18);
+  const saucerDomeGeo = new THREE.SphereGeometry(0.27, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+  const mats = ROW_DEFS.map(def => ({
+    def,
+    bodyMat: new THREE.MeshStandardMaterial({
+      color: new THREE.Color(def.color).multiplyScalar(0.35),
+      emissive: def.color, emissiveIntensity: 0.7,
+      roughness: 0.3, metalness: 0.6
+    }),
+    coreMat: new THREE.MeshBasicMaterial({ color: def.color, toneMapped: false }),
+    bodyGeo: invaderBodyGeo(def.kind)
+  }));
+  for (let i = 0; i < SWARM_COUNT; i++) {
+    const m = mats[i % mats.length];
+    const grp = new THREE.Group();
+    if (m.def.kind === 'saucer') {
+      const belt = new THREE.Mesh(saucerBeltGeo, m.bodyMat); grp.add(belt);
+      const dome = new THREE.Mesh(saucerDomeGeo, m.bodyMat); dome.scale.y = 0.75; dome.position.y = 0.06; grp.add(dome);
+    } else {
+      grp.add(new THREE.Mesh(m.bodyGeo, m.bodyMat));
+    }
+    const core = new THREE.Mesh(coreGeo, m.coreMat); core.position.z = 0.2; grp.add(core);
+    const glow = glowSprite(m.def.color, 1.85, 0.34); glow.position.z = -0.1; grp.add(glow);
+    // Menu-ring start position (the menu branch re-positions every frame);
+    // resetSwarm() re-spawns on the shell when a run starts.
+    const ringA = i / SWARM_COUNT * Math.PI * 2;
+    grp.position.set(Math.cos(ringA) * 14, 5.5, Math.sin(ringA) * 14);
+    scene.add(grp);
+    invaders.push({ grp, core, row: i % ROW_DEFS.length, alive: true, phase: Math.random() * Math.PI * 2, def: m.def, elite: false, hp: 1, points: m.def.points, lunging: false, lungeT: 0, lungeDur: 0, lungeX0: 0, lungeY0: 0, lungeZ0: 0, lungeX1: 0, lungeY1: 0, lungeZ1: 0, anchorX: 0, anchorY: 0, anchorZ: -1, hold: 8, speed: 0.7, strafe: 0.8, strafeDir: 1 });
+  }
+}
+// Instanced detail meshes — children of the scene now (the swarm lives in
+// world space); updateInvaderDetails positions them from world coords + facing.
+const eyeGeo = new THREE.SphereGeometry(0.055, 8, 6);
+const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+const eyeMesh = new THREE.InstancedMesh(eyeGeo, eyeMat, SWARM_COUNT * 2);
+eyeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+eyeMesh.frustumCulled = false;
+scene.add(eyeMesh);
+const canopyGeo = new THREE.SphereGeometry(0.16, 10, 8);
+canopyGeo.scale(1, 0.55, 0.8);
+const canopyMesh = new THREE.InstancedMesh(canopyGeo,
+  new THREE.MeshStandardMaterial({ color: 0x0a1428, roughness: 0.1, metalness: 0.9 }), SWARM_COUNT);
+canopyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+canopyMesh.frustumCulled = false;
+scene.add(canopyMesh);
+const ringGeo = new THREE.TorusGeometry(0.3, 0.03, 6, 20);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+const ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, SWARM_COUNT);
+ringMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+ringMesh.frustumCulled = false;
+scene.add(ringMesh);
+{
+  const c = new THREE.Color();
+  invaders.forEach((v, i) => {
+    c.setHex(v.def.color);
+    eyeMesh.setColorAt(i * 2, c);
+    eyeMesh.setColorAt(i * 2 + 1, c);
+    ringMesh.setColorAt(i, c);
+  });
+  eyeMesh.instanceColor.needsUpdate = true;
+  ringMesh.instanceColor.needsUpdate = true;
+}
+const detailDummy = new THREE.Object3D();
+const ZERO_SCALE = 0.0001;
+function updateInvaderDetails() {
+  // Reuses one dummy object — no allocation per frame. Dead invaders collapse
+  // their instances to zero scale instead of being removed. Details sit on
+  // the invader's front (facing you) in world space — there is no formation
+  // plane anymore. The dummy's quaternion comes from lookAt once per invader,
+  // so the ring faces you; eye positions use facing/side vectors directly.
+  for (let i = 0; i < invaders.length; i++) {
+    const v = invaders[i];
+    if (!v.alive) {
+      detailDummy.position.set(0, -999, 0);
+      detailDummy.scale.setScalar(ZERO_SCALE);
+      detailDummy.updateMatrix();
+      eyeMesh.setMatrixAt(i * 2, detailDummy.matrix);
+      eyeMesh.setMatrixAt(i * 2 + 1, detailDummy.matrix);
+      canopyMesh.setMatrixAt(i, detailDummy.matrix);
+      ringMesh.setMatrixAt(i, detailDummy.matrix);
+      continue;
+    }
+    const gp = v.grp.position;
+    tmpA.copy(playerPos).sub(gp);
+    if (tmpA.lengthSq() < 0.01) tmpA.set(0, 0, 1); else tmpA.normalize();
+    tmpB.crossVectors(UP_Y, tmpA);
+    if (tmpB.lengthSq() < 0.01) tmpB.set(1, 0, 0); else tmpB.normalize();
+    const fx = tmpA.x, fy = tmpA.y, fz = tmpA.z; // facing (toward you)
+    const sx = tmpB.x, sy = tmpB.y, sz = tmpB.z; // side
+    detailDummy.position.copy(gp);
+    detailDummy.lookAt(playerPos.x, playerPos.y, playerPos.z);
+    const pulse = 1 + Math.sin(elapsed * 4 + v.phase) * 0.12;
+    detailDummy.position.set(gp.x - sx * 0.14 + fx * 0.18, gp.y + 0.12 + fy * 0.18, gp.z - sz * 0.14 + fz * 0.18);
+    detailDummy.scale.setScalar(pulse);
+    detailDummy.updateMatrix();
+    eyeMesh.setMatrixAt(i * 2, detailDummy.matrix);
+    detailDummy.position.set(gp.x + sx * 0.14 + fx * 0.18, gp.y + 0.12 + fy * 0.18, gp.z + sz * 0.14 + fz * 0.18);
+    detailDummy.updateMatrix();
+    eyeMesh.setMatrixAt(i * 2 + 1, detailDummy.matrix);
+    detailDummy.position.set(gp.x + fx * 0.05, gp.y + 0.3 + fy * 0.05, gp.z + fz * 0.05);
+    detailDummy.scale.setScalar(1);
+    detailDummy.updateMatrix();
+    canopyMesh.setMatrixAt(i, detailDummy.matrix);
+    detailDummy.position.set(gp.x + fx * 0.22, gp.y + fy * 0.22, gp.z + fz * 0.22);
+    detailDummy.scale.setScalar(pulse * (v.elite ? 1.6 : 1));
+    detailDummy.updateMatrix();
+    ringMesh.setMatrixAt(i, detailDummy.matrix);
+  }
+  eyeMesh.instanceMatrix.needsUpdate = true;
+  canopyMesh.instanceMatrix.needsUpdate = true;
+  ringMesh.instanceMatrix.needsUpdate = true;
+}
+let aliveCount = SWARM_COUNT;
+
+// ============================== shield bunkers (one InstancedMesh) ==============================
+const SHIELD_Z = -9;
+const shieldCubes = [];   // {x,y,z,alive}
+let shieldMesh = null;
+{
+  const pattern = ['.XXX.', 'XXXXX', 'XXXXX', 'XX.XX'];
+  const centers = [-4.6, -1.55, 1.55, 4.6];
+  for (const cx of centers) {
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) {
+      if (pattern[r][c] !== 'X') continue;
+      shieldCubes.push({ x: cx + (c - 2) * 0.36, y: 2.32 + (1.5 - r) * 0.36, z: SHIELD_Z, alive: true });
+    }
+  }
+  shieldMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(0.34, 0.34, 0.34),
+    new THREE.MeshStandardMaterial({ color: 0x0d2b33, emissive: 0x19e3ff, emissiveIntensity: 0.65, roughness: 0.5, metalness: 0.2, map: edgeFrameTex, emissiveMap: edgeFrameTex }),
+    shieldCubes.length
+  );
+  shieldMesh.frustumCulled = false;
+  scene.add(shieldMesh);
+}
+const shieldDummy = new THREE.Object3D();
+function refreshShields() {
+  for (let i = 0; i < shieldCubes.length; i++) {
+    const c = shieldCubes[i];
+    shieldDummy.position.set(c.x, c.y, c.z);
+    shieldDummy.scale.setScalar(c.alive ? 1 : 0.0001);
+    shieldDummy.updateMatrix();
+    shieldMesh.setMatrixAt(i, shieldDummy.matrix);
+  }
+  shieldMesh.instanceMatrix.needsUpdate = true;
+}
+function resetShields() { shieldCubes.forEach(c => { c.alive = true; }); refreshShields(); }
+refreshShields();
+// Returns true if the point destroys a shield cube
+function hitShield(x, y, z) {
+  for (const c of shieldCubes) {
+    if (!c.alive) continue;
+    const dx = x - c.x, dy = y - c.y, dz = z - c.z;
+    if (dx * dx + dy * dy + dz * dz < 0.115) { c.alive = false; refreshShields(); return true; }
+  }
+  return false;
+}
+
+// ============================== particles (pooled, ring-recycled) ==============================
+const P_COUNT = 480;
+const pPos = new Float32Array(P_COUNT * 3);
+const pCol = new Float32Array(P_COUNT * 3);
+const pVel = new Float32Array(P_COUNT * 3);
+const pLife = new Float32Array(P_COUNT);
+let pCursor = 0;
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3).setUsage(THREE.DynamicDrawUsage));
+const pPoints = new THREE.Points(pGeo, new THREE.PointsMaterial({
+  map: glowTex, size: 0.17, vertexColors: true, transparent: true,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+pPoints.frustumCulled = false;
+scene.add(pPoints);
+for (let i = 0; i < P_COUNT; i++) pPos[i * 3 + 1] = -999;
+const tmpColor = new THREE.Color();
+function spawnBurst(x, y, z, colorHex, count, speed, life) {
+  // Adaptive safety valve: halve particle spawns while frames are slow.
+  if (degraded) count = Math.ceil(count / 2);
+  tmpColor.setHex(colorHex);
+  for (let k = 0; k < count; k++) {
+    const i = pCursor; pCursor = (pCursor + 1) % P_COUNT;
+    pPos[i * 3] = x; pPos[i * 3 + 1] = y; pPos[i * 3 + 2] = z;
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1)), sp = speed * rand(0.3, 1);
+    pVel[i * 3] = sp * Math.sin(ph) * Math.cos(th);
+    pVel[i * 3 + 1] = sp * Math.cos(ph);
+    pVel[i * 3 + 2] = sp * Math.sin(ph) * Math.sin(th);
+    pCol[i * 3] = tmpColor.r; pCol[i * 3 + 1] = tmpColor.g; pCol[i * 3 + 2] = tmpColor.b;
+    pLife[i] = life * rand(0.5, 1.1);
+  }
+  pGeo.attributes.color.needsUpdate = true;
+}
+function updateParticles(dt) {
+  for (let i = 0; i < P_COUNT; i++) {
+    if (pLife[i] <= 0) continue;
+    pLife[i] -= dt;
+    if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; continue; }
+    pVel[i * 3 + 1] -= 3.2 * dt;
+    pPos[i * 3] += pVel[i * 3] * dt;
+    pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
+    pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+  }
+  pGeo.attributes.position.needsUpdate = true;
+}
+
+// ============================== shockwave rings (pooled) ==============================
+const shockwaves = [];
+for (let i = 0; i < 8; i++) {
+  const s = glowSprite(0xffffff, 1, 0);
+  s.visible = false;
+  scene.add(s);
+  shockwaves.push({ sprite: s, active: false, t: 0 });
+}
+let shockCursor = 0;
+function spawnShockwave(x, y, z, colorHex) {
+  // Valve: while degraded, spawn on alternate frames only (particles still
+  // fire every kill — the shockwave is the shed layer, not the feedback).
+  if (degraded && (frameNo % 2 === 1)) return;
+  let sw = shockwaves.find(s => !s.active);
+  if (!sw) { sw = shockwaves[shockCursor]; shockCursor = (shockCursor + 1) % shockwaves.length; }
+  sw.sprite.position.set(x, y, z);
+  sw.sprite.material.color.setHex(colorHex);
+  sw.t = 0; sw.active = true; sw.sprite.visible = true;
+}
+function updateShockwaves(dt) {
+  for (const sw of shockwaves) {
+    if (!sw.active) continue;
+    sw.t += dt / 0.5;
+    if (sw.t >= 1) { sw.active = false; sw.sprite.visible = false; continue; }
+    const sc = 0.5 + sw.t * 7;
+    sw.sprite.scale.set(sc, sc, 1);
+    sw.sprite.material.opacity = (1 - sw.t) * 0.85;
+  }
+}
+
+// ============================== kill rings (pooled, cinematic upgrade) ==============================
+// Weapon-impact juice, second layer: a flat additive ring that blooms outward
+// from every kill, facing the player. Pooled (6, recycle-oldest), shared
+// geometry, per-ring material (color is set per kill). Costs draw calls ONLY
+// while visible (typically 1–2). The valve sheds these first while degraded —
+// the particle burst + shockwave still fire, so kill feedback never vanishes.
+const killRingGeo = new THREE.RingGeometry(0.42, 0.5, 40);
+const killRings = [];
+for (let i = 0; i < 6; i++) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false });
+  const mesh = new THREE.Mesh(killRingGeo, mat);
+  mesh.visible = false;
+  scene.add(mesh);
+  killRings.push({ mesh, active: false, t: 0 });
+}
+let killRingCursor = 0;
+function spawnKillRing(x, y, z, colorHex) {
+  if (degraded) return; // valve shed item (see the valve registry in tick)
+  let kr = killRings.find(k => !k.active);
+  if (!kr) { kr = killRings[killRingCursor]; killRingCursor = (killRingCursor + 1) % killRings.length; }
+  kr.mesh.position.set(x, y, z);
+  kr.mesh.lookAt(playerPos.x, playerPos.y, playerPos.z);
+  kr.mesh.material.color.setHex(colorHex);
+  kr.t = 0; kr.active = true; kr.mesh.visible = true;
+}
+function updateKillRings(dt) {
+  for (const kr of killRings) {
+    if (!kr.active) continue;
+    kr.t += dt / 0.45;
+    if (kr.t >= 1) { kr.active = false; kr.mesh.visible = false; continue; }
+    const sc = 0.6 + kr.t * 6.5;
+    kr.mesh.scale.set(sc, sc, 1);
+    kr.mesh.material.opacity = (1 - kr.t) * 0.9;
+  }
+}
+
+// ============================== player weapons (all pooled, recycle-oldest) ==============================
+const aimPoint = new THREE.Vector3(0, 6.2, FORM_Z);
+// YOU, the target: VR = headset world position, desktop = defended point.
+// The swarm, the bombs and the lunge targets all read this, never a rail.
+const playerPos = new THREE.Vector3(0, 1.1, RAIL_Z);
+const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+const muzzlePos = new THREE.Vector3(), aimDir = new THREE.Vector3();
+const volleyAim = new THREE.Vector3(); // the aim this volley actually uses (per-hand in VR)
+const UP_Y = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
+// Bolts: longer capsule + additive blending = laser glow trail, no extra draw calls.
+const boltGeo = new THREE.CapsuleGeometry(0.045, 0.6, 3, 8);
+const boltMat = new THREE.MeshBasicMaterial({ color: 0xbffcff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+const bolts = [];
+for (let i = 0; i < 48; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(boltGeo, boltMat));
+  grp.add(glowSprite(0x27e8ff, 0.55, 0.8));
+  grp.visible = false;
+  scene.add(grp);
+  bolts.push({ grp, active: false, vx: 0, vy: 0, vz: 0, life: 0, pierce: 0 });
+}
+let boltCursor = 0;
+function nextBolt() {
+  let b = bolts.find(x => !x.active);
+  if (!b) { b = bolts[boltCursor]; boltCursor = (boltCursor + 1) % bolts.length; }
+  return b;
+}
+function launchBolt(ox, oy, oz, dx, dy, dz) {
+  const b = nextBolt();
+  b.grp.position.set(ox, oy, oz);
+  tmpA.set(dx, dy, dz).normalize();
+  tmpQ.setFromUnitVectors(UP_Y, tmpA);
+  b.grp.quaternion.copy(tmpQ);
+  b.vx = tmpA.x * 42; b.vy = tmpA.y * 42; b.vz = tmpA.z * 42;
+  b.life = 1.1; b.pierce = U.power; b.active = true; b.grp.visible = true;
+}
+// Beams: one stretched additive box, pierces invaders along its path.
+// Rail = yellow and narrow; Spartan Laser = thick crimson, more kills.
+const beamGeo = new THREE.BoxGeometry(1, 1, 1);
+const beams = [];
+for (let i = 0; i < 2; i++) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffd319, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const mesh = new THREE.Mesh(beamGeo, mat);
+  mesh.visible = false;
+  scene.add(mesh);
+  beams.push({ mesh, active: false, life: 0 });
+}
+let beamCursor = 0;
+function fireBeam(beamColor, beamWidth, beamKills, beamRadius) {
+  let bm = beams.find(x => !x.active);
+  if (!bm) { bm = beams[beamCursor]; beamCursor = (beamCursor + 1) % beams.length; }
+  tmpA.copy(volleyAim).sub(muzzlePos);
+  const len = tmpA.length();
+  tmpA.normalize();
+  tmpQ.setFromUnitVectors(Z_AXIS, tmpA);
+  bm.mesh.quaternion.copy(tmpQ);
+  tmpB.copy(muzzlePos).addScaledVector(tmpA, len / 2);
+  bm.mesh.position.copy(tmpB);
+  bm.mesh.scale.set(beamWidth, beamWidth, len);
+  bm.life = 0.18; bm.active = true; bm.mesh.visible = true;
+  bm.mesh.material.color.setHex(beamColor);
+  bm.mesh.material.opacity = 0.9;
+  // Hitscan: kill up to beamKills invaders within beamRadius of the segment.
+  const maxKills = beamKills, w0 = wave;
+  const r2 = beamRadius * beamRadius;
+  let kills = 0;
+  tmpB.copy(volleyAim).sub(muzzlePos); // segment vector
+  const segLenSq = tmpB.lengthSq();
+  for (const v of invaders) {
+    if (kills >= maxKills || wave !== w0) break;
+    if (!v.alive) continue;
+    const wx = v.grp.position.x, wy = v.grp.position.y, wz = v.grp.position.z;
+    tmpA.set(wx - muzzlePos.x, wy - muzzlePos.y, wz - muzzlePos.z);
+    let t = segLenSq > 0 ? (tmpA.x * tmpB.x + tmpA.y * tmpB.y + tmpA.z * tmpB.z) / segLenSq : 0;
+    t = clamp(t, 0, 1);
+    const cx = muzzlePos.x + tmpB.x * t, cy = muzzlePos.y + tmpB.y * t, cz = muzzlePos.z + tmpB.z * t;
+    const dx = wx - cx, dy = wy - cy, dz = wz - cz;
+    if (dx * dx + dy * dy + dz * dz < r2) { killInvader(v); kills++; }
+  }
+  // SHOOT-TO-COLLECT: the beam also collects floating pickups near its path.
+  for (const pk of pickups) {
+    if (!pk.active) continue;
+    const pp = pk.grp.position;
+    tmpA.set(pp.x - muzzlePos.x, pp.y - muzzlePos.y, pp.z - muzzlePos.z);
+    let t2 = segLenSq > 0 ? (tmpA.x * tmpB.x + tmpA.y * tmpB.y + tmpA.z * tmpB.z) / segLenSq : 0;
+    t2 = clamp(t2, 0, 1);
+    const cx2 = muzzlePos.x + tmpB.x * t2, cy2 = muzzlePos.y + tmpB.y * t2, cz2 = muzzlePos.z + tmpB.z * t2;
+    const dx2 = pp.x - cx2, dy2 = pp.y - cy2, dz2 = pp.z - cz2;
+    if (dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < r2) collectPickup(pk);
+  }
+}
+// Seeker missiles: homing cones, pooled.
+const missileGeo = new THREE.ConeGeometry(0.12, 0.5, 8);
+const missileMat = new THREE.MeshBasicMaterial({ color: 0x2bff88, toneMapped: false });
+const missiles = [];
+for (let i = 0; i < 16; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(missileGeo, missileMat));
+  grp.add(glowSprite(0x2bff88, 0.7, 0.8));
+  grp.visible = false;
+  scene.add(grp);
+  missiles.push({ grp, active: false, vx: 0, vy: 0, vz: 0, life: 0 });
+}
+let missileCursor = 0;
+function fireMissile(ox, oy, oz, dx, dy, dz) {
+  let m = missiles.find(x => !x.active);
+  if (!m) { m = missiles[missileCursor]; missileCursor = (missileCursor + 1) % missiles.length; }
+  m.grp.position.set(ox, oy, oz);
+  m.vx = dx * 20; m.vy = dy * 20; m.vz = dz * 20;
+  m.life = 4; m.active = true; m.grp.visible = true;
+}
+// One trigger pull = base bolt + your one equipped weapon.
+let fireCooldown = 0;
+function fireWeapons(ox, oy, oz, tx, ty, tz) {
+  // IRON MAN HANDS: in VR the shots come from the firing hand (ox,oy,oz);
+  // on desktop ox/oy/oz are omitted and the rail barrel stays the muzzle.
+  // tx/ty/tz (VR hands only): that hand's OWN aim point — each hand fires
+  // where IT points, never slaved to the other controller. Desktop omits
+  // them and uses the shared mouse aim point.
+  if (ox === undefined) {
+    tmpV.set(0, 0.03, 0.85);
+    barrel.localToWorld(tmpV);
+    muzzlePos.copy(tmpV);
+  } else muzzlePos.set(ox, oy, oz);
+  if (tx === undefined) volleyAim.copy(aimPoint);
+  else volleyAim.set(tx, ty, tz);
+  aimDir.copy(volleyAim).sub(muzzlePos).normalize();
+  launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  for (let i = 1; i <= W.spread; i++) { // fan pairs, ±i steps of ~3.2°
+    const a = i * 0.055, c = Math.cos(a), s = Math.sin(a);
+    launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x * c + aimDir.z * s, aimDir.y, -aimDir.x * s + aimDir.z * c);
+    launchBolt(muzzlePos.x, muzzlePos.y, muzzlePos.z, aimDir.x * c - aimDir.z * s, aimDir.y, aimDir.x * s + aimDir.z * c);
+  }
+  for (let k = 1; k <= W.twin; k++) { // parallel bolts, alternating sides
+    const off = (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 0.14;
+    launchBolt(muzzlePos.x + off, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  }
+  if (W.rail >= 1) { fireBeam(0xffd319, Math.min(0.18 + W.rail * 0.02, 0.5), 2 + W.rail, 0.75); beamSound(volleyAim.x, volleyAim.y, volleyAim.z); }
+  for (let k = 0; k < W.seeker; k++) fireMissile(muzzlePos.x + (k - (W.seeker - 1) / 2) * 0.2, muzzlePos.y, muzzlePos.z, aimDir.x, aimDir.y, aimDir.z);
+  // SPARTAN LASER (Danny 2026-10-27, Halo-style): a thick crimson beam that
+  // pierces a whole line of invaders — the famous-laser replacement for the
+  // removed orange bomb orbs. Heavier than the rail beam, so it also slows
+  // the repeat rate (see the volley formula in tick).
+  if (W.spartan >= 1) { fireBeam(0xff2233, 0.35, 8, 0.9); spartanSound(volleyAim.x, volleyAim.y, volleyAim.z); }
+  if (W.seeker >= 1) missileSound(muzzlePos.x, muzzlePos.y, muzzlePos.z);
+  muzzleFlash.position.copy(muzzlePos);
+  flashT = 0.07;
+  laserSound(muzzlePos.x, muzzlePos.y, muzzlePos.z);
+}
+// Fire one full volley from a VR hand: origin just past the palm, aimed at
+// the same aim point the controller ray is pointing at.
+function fireHand(ctl) {
+  // INDEPENDENT HANDS: this hand's palm is the muzzle AND its ray is the
+  // aim — the left hand no longer shoots where the right hand points.
+  tmpV.setFromMatrixPosition(ctl.matrixWorld);
+  tmpV2.set(0, 0, -1).applyQuaternion(ctl.getWorldQuaternion(tmpQ));
+  const px = tmpV.x + tmpV2.x * 0.1, py = tmpV.y + tmpV2.y * 0.1, pz = tmpV.z + tmpV2.z * 0.1;
+  fireWeapons(px, py, pz, tmpV.x + tmpV2.x * 14, tmpV.y + tmpV2.y * 14, tmpV.z + tmpV2.z * 14);
+}
+
+// ============================== pickups (pooled, recycle-oldest) ==============================
+const PICKUP_TYPES = {
+  spread: { label: 'SPREAD SHOT', color: 0xff3df0, weapon: 'spread' },
+  twin:   { label: 'TWIN LASER', color: 0x27e8ff, weapon: 'twin' },
+  rail:   { label: 'RAIL BEAM', color: 0xffd319, weapon: 'rail' },
+  seeker: { label: 'SEEKER MISSILES', color: 0x2bff88, weapon: 'seeker' },
+  spartan: { label: 'SPARTAN LASER', color: 0xff2233, weapon: 'spartan' },
+  rate:   { label: 'FIRE RATE', color: 0xff3355, upgrade: 'rate' },
+  shield: { label: 'SHIELD LAYER', color: 0x4da6ff, upgrade: 'shield' },
+  power:  { label: 'CANNON POWER', color: 0xffffff, upgrade: 'power' },
+  speed:  { label: 'MOVE SPEED', color: 0x9d5cff, upgrade: 'speed' }
+};
+const PICKUP_KEYS = Object.keys(PICKUP_TYPES);
+// Pickup economy split: weapons come only from hard kills, upgrades from
+// regular kills and the wave-start rain (see killInvader / startWave).
+const WEAPON_KEYS = PICKUP_KEYS.filter(k => PICKUP_TYPES[k].weapon);
+const UPGRADE_KEYS = PICKUP_KEYS.filter(k => PICKUP_TYPES[k].upgrade);
+const octaGeo = new THREE.OctahedronGeometry(0.24);
+const icosaGeo = new THREE.IcosahedronGeometry(0.24, 0);
+const pickups = [];
+for (let i = 0; i < 12; i++) {
+  const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const core = new THREE.Mesh(octaGeo, coreMat);
+  const grp = new THREE.Group();
+  grp.add(core);
+  const glow = glowSprite(0xffffff, 1.1, 0.8);
+  grp.add(glow);
+  grp.visible = false;
+  scene.add(grp);
+  pickups.push({ grp, core, glow, active: false, type: '', phase: Math.random() * Math.PI * 2 });
+}
+let pickupCursor = 0;
+function spawnPickup(x, y, z, type) {
+  let p = pickups.find(q => !q.active);
+  if (!p) { p = pickups[pickupCursor]; pickupCursor = (pickupCursor + 1) % pickups.length; }
+  const meta = PICKUP_TYPES[type];
+  p.grp.position.set(x, y, z);
+  p.core.geometry = meta.weapon ? octaGeo : icosaGeo;
+  p.core.material.color.setHex(meta.color);
+  p.glow.material.color.setHex(meta.color);
+  p.type = type; p.active = true; p.grp.visible = true;
+  p.baseY = y; p.life = 25; // hover life: unshot pickups fade out after 25s
+}
+function applyPickup(type, bx, by, bz) {
+  const meta = PICKUP_TYPES[type];
+  if (meta.weapon) {
+    const key = meta.weapon;
+    if (equipped.includes(key)) {
+      score += 100;
+      showAnnouncement(meta.label + ' — ALREADY EQUIPPED', 'Bonus +100 pts', 1.4);
+    } else {
+      // ONE WEAPON AT A TIME: a new weapon always replaces the one you have.
+      const old = equipped.length ? equipped[0] : null;
+      if (old) W[old] = 0;
+      equipped.length = 0; equipped.push(key); W[key] = 1;
+      showAnnouncement(meta.label, old ? 'Replaces ' + WEAPON_LABELS[old] + ' — one weapon at a time' : 'Weapon equipped — one at a time', 1.8);
+    }
+  } else {
+    U[meta.upgrade]++;
+    showAnnouncement(meta.label + ' +1', 'Upgrade level ' + U[meta.upgrade] + ' — stacks forever', 1.4);
+  }
+  pickupSound(bx, by, bz);
+  pulseBoth(0.6, 70); // pickup buzz — same frame as the sound + burst
+  spawnBurst(bx, by, bz, meta.color, 14, 3.5, 0.5);
+  markScoreDirty();
+}
+function updatePickups(dt) {
+  // SHOOT-TO-COLLECT (Danny 2026-10-27): pickups hover where they spawn and
+  // bob gently — no more falling to the rail, no magnet, no walk-over
+  // collection. Shoot one to collect it (see the bolt/beam/missile/orb
+  // checks). Unshot pickups fade out after 25s, blinking in the last 3s.
+  for (const p of pickups) {
+    if (!p.active) continue;
+    const pos = p.grp.position;
+    pos.y = p.baseY + Math.sin(elapsed * 2 + p.phase) * 0.3;
+    pos.x += Math.sin(elapsed * 3 + p.phase) * 0.25 * dt;
+    p.grp.rotation.y += dt * 2.2;
+    p.life -= dt;
+    if (p.life <= 0) {
+      spawnBurst(pos.x, pos.y, pos.z, 0x7d72a8, 6, 2, 0.4);
+      p.active = false; p.grp.visible = false;
+      continue;
+    }
+    p.grp.visible = p.life > 3 || Math.floor(elapsed * 6) % 2 === 0;
+  }
+}
+// Shared by every shoot-to-collect check: burst at the pickup, then apply it.
+function collectPickup(pk) {
+  if (!pk.active) return;
+  const pp = pk.grp.position;
+  pk.active = false; pk.grp.visible = false;
+  applyPickup(pk.type, pp.x, pp.y, pp.z);
+}
+
+// ============================== enemy bombs (pooled) ==============================
+const bombGeo = new THREE.SphereGeometry(0.14, 12, 10);
+const bombMat = new THREE.MeshBasicMaterial({ color: 0xffa02e, toneMapped: false });
+const bombs = [];
+for (let i = 0; i < 20; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(bombGeo, bombMat));
+  grp.add(glowSprite(0xff5533, 0.8, 0.75));
+  grp.visible = false;
+  scene.add(grp);
+  bombs.push({ grp, active: false, vx: 0, vy: 0, vz: 0 });
+}
+let bombTimer = 1.2;
+function dropBomb() {
+  // Only an invader you can actually SEE shoots: within ~70° of where you're
+  // looking (VR: headset forward, desktop: straight ahead). What's behind
+  // you closes in and lunges instead — it never snipes you blind.
+  camera.getWorldDirection(tmpV);
+  const shooters = [];
+  for (const v of invaders) {
+    if (!v.alive || v.lunging) continue;
+    tmpA.copy(v.grp.position).sub(playerPos).normalize();
+    if (tmpA.dot(tmpV) > 0.34) shooters.push(v);
+  }
+  if (!shooters.length) return;
+  const shooter = shooters[Math.floor(Math.random() * shooters.length)];
+  for (const b of bombs) {
+    if (b.active) continue;
+    b.grp.position.copy(shooter.grp.position);
+    tmpV.copy(playerPos).sub(b.grp.position).normalize();
+    const sp = Math.min(9 + wave * 0.4, 15);
+    b.vx = tmpV.x * sp; b.vy = tmpV.y * sp; b.vz = tmpV.z * sp;
+    b.life = 6;
+    b.active = true; b.grp.visible = true;
+    return;
+  }
+}
+
+// ============================== mothership ==============================
+const MOTHERSHIP_ENABLED = false; // REMOVED 2026-10-25 (night): the cheap-material rebuild STILL froze in VR, so the saucer itself — not just its materials — is the problem. Fully off: never spawns, never renders, never warbles. Code block kept intact; flip this one line back to true to restore it.
+const mother = new THREE.Group();
+let motherActive = false, motherDir = 1, motherTimer = rand(14, 22);
+{
+  // CHEAP REBUILD (2026-10-25): the original MeshStandardMaterial hull (emissive) and
+  // metalness dome compiled expensive shaders on first sight and froze VR — Danny's
+  // saucer-off test confirmed it. These MeshBasicMaterial equivalents look the same
+  // from the player's distance (hull color pre-blended toward its old emissive pink)
+  // but need no lighting and no expensive shader program. Same size, shape, path.
+  const hullMat = new THREE.MeshBasicMaterial({ color: 0xb9266e });
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.6, 0.42, 20), hullMat);
+  mother.add(belt);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.75, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff }));
+  dome.scale.y = 0.8; dome.position.y = 0.18; mother.add(dome);
+  const bandMat = new THREE.MeshBasicMaterial({ color: 0xffd319, toneMapped: false });
+  for (let i = 0; i < 6; i++) {
+    const a = i / 6 * Math.PI * 2;
+    const light = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), bandMat);
+    light.position.set(Math.cos(a) * 1.48, 0, Math.sin(a) * 1.48);
+    mother.add(light);
+  }
+  mother.add(glowSprite(0xff2e88, 5.5, 0.35));
+  mother.position.set(-19, 11.4, -17);
+  mother.visible = false;
+  scene.add(mother);
+}
+
+// ============================== audio (WebAudio synth, gesture-started) ==============================
+let actx = null, masterGain = null, warbleOsc = null, warbleGain = null;
+let droneNodes = null; // danger-drone nodes, created once by startDrone()
+// NOTE: `muted` is declared in the game-state section above (drawScorePanel
+// needs it at module load); setMuted/blip read the same flag.
+function startAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.5;
+    masterGain.connect(actx.destination);
+  } catch (e) { /* audio unavailable — game still plays */ }
+  startDrone();
+}
+// DANGER DRONE (Danny 2026-10-27: background sound like danger / an imminent
+// attack): detuned low sines beating against each other through a dark
+// lowpass filter, plus a slow heartbeat pulse on the gain. Quiet bed, not a
+// melody — it just sits under the game and gets slightly louder every wave.
+// Runs through masterGain, so the SOUND button / M key mute it too.
+function startDrone() {
+  if (!actx || !masterGain || droneNodes) return;
+  try {
+    const g = actx.createGain(); g.gain.value = 0.05;
+    const filt = actx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 220; filt.Q.value = 0.8;
+    const o1 = actx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 55;
+    const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 55.7; // slow beat against o1
+    const o3 = actx.createOscillator(); o3.type = 'triangle'; o3.frequency.value = 110.3;
+    const g3 = actx.createGain(); g3.gain.value = 0.25;
+    o1.connect(filt); o2.connect(filt); o3.connect(g3); g3.connect(filt);
+    filt.connect(g); g.connect(masterGain);
+    const lfo = actx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.9;
+    const lfoGain = actx.createGain(); lfoGain.gain.value = 0.02;
+    lfo.connect(lfoGain); lfoGain.connect(g.gain);
+    o1.start(); o2.start(); o3.start(); lfo.start();
+    droneNodes = { gain: g };
+  } catch (e) { /* drone unavailable — game still plays */ }
+}
+function setDroneLevel(waveNum) {
+  if (!droneNodes || !actx) return;
+  const target = Math.min(0.05 + waveNum * 0.004, 0.10);
+  droneNodes.gain.gain.setTargetAtTime(target, actx.currentTime, 0.5);
+}
+function blip(freqA, freqB, dur, type, vol, pan, x, y, z) {
+  if (!actx || muted) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freqA, actx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(freqB, 1), actx.currentTime + dur);
+  g.gain.setValueAtTime(vol, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(g);
+  // Spatial placement (Round 3 N-P0-3, Bible §3.6): a world position
+  // (x,y,z) routes through a per-event HRTF panner at the event point —
+  // front/back and distance, not just left/right. No position, or no
+  // PannerNode (old browser), falls back to the stereo pan; no
+  // StereoPanner either plays centered. Distance is gentle (refDistance 3,
+  // rolloff 0.5): a kill at hold range (~8) plays at ~55%, a far spawn
+  // (~17) at ~30% — audible, but distance now reads. The try/catch keeps
+  // audio failure-free either way.
+  let routed = false;
+  if (x !== undefined && actx.createPanner) {
+    try {
+      const pn = actx.createPanner();
+      pn.panningModel = 'HRTF';
+      pn.distanceModel = 'inverse';
+      pn.refDistance = 3; pn.maxDistance = 40; pn.rolloffFactor = 0.5;
+      if (pn.positionX) { pn.positionX.value = x; pn.positionY.value = y; pn.positionZ.value = z; }
+      else pn.setPosition(x, y, z);
+      g.connect(pn); pn.connect(masterGain);
+      routed = true;
+    } catch (e) { /* fall through to the stereo pan */ }
+  }
+  if (!routed) {
+    const p = pan || 0;
+    if (p !== 0 && actx.createStereoPanner) {
+      try {
+        const sp = actx.createStereoPanner();
+        sp.pan.value = clamp(p, -0.8, 0.8);
+        g.connect(sp); sp.connect(masterGain);
+      } catch (e) { g.connect(masterGain); }
+    } else g.connect(masterGain);
+  }
+  o.start(); o.stop(actx.currentTime + dur + 0.02);
+}
+// Stereo pan of a world point from the player's view: -1 hard left, +1 hard
+// right, clamped to ±0.8 so nothing ever goes fully one-ear. Dedicated temps
+// — callers invoke this inside loops that own tmpA/tmpB.
+const _panV = new THREE.Vector3(), _panQ = new THREE.Quaternion();
+function panFor(x, y, z) {
+  try {
+    camera.getWorldPosition(_panV);
+    _panV.set(x - _panV.x, y - _panV.y, z - _panV.z);
+    const len = _panV.length() || 1;
+    camera.getWorldQuaternion(_panQ).invert();
+    _panV.applyQuaternion(_panQ);
+    return clamp(_panV.x / len, -0.8, 0.8);
+  } catch (e) { return 0; }
+}
+// Keep the Web Audio listener on the camera (position + orientation) so the
+// HRTF panners spatialize correctly (Round 3 N-P0-3, Bible §3.6 — same
+// pattern as Rhythm Slicer's updateAudioListener). Module-scope helper: it
+// reads the camera directly and NEVER a tick()-local (Bible §2 — the Nov 14
+// black-screen scope rule). Updated every frame, VR and desktop alike — the
+// desktop camera sits at standing height and tilts, so the default listener
+// pose (origin, facing -z) would be wrong there too. Best-effort: never throws.
+const _lisPos = new THREE.Vector3(), _lisQuat = new THREE.Quaternion();
+const _lisFwd = new THREE.Vector3(), _lisUp = new THREE.Vector3();
+function updateAudioListener() {
+  if (!actx) return;
+  try {
+    const l = actx.listener;
+    camera.getWorldPosition(_lisPos);
+    camera.getWorldQuaternion(_lisQuat);
+    _lisFwd.set(0, 0, -1).applyQuaternion(_lisQuat);
+    _lisUp.set(0, 1, 0).applyQuaternion(_lisQuat);
+    if (l.positionX) {
+      l.positionX.value = _lisPos.x; l.positionY.value = _lisPos.y; l.positionZ.value = _lisPos.z;
+      l.forwardX.value = _lisFwd.x; l.forwardY.value = _lisFwd.y; l.forwardZ.value = _lisFwd.z;
+      l.upX.value = _lisUp.x; l.upY.value = _lisUp.y; l.upZ.value = _lisUp.z;
+    } else {
+      l.setPosition(_lisPos.x, _lisPos.y, _lisPos.z);
+      l.setOrientation(_lisFwd.x, _lisFwd.y, _lisFwd.z, _lisUp.x, _lisUp.y, _lisUp.z);
+    }
+  } catch (e) { /* listener update is best-effort */ }
+}
+// SOUND REDESIGN (Danny 2026-10-27: the old effects were annoying): every
+// effect is now softer, rounder and quieter — triangles and sines instead
+// of harsh squares and sawtooths, shorter, and roughly half the volume.
+// The ball-weapon (orb) explosions use the same softened boom below.
+function laserSound(x, y, z) { blip(700, 320, 0.08, 'triangle', 0.07, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function invaderHitSound(x, y, z) { blip(300, 130, 0.10, 'sine', 0.10, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function beamSound(x, y, z) { blip(1200, 300, 0.15, 'triangle', 0.08, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function spartanSound(x, y, z) { blip(300, 80, 0.25, 'triangle', 0.15, x === undefined ? 0 : panFor(x, y, z), x, y, z); } // Spartan Laser: low crimson thump, same soft family as the redesign
+function missileSound(x, y, z) { blip(420, 800, 0.12, 'sine', 0.07, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function pickupSound(x, y, z) { const p = x === undefined ? 0 : panFor(x, y, z); blip(660, 1320, 0.14, 'sine', 0.12, p, x, y, z); blip(990, 1980, 0.18, 'sine', 0.08, p, x, y, z); }
+function shieldSound(x, y, z) { blip(520, 300, 0.20, 'triangle', 0.12, x === undefined ? 0 : panFor(x, y, z), x, y, z); }
+function waveClearSound() { blip(660, 660, 0.12, 'sine', 0.09); blip(990, 990, 0.22, 'sine', 0.07); } // Round 3 N-P0-9: soft two-note chime (E5 + B5) when a wave clears
+function boomSound() {
+  if (!actx || muted) return;
+  blip(100, 40, 0.28, 'sine', 0.30);
+  const len = actx.sampleRate * 0.2, buf = actx.createBuffer(1, len, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 300;
+  const g = actx.createGain(); g.gain.value = 0.20;
+  src.connect(f); f.connect(g); g.connect(masterGain);
+  src.start();
+}
+function warbleStart() {
+  if (!actx || muted || warbleOsc) return;
+  warbleOsc = actx.createOscillator(); warbleOsc.type = 'sine'; warbleOsc.frequency.value = 620;
+  const lfo = actx.createOscillator(); lfo.frequency.value = 7;
+  const lfoG = actx.createGain(); lfoG.gain.value = 190;
+  lfo.connect(lfoG); lfoG.connect(warbleOsc.frequency);
+  warbleGain = actx.createGain(); warbleGain.gain.value = 0.06;
+  warbleOsc.connect(warbleGain); warbleGain.connect(masterGain);
+  warbleOsc.start(); lfo.start();
+  warbleOsc.userData.lfo = lfo;
+}
+function warbleStop() {
+  if (!warbleOsc) return;
+  try { warbleOsc.stop(); warbleOsc.userData.lfo.stop(); } catch (e) {}
+  warbleOsc.disconnect(); warbleGain.disconnect();
+  warbleOsc = null; warbleGain = null;
+}
+const muteBtn = document.getElementById('muteBtn');
+function setMuted(m) {
+  muted = m;
+  muteBtn.textContent = m ? 'SOUND: OFF' : 'SOUND: ON';
+  if (masterGain) masterGain.gain.value = m ? 0 : 0.5;
+  if (m) warbleStop();
+  markScoreDirty(); // the VR score cell shows a MUTED tag + red border
+}
+muteBtn.addEventListener('click', () => { startAudio(); setMuted(!muted); });
+
+// --- Controller haptics (Quest 2 Touch; no-op on desktop / without actuators) ---
+// Same guarded pattern as Rhythm Slicer: reads renderer.xr.isPresenting
+// directly (Bible §2 — a module-scope helper must never read a tick()-local).
+// Fires on the same frame path as the score and the sound: kills, pickups,
+// player hits. Both hands buzz — either hand can fire, so a kill is never
+// attributed to one hand the player didn't use.
+function pulseHaptics(hand, strength, ms) {
+  if (!renderer.xr.isPresenting) return;
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const src of session.inputSources) {
+    if (src.handedness !== hand) continue;
+    const gp = src.gamepad;
+    if (!gp || !gp.hapticActuators || !gp.hapticActuators.length) continue;
+    const act = gp.hapticActuators[0];
+    try {
+      if (typeof act.pulse === 'function') act.pulse(clamp(strength, 0, 1), ms);
+      else if (typeof act.playEffect === 'function') act.playEffect('dual-rumble', { duration: ms, strongMagnitude: strength, weakMagnitude: strength * 0.6 });
+    } catch (e) { /* haptics are best-effort */ }
+  }
+}
+function pulseBoth(strength, ms) { pulseHaptics('left', strength, ms); pulseHaptics('right', strength, ms); }
+
+// ============================== input: keyboard / mouse / XR controllers ==============================
+const keys = {};
+let mouseDown = false, mouseSeen = false;
+const mouseNDC = new THREE.Vector2(0, 0);
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+  if (e.repeat) return; // held keys must not re-toggle pause/mute/restart
+  if (e.code === 'KeyM') setMuted(!muted);
+  if (e.code === 'KeyP') togglePause();
+  if (e.code === 'KeyR') restartRun();
+  startAudio();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('pointermove', e => {
+  mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  mouseSeen = true;
+});
+window.addEventListener('pointerdown', () => { mouseDown = true; startAudio(); });
+window.addEventListener('pointerup', () => { mouseDown = false; });
+
+// XR controllers: target-ray spaces for aim; handedness recorded on connect
+const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
+let rightCtl = null, leftCtl = null;
+[ctlL, ctlR].forEach(c => {
+  c.addEventListener('connected', e => {
+    c.userData.handedness = e.data.handedness;
+    c.userData.connected = true;
+    // Round 3 (P-6): parent the palm cannon by HANDEDNESS, not slot —
+    // the old boot-time ctlL.add(handL)/ctlR.add(handR) put the cyan
+    // cannon on the right hand whenever the right controller connected
+    // first (slots are connection-ordered). handL/handR are built below
+    // this block, but 'connected' only fires during a live session, after
+    // module evaluation, so the closure is safe. Re-parenting on
+    // reconnect is automatic: Object3D.add removes the child from its
+    // previous parent first.
+    if (e.data.handedness === 'right') { rightCtl = c; c.add(handR); }
+    if (e.data.handedness === 'left') { leftCtl = c; c.add(handL); }
+  });
+  c.addEventListener('disconnected', () => {
+    c.userData.connected = false;
+    if (rightCtl === c) rightCtl = null;
+    if (leftCtl === c) leftCtl = null;
+  });
+  scene.add(c);
+});
+// IRON MAN HAND CANNONS (Danny 2026-10-27): a glowing palm cannon rides on
+// each controller. In VR the shots come from the firing hand, not the rail —
+// YOU are the thing you defend now (bombs and lunging flyers come at your
+// position), but your hands are the guns. Hidden whenever not presenting.
+function buildPalmCannon(color) {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.11, 0.06, 16),
+    new THREE.MeshBasicMaterial({ color, toneMapped: false })
+  );
+  disc.rotation.x = Math.PI / 2; // cylinder axis -> controller forward (-z)
+  disc.position.z = -0.04;
+  g.add(disc);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.13, 0.018, 8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false })
+  );
+  ring.position.z = -0.08;
+  g.add(ring);
+  const glow = glowSprite(color, 0.45, 0.85);
+  glow.position.z = -0.08;
+  g.add(glow);
+  g.visible = false;
+  return g;
+}
+const handL = buildPalmCannon(0x27e8ff), handR = buildPalmCannon(0x2bff88);
+// Round 3 (P-6): the cannons are parented in the 'connected' handler
+// above, by handedness — NOT here by slot index (see the handler comment).
+// Aim laser from the right controller + aim dot at ray distance
+const laserGeo = new THREE.BufferGeometry();
+laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
+const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({
+  color: 0x27e8ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+laser.frustumCulled = false; laser.visible = false;
+scene.add(laser);
+const aimDot = glowSprite(0x2bff88, 0.55, 0.9);
+aimDot.position.copy(aimPoint);
+scene.add(aimDot);
+
+const raycaster = new THREE.Raycaster();
+const DEAD = 0.12;
+const fireHands = { left: false, right: false }; // which VR triggers are held, reset each poll
+// VR pause/mute/restart buttons, rising-edge state (cinematic upgrade):
+// A/X (buttons[4]) = pause/resume, B/Y (buttons[5]) = mute, grip
+// (buttons[1]) while paused = restart. Previous-frame state per button,
+// shared across hands — either hand's button works.
+let prevBtn4 = false, prevBtn5 = false, prevGrip = false;
+function pollInput(dt) {
+  let steer = 0, fire = false;
+  let anyBtn4 = false, anyBtn5 = false, anyGrip = false;
+  fireHands.left = fireHands.right = false;
+  // Keyboard
+  if (keys['ArrowLeft'] || keys['KeyA']) steer -= 1;
+  if (keys['ArrowRight'] || keys['KeyD']) steer += 1;
+  if (keys['Space']) fire = true;
+  if (mouseDown) fire = true;
+  // XR gamepads: thumbstick (either stick) slides, either trigger fires
+  if (renderer.xr.isPresenting) {
+    const session = renderer.xr.getSession();
+    if (session) {
+      for (const src of session.inputSources) {
+        const gp = src.gamepad;
+        if (!gp) continue;
+        // Thumbstick X is axes[2] — W3C WebXR Gamepads Module §3.3,
+        // "xr-standard" mapping: axes[0]/[1] are the PRIMARY TOUCHPAD
+        // (placeholder 0 on Touch controllers, which have no touchpad)
+        // and axes[2]/[3] are the PRIMARY THUMBSTICK. Reading axes[0]
+        // here made stick steering dead in VR (ax was always 0). DO NOT
+        // "fix" this back to axes[0] — see the Star Strike axis
+        // resolution notes (star-strike-axis-resolution-build-notes-2026-11-15.md).
+        // Either stick steers; strongest wins.
+        if (gp.axes && gp.axes.length > 2) {
+          const ax = gp.axes[2] || 0;
+          if (Math.abs(ax) > DEAD && Math.abs(ax) > Math.abs(steer)) steer = ax;
+        }
+        if (gp.buttons && gp.buttons[0] && gp.buttons[0].value > 0.35) {
+          fire = true;
+          if (src.handedness === 'left') fireHands.left = true;
+          else if (src.handedness === 'right') fireHands.right = true;
+        }
+        // Pause/mute/restart buttons (rising edges handled below the loop).
+        if (gp.buttons) {
+          if (gp.buttons[4] && gp.buttons[4].pressed) anyBtn4 = true;
+          if (gp.buttons[5] && gp.buttons[5].pressed) anyBtn5 = true;
+          if (gp.buttons[1] && gp.buttons[1].value > 0.5) anyGrip = true;
+        }
+      }
+    }
+  }
+  // Rising-edge toggles: a held button fires exactly once.
+  if (anyBtn4 && !prevBtn4) togglePause();
+  if (anyBtn5 && !prevBtn5) setMuted(!muted);
+  if (paused && anyGrip && !prevGrip) restartRun();
+  prevBtn4 = anyBtn4; prevBtn5 = anyBtn5; prevGrip = anyGrip;
+  // Paused: buttons above still work (that is how you resume), but the
+  // cannon never slides and nothing fires until the game resumes.
+  if (paused) return false;
+  // Slide the cannon — Move Speed upgrade scales the slide with NO cap
+  // (Danny 2026-10-27: upgrades keep working forever). Analog sticks still
+  // scale the input, so control stays in the player's hand.
+  const slideSpeed = 9.5 * (1 + U.speed * 0.08);
+  cannonX = clamp(cannonX + steer * slideSpeed * dt, RAIL_MIN, RAIL_MAX);
+  // VR thumbstick dodge (either hand): a sidestep that springs back — the
+  // tick applies + decays it, so the sticks finally move you in VR.
+  if (renderer.xr.isPresenting) dodgeX = clamp(dodgeX + steer * 6 * dt, -2.5, 2.5);
+  // Aim resolution — SURROUND: the aim point is a point 14 units along the
+  // aim ray (controller ray in VR, mouse ray on desktop), so you can aim at
+  // invaders in ANY direction, not just at a flat plane in front of you.
+  // No x/y clamps anymore: clamping would make high, low and behind-you
+  // invaders unhittable in VR.
+  let aimed = false;
+  if (renderer.xr.isPresenting) {
+    // Aim hand: right preferred for the guide laser/dot, left if the right
+    // isn't connected, headset forward if neither — firing itself is fully
+    // per-hand (see fireHand), this only drives the visual guide.
+    // Round 3 (X-1): prefer a hand whose pose is LIVE — r160 hides the
+    // target-ray Group when the pose is null (tracking lost) while its
+    // matrix keeps the last good value, so a guide drawn from a lost hand
+    // would point where the hand WAS. A lost hand also stops firing
+    // (gated in tick) and flips the scoreboard notice, on the transition
+    // only — the panel redraws on dirty, at most 4×/s.
+    const aimCtl = (rightCtl && rightCtl.visible) ? rightCtl
+      : (leftCtl && leftCtl.visible) ? leftCtl : null;
+    const lostNow = !!((rightCtl && !rightCtl.visible) || (leftCtl && !leftCtl.visible));
+    if (lostNow !== trackingLost) { trackingLost = lostNow; markScoreDirty(); }
+    if (aimCtl) {
+      tmpV.setFromMatrixPosition(aimCtl.matrixWorld);
+      tmpV2.set(0, 0, -1).applyQuaternion(aimCtl.getWorldQuaternion(tmpQ));
+      aimPoint.copy(tmpV).addScaledVector(tmpV2, 14);
+      aimed = true;
+      // Laser from the aim hand to the aim point
+      const lp = laserGeo.attributes.position.array;
+      lp[0] = tmpV.x; lp[1] = tmpV.y; lp[2] = tmpV.z;
+      lp[3] = aimPoint.x; lp[4] = aimPoint.y; lp[5] = aimPoint.z;
+      laserGeo.attributes.position.needsUpdate = true;
+      laser.visible = true;
+    } else {
+      laser.visible = false;
+      camera.getWorldPosition(tmpV);
+      camera.getWorldDirection(tmpV2);
+      aimPoint.copy(tmpV).addScaledVector(tmpV2, 14);
+      aimed = true;
+    }
+  } else {
+    laser.visible = false;
+    if (mouseSeen && !renderer.xr.isPresenting) {
+      raycaster.setFromCamera(mouseNDC, camera);
+      aimPoint.copy(raycaster.ray.origin).addScaledVector(raycaster.ray.direction, 14);
+      aimed = true;
+      // Desktop: the cannon also eases toward the aim x when no key steering
+      if (steer === 0) cannonX = clamp(lerp(cannonX, clamp(aimPoint.x, RAIL_MIN, RAIL_MAX), 1 - Math.pow(0.002, dt)), RAIL_MIN, RAIL_MAX);
+    }
+  }
+  if (!aimed) aimPoint.set(cannonX * 0.6, 6.2, -14);
+  aimDot.position.copy(aimPoint);
+  return fire;
+}
+
+// ============================== game flow ==============================
+function resetSwarm() {
+  // SURROUND SPAWN: every invader gets an anchor direction on a shell around
+  // you. VR: full sphere (every angle). Desktop: front cone only — a flat
+  // screen can't show what's behind you, so desktop anchors stay in view
+  // (within ~65° of straight ahead, y 1..13 at radius 15-17).
+  const presenting = renderer.xr.isPresenting;
+  for (const v of invaders) {
+    v.alive = true; v.grp.visible = true; v.elite = false; v.hp = 1; v.points = v.def.points;
+    v.lunging = false; v.grp.scale.set(1, 1, 1); v.grp.rotation.set(0, 0, 0);
+    let ax, ay, az;
+    if (presenting) {
+      do {
+        const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1));
+        ax = Math.sin(ph) * Math.cos(th); ay = Math.cos(ph); az = Math.sin(ph) * Math.sin(th);
+      } while (ay < 0.03);
+    } else {
+      ax = rand(-0.85, 0.85); ay = rand(0.05, 0.75); az = -Math.sqrt(Math.max(0.1, 1 - ax * ax - ay * ay));
+    }
+    const al = Math.hypot(ax, ay, az) || 1;
+    v.anchorX = ax / al; v.anchorY = ay / al; v.anchorZ = az / al;
+    v.hold = rand(7, 9);
+    v.strafe = rand(0.6, 1.4);
+    v.strafeDir = Math.random() < 0.5 ? 1 : -1;
+    const r = rand(15, 17);
+    v.grp.position.set(v.anchorX * r, Math.max(0.5, v.anchorY * r), v.anchorZ * r);
+    const glow = v.grp.children[v.grp.children.length - 1];
+    glow.material.color.setHex(v.def.color);
+    v.diveGlowBase = null;
+  }
+  assignElites(); // elites must exist before speeds are set (elites are faster)
+  for (const v of invaders) {
+    v.speed = Math.min(1.6, (0.55 + (wave - 1) * 0.06 + tier * 0.04) * (surgeWave ? 1.4 : 1)) * (v.elite ? 1.25 : 1);
+  }
+  aliveCount = SWARM_COUNT;
+  for (const b of bombs) { b.active = false; b.grp.visible = false; }
+  bombTimer = 1.4;
+  lungeTimer = 2; // first lunge ~2s into every wave
+}
+function startWave() {
+  surgeWave = (wave % 5 === 0);
+  resetSwarm();
+  resetShields();
+  markScoreDirty();
+  bumpPulse(1);
+  if (surgeWave) showAnnouncement('SURGE WAVE ' + wave, 'Double points - faster approach, double bombs!', 2.2);
+  else showAnnouncement('WAVE ' + wave, wave === 1 ? 'Unlimited ships. Endless waves.' : 'Bonus pickups inbound — they keep coming.', 2.0);
+  if (wave > 1) { // wave-clear bonus: 1 free upgrade pickup rains into the front field
+    spawnPickup(rand(-6, 6), rand(3, 9), rand(-14, -8), UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
+    waveClearSound(); // Round 3 N-P0-9: short chime when a wave clears
+  }
+  setDroneLevel(wave); // danger bed gets slightly louder every wave
+}
+function startGame() {
+  if (started) return;
+  started = true;
+  mode = 'play';
+  perfSessionStart(); // a new play session begins (restarts continue it)
+  score = 0; wave = 1; shipsLost = 0; tier = 0; surgeWave = false;
+  W.spread = W.twin = W.rail = W.seeker = W.spartan = 0;
+  equipped.length = 0;
+  U.rate = U.shield = U.power = U.speed = 0;
+  drawnScore = drawnWave = drawnLost = -1;
+  cannonX = 0;
+  for (const p of pickups) { p.active = false; p.grp.visible = false; }
+  for (const m of missiles) { m.active = false; m.grp.visible = false; }
+  for (const bm of beams) { bm.active = false; bm.mesh.visible = false; }
+  startWave();
+}
+// Restart (cinematic upgrade): same reset as startGame, but callable mid-run
+// (R key on desktop, grip while paused in VR) and it also clears live
+// entities — bolts, bombs, shockwaves, kill rings, particles, mothership —
+// so no stale object leaks into the fresh run (Bible §3.4 reset-path rule).
+// Score/wave/gear reset is identical to startGame; the valve keeps its
+// measured frame-time state (it measures the device, not the run).
+function restartRun() {
+  if (!started || mode !== 'play') return;
+  paused = false;
+  score = 0; wave = 1; shipsLost = 0; tier = 0; surgeWave = false;
+  W.spread = W.twin = W.rail = W.seeker = W.spartan = 0;
+  equipped.length = 0;
+  U.rate = U.shield = U.power = U.speed = 0;
+  drawnScore = drawnWave = drawnLost = -1;
+  cannonX = 0; dodgeX = 0; fireCooldown = 0;
+  flash = 0; shakeT = 0; shimmerT = 0; lungeFlash = 0; flashT = 0;
+  annT = 0; annDur = 0; annMesh.material.opacity = 0;
+  for (const p of pickups) { p.active = false; p.grp.visible = false; }
+  for (const m of missiles) { m.active = false; m.grp.visible = false; }
+  for (const bm of beams) { bm.active = false; bm.mesh.visible = false; }
+  for (const b of bolts) { b.active = false; b.grp.visible = false; }
+  for (const b of bombs) { b.active = false; b.grp.visible = false; }
+  for (const sw of shockwaves) { sw.active = false; sw.sprite.visible = false; }
+  for (const kr of killRings) { kr.active = false; kr.mesh.visible = false; }
+  for (let i = 0; i < P_COUNT; i++) { pLife[i] = 0; pPos[i * 3 + 1] = -999; }
+  pGeo.attributes.position.needsUpdate = true;
+  motherActive = false; mother.visible = false; motherTimer = rand(14, 22);
+  warbleStop();
+  lungeTimer = 2;
+  markScoreDirty();
+  startWave();
+}
+function playerHit() {
+  // PHANTOM-FEEDBACK FIX (Danny 2026-10-27): while invulnerable, a bomb or
+  // diver passing through the cannon must NOT flash red or shake the view —
+  // the shield shimmer already shows you are protected. Red + shake now fire
+  // ONLY on a real hit that actually costs a shield layer or a ship.
+  if (shimmerT > 0) return;
+  spawnBurst(playerPos.x, playerPos.y, playerPos.z, 0xff5533, 34, 5.5, 0.8);
+  spawnBurst(playerPos.x, playerPos.y, playerPos.z, 0xffd319, 18, 4, 0.6);
+  boomSound();
+  flash = 0.85; shakeT = 0.4;
+  if (U.shield > 0) {                  // a shield layer absorbs the hit, no ship lost
+    U.shield--;
+    shimmerT = 1.2;
+    shieldSound();
+    pulseBoth(0.7, 100);
+    markScoreDirty();
+    showAnnouncement('SHIELD ABSORBED!', 'Layers left: ' + U.shield, 1.0);
+    return;
+  }
+  shipsLost++;
+  shimmerT = 2;
+  pulseBoth(0.9, 150);
+  markScoreDirty();
+  showAnnouncement('SHIP HIT!', 'Ships lost: ' + shipsLost + ' — plenty more where that came from', 1.4);
+}
+// ============================== per-frame updates ==============================
+// ROUND-2 adaptive safety valve: rolling average frame time. When it exceeds
+// ~20ms the game automatically sheds load (halved particle spawns, shield
+// checks on alternate frames only) until frames recover below ~16ms. This is
+// automatic — no setting, no player action — and weapon/upgrade levels stay
+// uncapped throughout.
+let avgFrameMs = 16, degraded = false, frameNo = 0;
+// Graduated foveation state (Round 3 N-P0-5, Bible §2): SEPARATE from the
+// `degraded` flag, so the flag's flip timing — and everything it sheds — is
+// unchanged. Level 0/1/2 → foveation 0.0/0.25/0.5; fovDwellT is seconds
+// spent at the current level (2 s minimum dwell per level).
+const FOV_STEPS = [0.0, 0.25, 0.5];
+let fovLevel = 0, fovDwellT = 0;
+let elapsed = 0;
+
+// ============================== local performance capture (V2.0 / Standard §4) ==============================
+// Browser-side frame-time + valve-state capture, stored LOCALLY on the
+// device (localStorage) ONLY — key `neon-invaders-vr:perf-log`. No personal
+// data of any kind, no network calls, nothing transmitted. One summary per
+// play session (last 5 sessions kept; samples capped at 1 h in memory).
+// What is logged per session: date, duration, sample count, min/median/p95
+// frame-time EMA (ms), seconds spent degraded vs not. Neon has NO leveled
+// valve — its adaptive safety valve is a single boolean (`degraded`,
+// >20ms degrade / <16ms recover, see tick) — so this logs the real binary
+// state instead of inventing levels: `degSec` (seconds degraded) and
+// `playSec` (seconds of sampled active play). This exists so Danny's
+// headset sessions produce a performance record automatically — no
+// hand-copied numbers. Only what the browser can measure (frame times +
+// valve state); no GPU-level claims. The last session's summary shows on
+// the menu (see showLastPerfSummary). All storage is guarded: a storage
+// failure must never break the game. Same pattern as Marsh Shot / Longshot.
+const PERF_LOG_KEY = 'neon-invaders-vr:perf-log';
+const PERF_LOG_MAX_SESSIONS = 5;
+const perfSession = { active: false, startT: 0, samples: [], sampleT: 0, degSec: 0, playSec: 0 };
+function perfSessionStart() {
+  if (perfSession.active) return; // restarts continue the same sitting
+  perfSession.active = true;
+  perfSession.startT = performance.now();
+  perfSessionWallStart = new Date().toISOString(); // FQ1: wall-clock start for the export
+  perfWarmup = 2; // FQ1: XR-entry + first-render hitches are not gameplay frame time
+  frameRing.length = 0; maxDrawCalls = 0; lastDrawCalls = 0; updatePerfLive(); // FQ1: fresh distribution per sitting
+  perfSession.samples.length = 0;
+  perfSession.sampleT = 0;
+  perfSession.degSec = 0;
+  perfSession.playSec = 0;
+}
+function perfSessionTick(dt) {
+  if (!perfSession.active) return;
+  perfSession.playSec += dt;
+  if (degraded) perfSession.degSec += dt;
+  perfSession.sampleT += dt;
+  if (perfSession.sampleT >= 1.0) {
+    perfSession.sampleT -= 1.0;
+    perfSession.samples.push({ ema: Math.round(avgFrameMs * 10) / 10, d: degraded ? 1 : 0 });
+    if (perfSession.samples.length > 3600) perfSession.samples.shift(); // cap: 1 h of samples
+  }
+}
+function perfSessionFlush() {
+  if (!perfSession.active) return;
+  perfSession.active = false;
+  try {
+    const ems = perfSession.samples.map(s => s.ema).sort((a, b) => a - b);
+    const n = ems.length;
+    const rec = {
+      date: new Date().toISOString(),
+      durSec: Math.round((performance.now() - perfSession.startT) / 1000),
+      samples: n,
+      emaMin: n ? ems[0] : 0,
+      emaMed: n ? ems[Math.floor(n / 2)] : 0,
+      emaP95: n ? ems[Math.min(n - 1, Math.floor(n * 0.95))] : 0,
+      degSec: Math.round(perfSession.degSec),
+      playSec: Math.round(perfSession.playSec)
+    };
+    let log = [];
+    try { const raw = localStorage.getItem(PERF_LOG_KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) log = p; } } catch (e) { log = []; }
+    log.push(rec);
+    while (log.length > PERF_LOG_MAX_SESSIONS) log.shift();
+    localStorage.setItem(PERF_LOG_KEY, JSON.stringify(log));
+    showLastPerfSummary();
+  } catch (e) { /* local logging must never break the game */ }
+}
+function showLastPerfSummary() {
+  const el = document.getElementById('perfLast');
+  if (!el) return;
+  try {
+    const raw = localStorage.getItem(PERF_LOG_KEY);
+    const log = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(log) || !log.length) { el.textContent = 'Performance: no session logged yet.'; return; }
+    const r = log[log.length - 1];
+    const mins = Math.max(1, Math.round(r.durSec / 60));
+    const totalP = (r.playSec || 0) || 1;
+    const degPct = Math.round((r.degSec || 0) / totalP * 100);
+    const d = new Date(r.date);
+    const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    el.textContent = 'Last session (' + when + '): ' + mins + ' min · median ' + r.emaMed + ' ms · p95 ' + r.emaP95 + ' ms · degraded ' + degPct + '% of play.';
+  } catch (e) { el.textContent = 'Performance: last-session summary unavailable.'; }
+}
+showLastPerfSummary(); // menu shows the previous session before play starts
+window.addEventListener('pagehide', perfSessionFlush);
+
+// ============================== FQ1: build ID + perf-log export (2026-11-16) ==============================
+// Finished-Quality Program §1/§5/§6: the build ID is shown in the menu
+// footer + the perf line so Danny can confirm what he is testing, and the
+// per-frame ring buffer + EXPORT PERF LOG button replace the withdrawn
+// assumption that anyone can read this device's localStorage remotely —
+// the downloaded JSON file IS the delivery mechanism.
+// The ring buffer records RAW per-frame times (unclamped dt) during active
+// play only, after a 2 s warm-up skip at session start — load hitches are
+// not gameplay frame time. Big hitch frames ARE recorded (no 100 ms cap):
+// the distribution must show real stalls, not hide them. The valve's own
+// EMA feeding is untouched — this is a measurement log, not a control
+// signal. Draw calls are renderer.info.render.calls sampled after each
+// frame's render (both eyes while presenting, single view on desktop).
+const FRAME_RING_MAX = 3600; // last 3600 frames (~50 s at 72 FPS)
+const frameRing = [];
+let perfSessionWallStart = null;
+let perfWarmup = 0; // FQ1: seconds of warm-up left (set at session start)
+let lastDrawCalls = 0, maxDrawCalls = 0, perfLiveTick = 0;
+function perfFrameRecord(rawMs) {
+  frameRing.push(Math.round(rawMs * 100) / 100);
+  if (frameRing.length > FRAME_RING_MAX) frameRing.shift();
+  if (++perfLiveTick >= 60) { perfLiveTick = 0; updatePerfLive(); }
+}
+function perfDist() {
+  const n = frameRing.length;
+  if (!n) return null;
+  const s = frameRing.slice().sort((a, b) => a - b);
+  const pct = (q) => s[Math.min(n - 1, Math.floor(n * q))];
+  let over = 0, sum = 0;
+  for (const v of frameRing) { sum += v; if (v > 13.9) over++; }
+  const tail = frameRing.slice(-60);
+  let tailSum = 0;
+  for (const v of tail) tailSum += v;
+  return {
+    frames: n,
+    p50: Math.round(pct(0.50) * 10) / 10,
+    p95: Math.round(pct(0.95) * 10) / 10,
+    p99: Math.round(pct(0.99) * 10) / 10,
+    mean: Math.round(sum / n * 10) / 10,
+    min: s[0],
+    max: s[n - 1],
+    over13_9Pct: Math.round(over / n * 1000) / 10,
+    rollingFps: Math.round(1000 / (tailSum / tail.length) * 10) / 10,
+    drawCallsLast: lastDrawCalls,
+    drawCallsMax: maxDrawCalls
+  };
+}
+function updatePerfLive() {
+  try {
+    const el = document.getElementById('perfLive');
+    if (!el) return;
+    const d = perfDist();
+    if (!d) { el.textContent = 'Build ' + BUILD_ID + ' · no frames recorded yet — play a session, then tap EXPORT PERF LOG.'; return; }
+    el.textContent = 'Build ' + BUILD_ID + ' · ' + d.frames + ' frames · p50 ' + d.p50 + ' ms · p95 ' + d.p95 + ' ms · p99 ' + d.p99 + ' ms · >13.9 ms ' + d.over13_9Pct + '% · rolling FPS ' + d.rollingFps + ' · draw calls ' + d.drawCallsLast + ' (max ' + d.drawCallsMax + ')';
+  } catch (e) { /* perf display must never break the game */ }
+}
+function exportPerfLog() {
+  try {
+    if (!frameRing.length) { setStatus('No frames recorded yet — play a session first, then export.'); return; }
+    const d = perfDist();
+    const payload = {
+      game: 'Neon Invaders VR',
+      buildId: BUILD_ID,
+      exportedAt: new Date().toISOString(),
+      sessionStart: perfSessionWallStart,
+      stats: d,
+      device: {
+        userAgent: (typeof navigator !== 'undefined' && navigator.userAgent) || null,
+        hardwareConcurrency: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || null,
+        deviceMemoryGB: (typeof navigator !== 'undefined' && navigator.deviceMemory) || null,
+        xrPresenting: renderer.xr.isPresenting,
+        viewport: window.innerWidth + 'x' + window.innerHeight
+      },
+      notes: [
+        'Frame times are raw per-frame deltas (ms) during active play, after a 2 s warm-up skip at session start; hitch frames are included, not capped.',
+        'p50/p95/p99 are percentiles of the recorded frames; over13_9Pct is the share of frames slower than 13.9 ms (the 72 FPS budget).',
+        'rollingFps is 1000 / mean of the last 60 recorded frames — a rolling window, not a session average.',
+        'drawCalls are renderer.info.render.calls after each frame render (both eyes while presenting; single view on desktop).',
+        'No FPS claim is made from desktop runs — Quest 2 headset numbers come from Danny\'s sessions.'
+      ],
+      frameTimesMs: frameRing.slice()
+    };
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fname = 'neon-invaders-vr-perf-' + BUILD_ID + '-' + stamp + '.json';
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus('Perf log downloaded: ' + fname + ' (' + d.frames + ' frames).');
+  } catch (e) { try { setStatus('Perf log export failed: ' + (e && e.message ? e.message : e)); } catch (e2) {} }
+}
+// Menu wiring (FQ1): build-ID footer + export button + initial perf line.
+(function fq1MenuInit() {
+  try {
+    const b = document.getElementById('buildIdLine');
+    if (b) b.textContent = 'Build ' + BUILD_ID;
+    const btn = document.getElementById('exportPerfBtn');
+    if (btn) btn.addEventListener('click', exportPerfLog);
+    updatePerfLive();
+  } catch (e) { /* menu extras must never break the game */ }
+})();
+// Combat pulse (cinematic upgrade, Bible §3.5): kills, waves, and tier-ups
+// briefly lift the whole scene — key light, starfield, grid, nebulas — then
+// it decays at 1.8/s. Costs a few float writes per frame, no new lights.
+// The valve freezes it at base values while degraded (see tick).
+let combatPulse = 0;
+function bumpPulse(x) { combatPulse = Math.min(1, combatPulse + x); }
+function killInvader(v) {
+  const kx = v.grp.position.x, ky = v.grp.position.y, kz = v.grp.position.z;
+  if (v.elite && v.hp > 1) { // elite absorbs the first hit — brighter core, 2 HP
+    v.hp--;
+    spawnBurst(kx, ky, kz, v.def.color, 10, 3.5, 0.4);
+    invaderHitSound(kx, ky, kz);
+    pulseBoth(0.4, 50);
+    markScoreDirty();
+    return;
+  }
+  const wasLunging = v.lunging;
+  v.lunging = false;
+  v.alive = false; v.grp.visible = false; v.grp.scale.set(1, 1, 1);
+  aliveCount--;
+  addScore(v.points);
+  if (wasLunging) { addScore(LUNGE_BONUS); showAnnouncement('FLYER DOWN!', '+' + LUNGE_BONUS + ' bonus', 1.4); }
+  spawnBurst(kx, ky, kz, v.def.color, 24, 4.6, 0.7);
+  spawnShockwave(kx, ky, kz, v.def.color);
+  spawnKillRing(kx, ky, kz, v.def.color);
+  bumpPulse(v.elite || wasLunging ? 0.6 : 0.35);
+  invaderHitSound(kx, ky, kz);
+  pulseBoth(v.elite || wasLunging ? 0.8 : 0.5, v.elite || wasLunging ? 90 : 60);
+  // Pickup economy ("easy, but not that easy"): regular kills only rarely
+  // drop an UPGRADE (5%); WEAPONS come only from hard kills — elites and
+  // lunging flyers at 50%, the mothership always (see the mothership hit block).
+  if (v.elite || wasLunging) { if (Math.random() < 0.50) spawnPickup(kx, ky, kz, WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)]); }
+  else if (Math.random() < 0.05) spawnPickup(kx, ky, kz, UPGRADE_KEYS[Math.floor(Math.random() * UPGRADE_KEYS.length)]);
+  markScoreDirty();
+  if (aliveCount <= 0) {
+    wave++;
+    startWave();
+  }
+}
+// Swept segment–sphere test (Round 3 N-P0-1, Standard §5): does the segment
+// A→B pass within radius r of center C? Same closest-point-on-segment math
+// as fireBeam — project C onto the segment, clamp t to [0,1], compare the
+// squared distance. Pure scalar math: no temps, no allocation, so it is
+// safe to call inside the bolt loop (killInvader may use tmpA/tmpB
+// downstream). A zero-length segment (dt 0) degrades to a point test.
+function segSphereHit(ax, ay, az, bx, by, bz, cx, cy, cz, r2) {
+  const abx = bx - ax, aby = by - ay, abz = bz - az;
+  const lenSq = abx * abx + aby * aby + abz * abz;
+  let t = 0;
+  if (lenSq > 0) t = ((cx - ax) * abx + (cy - ay) * aby + (cz - az) * abz) / lenSq;
+  t = clamp(t, 0, 1);
+  const dx = cx - (ax + abx * t), dy = cy - (ay + aby * t), dz = cz - (az + abz * t);
+  return dx * dx + dy * dy + dz * dz < r2;
+}
+function updateBolts(dt) {
+  // ROUND-2: single collision step per frame, always. The old code ran a 2nd
+  // substep whenever dt > 0.022, so a slow frame did MORE work and got slower
+  // until the game froze — a death spiral. One step, always.
+  for (const b of bolts) {
+    if (!b.active) continue;
+    boltStep: {
+      // SWEPT COLLISION (Round 3 N-P0-1): the bolt's frame segment runs
+      // from its previous position (ox,oy,oz) to its new one (p) — every
+      // hit test below runs against the SEGMENT, not the end point, so a
+      // slow-frame step can no longer jump clean over a target. Still ONE
+      // step per frame (no substep — see the Round-2 note above).
+      const p = b.grp.position;
+      const ox = p.x, oy = p.y, oz = p.z;
+      b.grp.position.x += b.vx * dt;
+      b.grp.position.y += b.vy * dt;
+      b.grp.position.z += b.vz * dt;
+      // Shield cubes erode from player fire too (skipped on alternate frames
+      // while the adaptive safety valve is active — see degraded/frameNo).
+      // Swept: the shield band is 1.0 wide and a slow-frame step is 2.1,
+      // so a bolt can jump clean over it — test the plane-crossing point
+      // too (all shield cubes sit at z = SHIELD_Z, so the crossing point
+      // is where the bolt meets the shield plane). The crossing branch can
+      // only run when oz and p.z are on opposite sides of the plane, so
+      // p.z - oz is never 0 there.
+      if (!degraded || (frameNo % 2 === 0)) {
+        let shieldHit = Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z);
+        if (!shieldHit && (oz - SHIELD_Z) * (p.z - SHIELD_Z) < 0) {
+          const t = (SHIELD_Z - oz) / (p.z - oz);
+          shieldHit = hitShield(ox + (p.x - ox) * t, oy + (p.y - oy) * t, SHIELD_Z);
+        }
+        if (shieldHit) { b.active = false; break boltStep; }
+      }
+      // Mothership — point test kept: the saucer box is 3.2 × 1.5 × 2.8,
+      // far wider than any single frame step, so it cannot tunnel.
+      if (motherActive && Math.abs(p.x - mother.position.x) < 1.6 && Math.abs(p.y - mother.position.y) < 0.75 && Math.abs(p.z - mother.position.z) < 1.4) {
+        const bonus = 50 * (1 + Math.floor(Math.random() * 4));
+        addScore(bonus);
+        spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xff2e88, 42, 6, 0.9);
+        spawnBurst(mother.position.x, mother.position.y, mother.position.z, 0xffd319, 20, 4.5, 0.7);
+        spawnShockwave(mother.position.x, mother.position.y, mother.position.z, 0xff2e88);
+        spawnKillRing(mother.position.x, mother.position.y, mother.position.z, 0xff2e88);
+        bumpPulse(1);
+        boomSound();
+        pulseBoth(0.9, 150);
+        // Mothership kill always drops one weapon pickup (hard-kill economy).
+        spawnPickup(mother.position.x, mother.position.y, mother.position.z, WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)]);
+        motherActive = false; mother.visible = false;
+        warbleStop();
+        motherTimer = rand(25, 40);
+        markScoreDirty();
+        showAnnouncement('BONUS +' + bonus, 'Mothership down!', 1.5);
+        b.active = false; break boltStep;
+      }
+      // SHOOT-TO-COLLECT: bolts collect floating pickups on contact, and
+      // the bolt flies on — hitting a pickup never costs you the shot.
+      for (const pk of pickups) {
+        if (!pk.active) continue;
+        const pp = pk.grp.position;
+        if (segSphereHit(ox, oy, oz, p.x, p.y, p.z, pp.x, pp.y, pp.z, 0.49)) collectPickup(pk);
+      }
+      // Swarm invaders (swept sphere test in world space — they come from
+      // every angle now, so there is no formation plane to test against).
+      // The radius grows with the invader's loom scale, so a lunging flyer
+      // that looks huge is just as huge a target. Cannon Power = pierce:
+      // the bolt keeps flying through up to `pierce` invaders instead of
+      // dying on one. Bolt speed 42 × dt cap 0.05 = 2.1/frame max — MORE
+      // than the 1.7 invader DIAMETER (r 0.85), so the old point test could
+      // tunnel clean through on a slow frame; the swept test cannot.
+      // (The old comment compared 2.1 against the 0.85 RADIUS — wrong side
+      // of the comparison; a step tunnels when it exceeds the diameter.)
+      for (const v of invaders) {
+        if (!v.alive) continue;
+        const dp = v.grp.position;
+        const rr = 0.85 * v.grp.scale.x;
+        if (segSphereHit(ox, oy, oz, p.x, p.y, p.z, dp.x, dp.y, dp.z, rr * rr)) {
+          killInvader(v);
+          if (b.pierce > 0) b.pierce--;
+          else b.active = false;
+          break;
+        }
+      }
+      if (!b.active) break boltStep;
+      // Bombs can be shot down
+      for (const mb of bombs) {
+        if (!mb.active) continue;
+        const mp = mb.grp.position;
+        if (segSphereHit(ox, oy, oz, p.x, p.y, p.z, mp.x, mp.y, mp.z, 0.2)) {
+          mb.active = false; mb.grp.visible = false;
+          addScore(5);
+          spawnBurst(p.x, p.y, p.z, 0xffa02e, 10, 3.4, 0.5);
+          invaderHitSound(p.x, p.y, p.z);
+          pulseBoth(0.4, 50);
+          markScoreDirty();
+          b.active = false;
+          break;
+        }
+      }
+    }
+    if (b.active) {
+      b.life -= dt;
+      if (b.life <= 0 || b.grp.position.y < -0.5 || b.grp.position.length() > 30) b.active = false;
+    }
+    b.grp.visible = b.active;
+  }
+}
+function updateBeams(dt) {
+  for (const bm of beams) {
+    if (!bm.active) continue;
+    bm.life -= dt;
+    if (bm.life <= 0) { bm.active = false; bm.mesh.visible = false; continue; }
+    bm.mesh.material.opacity = (bm.life / 0.18) * 0.9;
+  }
+}
+function updateMissiles(dt) {
+  for (const m of missiles) {
+    if (!m.active) continue;
+    // Nearest alive invader, squared-distance search, temps only — no allocation.
+    let best = null, bestD2 = Infinity;
+    for (const v of invaders) {
+      if (!v.alive) continue;
+      const wx = v.grp.position.x, wy = v.grp.position.y, wz = v.grp.position.z;
+      const dx = wx - m.grp.position.x, dy = wy - m.grp.position.y, dz = wz - m.grp.position.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < bestD2) { bestD2 = d2; best = v; }
+    }
+    if (best) {
+      tmpA.set(best.grp.position.x - m.grp.position.x, best.grp.position.y - m.grp.position.y, best.grp.position.z - m.grp.position.z).normalize();
+      const k = 1 - Math.exp(-5 * dt);
+      m.vx += (tmpA.x * 26 - m.vx) * k;
+      m.vy += (tmpA.y * 26 - m.vy) * k;
+      m.vz += (tmpA.z * 26 - m.vz) * k;
+      const sp = Math.hypot(m.vx, m.vy, m.vz) || 1;
+      m.vx = m.vx / sp * 26; m.vy = m.vy / sp * 26; m.vz = m.vz / sp * 26;
+      tmpA.set(m.vx, m.vy, m.vz).normalize();
+      tmpQ.setFromUnitVectors(UP_Y, tmpA);
+      m.grp.quaternion.copy(tmpQ);
+      if (bestD2 < 0.81) {
+        killInvader(best);
+        spawnBurst(m.grp.position.x, m.grp.position.y, m.grp.position.z, 0x2bff88, 16, 4, 0.5);
+        m.active = false; m.grp.visible = false;
+        continue;
+      }
+    }
+    m.grp.position.x += m.vx * dt;
+    m.grp.position.y += m.vy * dt;
+    m.grp.position.z += m.vz * dt;
+    // SHOOT-TO-COLLECT: missiles collect floating pickups they pass, and fly on.
+    for (const pk of pickups) {
+      if (!pk.active) continue;
+      const pp = pk.grp.position;
+      const dx = m.grp.position.x - pp.x, dy = m.grp.position.y - pp.y, dz = m.grp.position.z - pp.z;
+      if (dx * dx + dy * dy + dz * dz < 0.49) collectPickup(pk);
+    }
+    m.life -= dt;
+    if (m.life <= 0 || m.grp.position.y < -0.5 || m.grp.position.length() > 30) {
+      m.active = false; m.grp.visible = false;
+    }
+  }
+}
+function updateBombs(dt) {
+  bombTimer -= dt;
+  if (bombTimer <= 0) {
+    dropBomb();
+    // STEEP RAMP (Danny 2026-10-27): -0.12/wave, interval x0.92^tier, SURGE x0.4; 0.38s floor kept so fire never becomes a wall.
+    bombTimer = Math.max(0.38, (rand(0.7, 1.25) - wave * 0.12 - (1 - aliveCount / SWARM_COUNT) * 0.3) * Math.pow(0.92, tier) * (surgeWave ? 0.4 : 1));
+  }
+  for (const b of bombs) {
+    if (!b.active) continue;
+    b.grp.position.x += b.vx * dt;
+    b.grp.position.y += b.vy * dt;
+    b.grp.position.z += b.vz * dt;
+    const p = b.grp.position;
+    if ((!degraded || (frameNo % 2 === 0)) && Math.abs(p.z - SHIELD_Z) < 0.5 && hitShield(p.x, p.y, p.z)) {
+      spawnBurst(p.x, p.y, p.z, 0x19e3ff, 8, 3, 0.45);
+      shieldSound(p.x, p.y, p.z); // Round 3 N-P0-9: soft block blip, panned to the block point
+      b.active = false; b.grp.visible = false;
+      continue;
+    }
+    // Hit test is distance to YOU now (VR: headset, desktop: defended point) —
+    // bombs come from every angle, so the old rail-zone box can't work.
+    b.life -= dt;
+    const dx = p.x - playerPos.x, dy = p.y - playerPos.y, dz = p.z - playerPos.z;
+    if (dx * dx + dy * dy + dz * dz < 1.1) {
+      b.active = false; b.grp.visible = false;
+      playerHit();
+      continue;
+    }
+    if (p.y <= 0.22 || b.life <= 0 || p.length() > 30) {
+      if (p.y <= 0.22) spawnBurst(p.x, 0.3, p.z, 0xff5533, 10, 3, 0.5);
+      b.active = false; b.grp.visible = false;
+    }
+  }
+}
+function updateMother(dt) {
+  if (!motherActive) {
+    motherTimer -= dt;
+    if (motherTimer <= 0) {
+      if (!MOTHERSHIP_ENABLED) { motherTimer = rand(25, 40); return; } // Saucer REMOVED 2026-10-25: cheap rebuild still froze, so the gate stays shut — timer just resets, saucer never activates, never renders, never warbles
+      motherActive = true;
+      motherDir = Math.random() < 0.5 ? 1 : -1;
+      mother.position.set(motherDir > 0 ? -18 : 18, 11.4, -17);
+      mother.visible = true;
+      warbleStart();
+    }
+    return;
+  }
+  mother.position.x += motherDir * 3.4 * dt;
+  mother.rotation.y += dt * 0.8;
+  if (mother.position.x > 19 || mother.position.x < -19) {
+    motherActive = false; mother.visible = false;
+    warbleStop();
+    motherTimer = rand(25, 40);
+  }
+}
+
+// ============================== surround swarm ==============================
+// SURROUND SWARM (Danny 2026-10-27): no more flat formation. Invaders live
+// in world space all the time, spawn on a shell around you, hold station at
+// their anchor's range while strafing around you, and break off into lunges
+// that fly straight at you. A lunge target is locked at launch, so stepping
+// aside dodges it; a spent flyer bursts and leaves the wave either way.
+// The wave ends only when every invader is SHOT. The scary-approach work
+// (loom, redden, faster pulse, proximity heartbeat) now keys off lunge
+// progress instead of the old dive progress.
+const SCARY_RED = new THREE.Color(0xff2233); // flyers turn this red as they close in
+let lungeTimer = 2;
+let lastLungeWarn = 0; // proximity-heartbeat timer, see updateSwarm
+const LUNGE_BONUS = 50;
+function maxLunges() { return wave >= 2 ? 4 : 2; }
+function nextLungeInterval() { return rand(1.9, 2.1); } // a lunge about every 2 seconds, all game long
+function lungeSound(x, y, z) { const p = x === undefined ? 0 : panFor(x, y, z); blip(880, 300, 0.5, 'triangle', 0.10, p); blip(1320, 400, 0.4, 'sine', 0.06, p); blip(660, 220, 0.4, 'triangle', 0.05, p); }
+function startLunge() {
+  const candidates = [];
+  for (const v of invaders) if (v.alive && !v.lunging) candidates.push(v);
+  if (!candidates.length) return;
+  const v = candidates[Math.floor(Math.random() * candidates.length)];
+  v.lunging = true; v.lungeT = 0;
+  v.lungeDur = Math.max(2.4, 5.0 - wave * 0.3 - tier * 0.15); // lunges get faster every wave/tier; 2.4s floor keeps them dodgeable
+  v.lungeX0 = v.grp.position.x; v.lungeY0 = v.grp.position.y; v.lungeZ0 = v.grp.position.z;
+  v.lungeX1 = playerPos.x; v.lungeY1 = playerPos.y; v.lungeZ1 = playerPos.z;
+  // Brighter than swarm invaders: oversized glow (pulsed per frame below).
+  // Each invader owns its glow sprite material, so tinting one flyer red as
+  // it closes in never leaks into the rest of the swarm (body/core materials
+  // are shared per row, so those are never tinted per invader).
+  const lGlow = v.grp.children[v.grp.children.length - 1];
+  lGlow.scale.set(4.2, 4.2, 1);
+  v.diveGlowBase = lGlow.material.color.clone();
+  v.grp.scale.set(1, 1, 1); // a previous lunge's loom never carries over
+  lungeSound(v.grp.position.x, v.grp.position.y, v.grp.position.z);
+  pulseBoth(0.5, 80); // lunge warning you can feel, same frame as the sound
+  lungeFlash = 0.5; // amber screen-edge warning flash
+  showAnnouncement('FLYER INBOUND!', 'It broke from the swarm — shoot it down!', 2.4);
+}
+function updateSwarm(dt) {
+  // Lunge spawner (same ~2s cadence the divers had).
+  let lunging = 0;
+  for (const v of invaders) if (v.alive && v.lunging) lunging++;
+  if (lunging < maxLunges()) {
+    lungeTimer -= dt;
+    if (lungeTimer <= 0) { startLunge(); lungeTimer = nextLungeInterval(); }
+  }
+  const w0 = wave;
+  for (const v of invaders) {
+    if (!v.alive) continue;
+    const gp = v.grp.position;
+    if (v.lunging) {
+      v.lungeT += dt;
+      const t = Math.min(v.lungeT / v.lungeDur, 1);
+      const ease = t * t * (3 - 2 * t);
+      // Sway perpendicular to the lunge line, zero at both ends.
+      tmpA.set(v.lungeX1 - v.lungeX0, v.lungeY1 - v.lungeY0, v.lungeZ1 - v.lungeZ0);
+      const ll = tmpA.length() || 1; tmpA.divideScalar(ll);
+      tmpB.crossVectors(UP_Y, tmpA);
+      if (tmpB.lengthSq() < 0.01) tmpB.set(1, 0, 0); else tmpB.normalize();
+      const sway = Math.sin(t * Math.PI) * Math.sin(t * Math.PI * 2 + v.phase) * 1.2;
+      gp.set(
+        v.lungeX0 + (v.lungeX1 - v.lungeX0) * ease + tmpB.x * sway,
+        v.lungeY0 + (v.lungeY1 - v.lungeY0) * ease + Math.sin(t * Math.PI) * 1.2,
+        v.lungeZ0 + (v.lungeZ1 - v.lungeZ0) * ease + tmpB.z * sway
+      );
+      if (gp.y < 0.4) gp.y = 0.4;
+      v.grp.rotation.z = Math.cos(t * Math.PI * 2 + v.phase) * 0.4;
+      // SCARY APPROACH: the closer a flyer gets, the bigger, redder and
+      // faster-pulsing it becomes — it looms at you.
+      const loom = 1 + t * 0.7;
+      v.grp.scale.set(loom, loom, loom);
+      const gs = (4.0 + t * 3.0) + Math.sin(elapsed * (10 + t * 14) + v.phase) * (0.8 + t * 1.2);
+      const lGlow = v.grp.children[v.grp.children.length - 1];
+      lGlow.scale.set(gs, gs, 1);
+      if (v.diveGlowBase) lGlow.material.color.copy(v.diveGlowBase).lerp(SCARY_RED, t * t);
+      if (t >= 1) {
+        // Reached you — a hit only if it actually arrives at your position
+        // (the lunge target was locked at launch, so sidestepping dodges
+        // it). Either way the flyer is spent: it bursts and leaves the
+        // wave, exactly like the old divers. Never a game over.
+        v.lunging = false; v.alive = false; v.grp.visible = false; v.grp.scale.set(1, 1, 1);
+        aliveCount--;
+        spawnBurst(gp.x, gp.y, gp.z, 0xff5533, 24, 5, 0.7);
+        tmpA.copy(playerPos).sub(gp);
+        if (tmpA.length() < 1.2) playerHit();
+        if (aliveCount <= 0) { wave++; startWave(); }
+        if (wave !== w0) break;
+      }
+      continue;
+    }
+    // Approach / orbit: hold station at your anchor's range, strafing around
+    // it so the swarm stays spread around you instead of clumping in front.
+    tmpA.copy(playerPos).sub(gp);
+    const dist = tmpA.length() || 1;
+    tmpA.divideScalar(dist);
+    const radial = clamp((dist - v.hold) * 1.0, -v.speed, v.speed);
+    let vx = tmpA.x * radial, vy = tmpA.y * radial, vz = tmpA.z * radial;
+    tmpB.crossVectors(UP_Y, tmpA);
+    if (tmpB.lengthSq() < 0.01) tmpB.set(1, 0, 0); else tmpB.normalize();
+    const strafeAmp = v.strafe * (0.5 + 0.5 * Math.sin(elapsed * 0.5 + v.phase)) * v.strafeDir;
+    vx += tmpB.x * strafeAmp; vy += tmpB.y * strafeAmp * 0.3; vz += tmpB.z * strafeAmp;
+    // Weak anchor pull keeps the angular spread (no clumping).
+    tmpB.set(playerPos.x + v.anchorX * v.hold - gp.x, playerPos.y + v.anchorY * v.hold - gp.y, playerPos.z + v.anchorZ * v.hold - gp.z);
+    const ad = tmpB.length() || 1; tmpB.divideScalar(ad);
+    vx += tmpB.x * 0.15; vy += tmpB.y * 0.15; vz += tmpB.z * 0.15;
+    gp.x += vx * dt; gp.y += vy * dt; gp.z += vz * dt;
+    if (gp.y < 0.5) gp.y = 0.5;
+    if (dist > 0.5) v.grp.lookAt(playerPos.x, playerPos.y, playerPos.z);
+    // Gentle glow pulse + elite core (same read as the old formation bob).
+    const s = (1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18) * (v.elite ? 1.4 : 1);
+    v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
+    if (v.core) v.core.scale.setScalar(v.elite ? 1.8 : 1);
+  }
+  updateInvaderDetails();
+  // Proximity heartbeat: the nearest lunging flyer past halfway triggers a
+  // soft, rising pulse — faster as it closes in. Quiet by design (see the
+  // sound redesign): a low triangle blip, never a harsh alarm.
+  let closest = 0;
+  for (const v of invaders) if (v.alive && v.lunging) closest = Math.max(closest, Math.min(v.lungeT / v.lungeDur, 1));
+  if (closest > 0.5) {
+    const interval = 0.5 - (closest - 0.5) * 0.76; // 0.5s at halfway → 0.12s at impact
+    if (elapsed - lastLungeWarn >= interval) {
+      lastLungeWarn = elapsed;
+      blip(170, 110, 0.12, 'triangle', 0.08);
+    }
+  } else lastLungeWarn = elapsed;
+}
+
+// ============================== ENTER VR flow (Rad VR pattern) ==============================
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+const panel = document.getElementById('panel');
+let xrSupported = false;
+function setStatus(msg) { statusEl.textContent = msg; }
+function hidePanel() { panel.style.display = 'none'; hud.style.display = 'block'; }
+function showPanel() { panel.style.display = 'flex'; hud.style.display = 'none'; }
+// r160 REALITY (Bible §2, verified against the three.js r160 source):
+// setPixelRatio is INERT during an active immersive session — the 1.25 call
+// below changes nothing while presenting; the boot-time cap of 1.5 is the
+// value that matters, and fixed foveation is the live resolution lever
+// (see the valve in tick). The calls are kept because xrPixelUp restores
+// the desktop ratio when the session ends.
+function xrPixelDown() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); }
+function xrPixelUp() { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); }
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+vrBtn.addEventListener('click', async () => {
+  startAudio();
+  startGame();
+  paused = false; // re-entering resumes a run paused by a session end
+  if (!xrSupported) { hidePanel(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    xrPixelDown();
+    hidePanel();
+    session.addEventListener('end', () => { perfSessionFlush(); xrPixelUp(); if (mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume (or press P on desktop).'); vrBtn.disabled = false; });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      xrPixelDown();
+      hidePanel();
+      session.addEventListener('end', () => { perfSessionFlush(); xrPixelUp(); if (mode === 'play') paused = true; showPanel(); setStatus('VR session ended — game paused. Tap ENTER VR to resume (or press P on desktop).'); vrBtn.disabled = false; });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+    }
+  }
+});
+
+// ============================== main loop ==============================
+const clock = new THREE.Clock();
+function tick() {
+  // FQ1: rawDt is the UNCLAMPED frame time — the perf ring buffer must see
+  // real hitches (the 50 ms clamp below would hide them; Star Strike hit
+  // exactly this in Nov 15 verification). Gameplay still uses clamped dt.
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  elapsed += dt;
+  frameNo++;
+  // Rolling average frame time with hysteresis: degrade above ~20ms, recover
+  // below ~16ms, so the valve doesn't flutter on a single slow frame.
+  // VALVE REGISTRY (Bible §2 — shed ONLY these, each with a reverse path;
+  // never lighting, geometry, textures, or gameplay feedback):
+  //  degraded: foveation sheds gradually — Bible §2 steps [0.0, 0.25, 0.5]
+  //  with a 2 s dwell per level (0 = none, 1 = max — r160 semantics);
+  //  particle spawns halved (spawnBurst); shield checks alternate frames;
+  //  kill rings off (spawnKillRing); shockwaves alternate frames;
+  //  combat pulse frozen at base values (below); tier escalation paused.
+  //  Recovered: foveation back to 0.0, everything above restores itself.
+  //  Thresholds/hysteresis are Neon's originals, unchanged by this upgrade.
+  avgFrameMs = avgFrameMs * 0.95 + dt * 1000 * 0.05;
+  if (!degraded && avgFrameMs > 20) {
+    degraded = true;
+  } else if (degraded && avgFrameMs < 16) {
+    degraded = false;
+  }
+  // Graduated foveation (Round 3 N-P0-5, Bible §2): steps [0.0, 0.25, 0.5]
+  // with a 2 s minimum dwell per level, driven by the same EMA thresholds
+  // as `degraded` — but the level state is separate, so foveation sheds
+  // gradually instead of jumping straight to 0.5, and recovers the same
+  // way. setFoveation only runs on a level change.
+  fovDwellT += dt;
+  if (avgFrameMs > 20 && fovLevel < 2 && fovDwellT >= 2) {
+    fovLevel++; fovDwellT = 0;
+    try { renderer.xr.setFoveation(FOV_STEPS[fovLevel]); } catch (e) { /* foveation unavailable */ }
+  } else if (avgFrameMs < 16 && fovLevel > 0 && fovDwellT >= 2) {
+    fovLevel--; fovDwellT = 0;
+    try { renderer.xr.setFoveation(FOV_STEPS[fovLevel]); } catch (e) { /* foveation unavailable */ }
+  }
+  if (mode === 'play' && !paused) {
+    perfSessionTick(dt); // perf log samples active play only
+    // FQ1 ring buffer: raw per-frame times, post-warm-up only.
+    if (perfWarmup > 0) perfWarmup -= dt; else perfFrameRecord(rawDt * 1000);
+  }
+  const presenting = renderer.xr.isPresenting;
+  updateAudioListener(); // Bible §3.6: the HRTF listener follows the camera every frame
+
+  // ONE scoreboard, one visible form at a time: the camera-attached VR cell
+  // while presenting, the top-left DOM cell on desktop preview. (The DOM is
+  // invisible inside an immersive session anyway; this keeps the two forms
+  // from ever doubling up on desktop.)
+  scoreMesh.visible = presenting;
+  aimDot.visible = mode === 'play'; // Round 3 N-P0-6: no aim dot in the menu backdrop
+  pauseMesh.visible = paused && mode === 'play';
+  // Palm cannons ride the controllers only while presenting and connected
+  // (handedness-tracked refs — the cannons are parented by handedness,
+  // Round 3 P-6, so visibility follows the hand, not the slot).
+  handL.visible = presenting && !!leftCtl;
+  handR.visible = presenting && !!rightCtl;
+  if (mode === 'play') hud.style.display = presenting ? 'none' : 'block';
+  else hud.style.display = 'none';
+
+  if (mode === 'play') {
+    const fire = pollInput(dt);
+    // NO RAIL CANNON (Danny 2026-10-27): in VR you ARE the target — the
+    // defended point follows your headset, so stepping aside dodges bombs
+    // and lunges — plus either thumbstick adds a sidestep that springs
+    // back. Desktop keeps the sliding defended point from pollInput.
+    // playerPos is what the whole swarm aims at.
+    if (presenting) {
+      camera.getWorldPosition(tmpA);
+      dodgeX *= Math.pow(0.02, dt); // sidestep springs back
+      cannonX = clamp(tmpA.x + dodgeX, RAIL_MIN, RAIL_MAX);
+      playerPos.copy(tmpA); playerPos.x = cannonX;
+    }
+    else playerPos.set(cannonX, 1.1, RAIL_Z);
+    // Paused: pollInput above still ran (resume/mute/restart buttons), but
+    // no firing and no gameplay updates until the game resumes.
+    if (!paused) {
+    fireCooldown -= dt;
+    if (fire && fireCooldown <= 0) {
+      // IRON MAN HANDS: in VR each trigger-holding hand fires its own full
+      // volley from its own palm toward where THAT hand points;
+      // desktop/rail firing is unchanged.
+      if (presenting && (fireHands.left || fireHands.right)) {
+        // Round 3 (X-1): a hand fires only while its pose is live — a
+        // tracking-lost hand's matrix is frozen at the last good pose,
+        // so firing from it would shoot where the hand WAS. The other
+        // hand keeps firing normally.
+        if (fireHands.left && leftCtl && leftCtl.visible) fireHand(leftCtl);
+        if (fireHands.right && rightCtl && rightCtl.visible) fireHand(rightCtl);
+        if (!leftCtl && !rightCtl) fireWeapons();
+      } else fireWeapons();
+      // ONE WEAPON (Danny 2026-10-27): a single equipped weapon, so one pull
+      // launches at most 3 bolts (spread) + 1 beam (rail or Spartan) — the
+      // old "everything at once" volley was the freeze path. The interval
+      // still grows with volley size as a second bound, and upgrades
+      // (U.rate) still stack without limit — the rate floor is 0.02s, not
+      // a cap on the upgrade. The Spartan Laser counts triple (heavy weapon).
+      const volley = 1 + 2 * W.spread + W.twin + W.seeker + W.spartan * 3;
+      fireCooldown = Math.max(0.02, volley * 0.004, 0.16 * Math.pow(0.94, U.rate));
+    }
+    updateSwarm(dt);
+    updateBolts(dt);
+    updateBeams(dt);
+    updateMissiles(dt);
+    updatePickups(dt);
+    updateBombs(dt);
+    updateMother(dt);
+    }
+    flushScorePanel(dt); // runs while paused too, so the MUTED tag updates
+  } else {
+    // Menu: the swarm idles in a slow ring around you as a backdrop
+    playerPos.set(0, 1.6, 0);
+    for (let i = 0; i < invaders.length; i++) {
+      const v = invaders[i];
+      const a = i / invaders.length * Math.PI * 2 + elapsed * 0.05;
+      v.grp.position.set(Math.cos(a) * 14, 5.5 + Math.sin(a * 2 + elapsed * 0.7) * 1.2, Math.sin(a) * 14);
+      v.grp.lookAt(0, 1.6, 0);
+      const s = 1.8 + Math.sin(elapsed * 3 + v.phase) * 0.18;
+      v.grp.children[v.grp.children.length - 1].scale.set(s, s, 1);
+    }
+    updateInvaderDetails();
+  }
+
+  // Direction indicators: which way is the swarm coming from? Each invader
+  // votes for its sector (camera space: +z is behind you), weighted by
+  // closeness, doubled for lunging flyers. Play mode only.
+  if (mode === 'play') {
+    camera.getWorldQuaternion(indQ).invert();
+    let sL = 0, sR = 0, sU = 0, sD = 0, sB = 0;
+    let lL = false, lR = false, lU = false, lD = false, lB = false;
+    for (const v of invaders) {
+      if (!v.alive) continue;
+      tmpA.copy(v.grp.position).sub(playerPos);
+      const d = tmpA.length() || 1; tmpA.divideScalar(d);
+      tmpA.applyQuaternion(indQ);
+      const w = v.lunging ? 2 : 1;
+      const str = w * clamp(1.6 - d / 20, 0.25, 1.2);
+      if (tmpA.z > 0.2) { if (str > sB) sB = str; if (v.lunging) lB = true; }
+      else if (Math.abs(tmpA.x) > Math.abs(tmpA.y)) {
+        if (tmpA.x < 0) { if (str > sL) sL = str; if (v.lunging) lL = true; }
+        else { if (str > sR) sR = str; if (v.lunging) lR = true; }
+      } else {
+        if (tmpA.y > 0) { if (str > sU) sU = str; if (v.lunging) lU = true; }
+        else { if (str > sD) sD = str; if (v.lunging) lD = true; }
+      }
+    }
+    const pulse = 0.75 + Math.sin(elapsed * 10) * 0.25;
+    setInd(indL, sL, lL, pulse, 0x27e8ff);
+    setInd(indR, sR, lR, pulse, 0x27e8ff);
+    setInd(indU, sU, lU, pulse, 0x27e8ff);
+    setInd(indD, sD, lD, pulse, 0x27e8ff);
+    setInd(indB, sB, lB, pulse, 0xff7e47);
+  } else {
+    indL.material.opacity = indR.material.opacity = indU.material.opacity = indD.material.opacity = indB.material.opacity = 0;
+    indL.visible = indR.visible = indU.visible = indD.visible = indB.visible = false;
+  }
+
+  // Cannon + barrel follow
+  cannon.position.x = cannonX;
+  barrel.lookAt(aimPoint);
+  if (flashT > 0) { flashT -= dt; muzzleFlash.visible = true; muzzleFlash.material.opacity = clamp(flashT / 0.07, 0, 1) * 0.95; }
+  else { muzzleFlash.visible = false; muzzleFlash.material.opacity = 0; }
+  // Thruster pulse + cannon follows the rail
+  thruster.position.x = cannonX;
+  const tp = 0.55 + Math.sin(elapsed * 9) * 0.2;
+  thruster.scale.set(tp, tp, 1);
+  thruster.material.opacity = 0.4 + Math.sin(elapsed * 9) * 0.12;
+
+  // Rig: desktop sits at standing height and tilts up at the swarm;
+  // in VR the headset owns the pose (tilt zeroed, holder only lifts a
+  // height-less local-space fallback — same rule as Rad VR).
+  if (presenting) {
+    tiltGroup.rotation.x = 0;
+    heightHolder.position.y = camera.position.y < 0.4 ? 1.05 : 0;
+  } else {
+    tiltGroup.rotation.x = 0.26;
+    heightHolder.position.y = 1.6;
+  }
+  if (shakeT > 0) {
+    shakeT = Math.max(0, shakeT - dt);
+    const a = shakeT * 0.1;
+    shakeGroup.position.set((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, 0);
+  } else shakeGroup.position.set(0, 0, 0);
+  flash = Math.max(0, flash - dt * 1.7);
+  flashMat.opacity = flash * 0.75;
+  flashQuad.visible = flash > 0;
+  lungeFlash = Math.max(0, lungeFlash - dt * 1.4);
+  lungeFlashMat.opacity = lungeFlash * 0.5;
+  lungeFlashQuad.visible = lungeFlash > 0;
+
+  // Shield bubble: bright flash while invulnerable, else a faint persistent
+  // shell while shield layers remain, stronger with more layers.
+  if (shimmerT > 0) {
+    shimmerT = Math.max(0, shimmerT - dt);
+    shimmer.material.opacity = 0.22 * (shimmerT / 2) + Math.sin(elapsed * 14) * 0.03;
+  } else if (U.shield > 0) {
+    shimmer.material.opacity = 0.1 + Math.min(U.shield, 8) * 0.015 + Math.sin(elapsed * 6) * 0.02;
+  } else shimmer.material.opacity = 0;
+  shimmer.visible = shimmer.material.opacity > 0.004;
+
+  // Combat pulse (Bible §3.5): kills/waves/tier-ups briefly lift the whole
+  // scene — key light, starfield, grid, nebulas — then it decays. Frozen
+  // at base values while degraded (valve registry item). No new lights.
+  combatPulse = Math.max(0, combatPulse - dt * 1.8);
+  const cp = degraded ? 0 : combatPulse;
+  keyLight.intensity = 1.15 + cp * 0.7;
+  if (starsMat) starsMat.opacity = 0.9 + cp * 0.1;
+  if (gridMat) gridMat.opacity = 0.5 + cp * 0.25;
+  for (const n of nebulaSprites) n.sprite.material.opacity = n.base * (1 + cp * 0.9);
+
+  // Announcement fade
+  if (annT > 0) {
+    annT = Math.max(0, annT - dt);
+    annMesh.material.opacity = clamp(annT / Math.min(0.45, annDur), 0, 1);
+  } else annMesh.material.opacity = 0;
+  annMesh.visible = annMesh.material.opacity > 0.004;
+
+  // Planets drift slowly
+  planetA.rotation.y += dt * 0.008;
+  planetB.rotation.y += dt * 0.012;
+  planetC.rotation.y += dt * 0.02;
+  // Shooting stars: idle countdown, then a ~1.8s streak across the far sky,
+  // starting at a random azimuth so they appear all around you, not just ahead
+  updateAsteroids(dt);
+  if (shootT > 0) {
+    shootT -= dt;
+    const p = 1 - Math.max(shootT, 0) / 1.8;
+    shootStar.position.set(shootX0 + shootDX * p * 90, shootY0 - p * 18, shootZ0 + shootDZ * p * 90);
+    shootStar.visible = true;
+    shootStar.material.opacity = Math.sin(p * Math.PI) * 1.0;
+    if (shootT <= 0) { shootStar.material.opacity = 0; shootStar.visible = false; }
+  } else {
+    shootTimer -= dt;
+    if (shootTimer <= 0) {
+      const th = Math.random() * Math.PI * 2;
+      shootX0 = Math.sin(th) * 200; shootZ0 = Math.cos(th) * 200; shootY0 = rand(25, 110);
+      shootDX = Math.cos(th); shootDZ = -Math.sin(th);
+      shootT = 1.8; shootTimer = rand(6, 12);
+    }
+  }
+
+  // Gameplay feedback freezes with the pause; the ambient scene above
+  // (planets, asteroids, shooting stars) keeps drifting behind the panel.
+  if (!paused) {
+    updateParticles(dt);
+    updateShockwaves(dt);
+    updateKillRings(dt);
+  }
+  renderer.render(scene, camera);
+  // FQ1: draw-call sample for the perf log (gameplay only; info counts both
+  // eyes while presenting — see the export notes).
+  if (perfSession.active) { lastDrawCalls = renderer.info.render.calls; if (lastDrawCalls > maxDrawCalls) maxDrawCalls = lastDrawCalls; }
+}
+// ============================== mothership shader warm-up ==============================
+// WHY THIS EXISTS: the mothership is the only object whose materials first render
+// mid-game (14-22s in, when motherTimer fires). Its first visible frame forced
+// first-time shader compilation + geometry/texture upload inside a stereo VR
+// frame, which stalled the view hard enough to read as a freeze — audio kept
+// going, and quitting back to the menu (same page, shaders already cached) made
+// the saucer appear fine on re-entry. So we pay that cost ONCE here, before the
+// first animation frame: show the saucer dead-center in front of the menu
+// camera, compile + render it for real, then hide it and restore its spawn
+// position. NOTE: whether three r160's renderer.compile() skips invisible
+// objects is not something this code bets on — the real renderer.render() below
+// is the guarantee, since a rendered object must have its programs compiled and
+// its buffers/textures uploaded. After this block, the mothership's first
+// in-game appearance costs ZERO new shader compiles. (Burst points, shockwave
+// sprites, and the announcement panel are already exercised by wave-1 kills and
+// wave-start announcements, so they need no warm-up.)
+if (MOTHERSHIP_ENABLED) { // Saucer REMOVED 2026-10-25: skip the warm-up render too — the saucer must never render at all while the flag is false
+  const warmSavedPos = mother.position.clone();
+  mother.position.set(0, 4, FORM_Z); // dead-center in front of the menu camera
+  mother.visible = true;
+  renderer.compile(scene, camera);
+  renderer.render(scene, camera);
+  mother.visible = false;
+  mother.position.copy(warmSavedPos);
+}
+renderer.setAnimationLoop(tick);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
