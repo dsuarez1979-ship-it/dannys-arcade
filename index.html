@@ -41,6 +41,28 @@
   a.tile.prototype { border: 1px dashed rgba(255,176,61,0.65); background: rgba(255,176,61,0.06); }
   .tag.proto { background: #3ddc97; }
   footer { text-align: center; color: #7d72a8; font-size: 13px; margin-top: clamp(28px, 5vh, 44px); }
+
+  body {
+    padding-block: max(16px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-bottom));
+    padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+  }
+  .grid { gap: clamp(10px, 2vw, 20px); }
+  a.tile { display: flex; flex-direction: column; overflow-wrap: anywhere; }
+  a.tile:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .launch { display: grid; place-items: center; align-self: center; min-block-size: 44px;
+    max-inline-size: 100%; padding: 6px 20px; margin-block-start: auto;
+    border: 1px solid #917cba; border-radius: 999px; color: #fff; font-weight: 700; }
+  .tile p { margin-block-end: 14px; }
+  .tag { align-self: flex-start; }
+  @media (max-height: 500px) {
+    header { margin-bottom: 12px; }
+    a.tile { padding: 12px; }
+    .tile h2 { font-size: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    a.tile { transition: none; }
+    a.tile:hover, a.tile:focus { transform: none; }
+  }
 </style>
 </head>
 <body>
@@ -53,76 +75,97 @@
       <span class="tag">VR · QUEST</span>
       <h2>🛸 Neon Invaders VR</h2>
       <p>Space Invaders in real VR — the formation marches on you in deep space. Slide the cannon, aim with your controller, and hold the line. Unlimited ships, endless waves.</p>
+      <span class="launch">Start game</span>
     </a>
     <a class="tile" href="star-strike.html">
       <span class="tag">VR · QUEST</span>
       <h2>🚀 Star Strike VR</h2>
       <p>Original VR space shooter — pilot the Kestrel against Void drone swarms, dodge asteroids, grab triple lasers, and take down the Ravager carrier. Unlimited retries, no game over.</p>
+      <span class="launch">Start game</span>
     </a>
     <a class="tile" href="marsh-shot-vr.html">
       <span class="tag">VR · QUEST</span>
       <h2>🦆 Marsh Shot VR</h2>
       <p>VR marsh shooting at sunset — ducks cross the sky, you aim with your controller and shoot. Rounds get faster, score and accuracy tracked, no game over.</p>
+      <span class="launch">Start game</span>
     </a>
     <a class="tile" href="longshot-vr.html">
       <span class="tag">VR · QUEST</span>
       <h2>🎯 Longshot VR</h2>
       <p>VR sniper range at golden hour — 4 rifles, scope zoom, wind that pushes your shots, and steel plates at 100, 300, and 600 yards. Endless targets, no game over.</p>
+      <span class="launch">Start game</span>
     </a>
     <a class="tile" href="dead-hollow-vr.html">
       <span class="tag">VR · QUEST</span>
       <h2>🧟 Dead Hollow VR</h2>
       <p>Original zombie survival in VR — roam the town of Hollow Creek, go inside the diner, pharmacy, hardware store and sheriff's office, find weapons and ammo, and survive the night. No game over.</p>
+      <span class="launch">Start game</span>
     </a>
     <a class="tile" href="rhythm-slicer-vr.html">
       <span class="tag">VR · QUEST</span>
       <h2>🎵 Rhythm Slicer VR</h2>
       <p>VR rhythm slicing — slash beat-locked notes with glowing blades, slice bonus orbs out of the air, dodge the bombs. 3 levels, 3 difficulties, unlimited retries, no game over.</p>
+      <span class="launch">Start game</span>
     </a>
     <a class="tile prototype" href="rhythm-slicer-vr-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🎵 Rhythm Slicer VR — Phase 2 Preview</h2>
       <p>Round 2: layout fixes + performance logging only — the approved look, sound, and gameplay are unchanged. Still in testing — the live game above is unchanged.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="neon-invaders-vr-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🛸 Neon Invaders VR — Preview</h2>
       <p>Round 2: layout fixes + performance logging only — the approved look, sound, and gameplay are unchanged. Still in testing — the live game above is unchanged.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="marsh-shot-vr-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🦆 Marsh Shot VR — Preview</h2>
       <p>Round 2 rebuild: corrected aiming (shots go where the shotgun points), licensed ducks, goose, dog and shotgun, rebuilt water and marsh, golden-hour light. Still in testing — the live game above is unchanged.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="longshot-vr-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🎯 Longshot VR — Preview</h2>
       <p>Round 2 rebuild: corrected aiming (the rifle now points where the shot goes), realistic PBR terrain and range, rebuilt rifle, muzzle flash and impacts. Still in testing — the live game above is unchanged.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="star-strike-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🚀 Star Strike VR — Preview</h2>
       <p>Round 2: layout fixes + performance logging only — the approved look, sound, and gameplay are unchanged. Still in testing — the live game above is unchanged.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="rad-vr-expansion-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🌎 Rad VR — Four Worlds Preview</h2>
       <p>Brand-new expansion prototype: four driving worlds (Downtown City, Mountain Roads, Coastal Highway, Neon Metropolis), curved roads, location selection, a continuous road trip, and a relaxed scenic drive. Still in testing.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="dead-hollow-vr-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🧟 Dead Hollow VR — Preview</h2>
       <p>Round 2 rebuild: real licensed cars, an animated zombie, licensed weapons, photo-textured streets and buildings, and a fixed flashlight. Still in testing — the live game above is unchanged.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="skybound-vr-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🌅 Skybound: Flight of Wonders — Preview</h2>
       <p>Brand-new flagship: fly Aurea the golden solwing through a six-scene guided journey — canyon dives, ocean crossings, an enchanted forest — plus free flight over the world of Aeralis. Still in testing.</p>
+      <span class="launch">Open preview</span>
     </a>
     <a class="tile prototype" href="skybound-vr-cr1-preview.html">
       <span class="tag proto">PROTOTYPE · TESTING</span>
       <h2>🌅 Skybound: Flight of Wonders — CR1 Preview</h2>
       <p>New FQ1 + ChatGPT CR1 merge: new mountains, trees, sky and mood, plus the FQ1 controller and performance fixes. Still in testing — the earlier preview above is unchanged.</p>
+      <span class="launch">Open preview</span>
+    </a>
+    <a class="tile prototype" href="index-fq1-visual-preview.html">
+      <span class="tag proto">PROTOTYPE · TESTING</span>
+      <h2>✨ FQ1 Visual Update — Preview Hub</h2>
+      <p>First visual pass on all seven FQ1 games: new materials and finishes, same gameplay. Still in testing — the live games above are unchanged.</p>
+      <span class="launch">Open preview hub</span>
     </a>
   </main>
   <footer>One link for the whole arcade — bookmark it on the Quest.</footer>
