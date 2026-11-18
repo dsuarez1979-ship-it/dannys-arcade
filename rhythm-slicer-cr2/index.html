@@ -1,0 +1,3020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
+<title>Rhythm Slicer VR — Prototype (Phase 2)</title>
+<style>
+  *, *::before, *::after { box-sizing:border-box; }
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#06021a;
+    font-family:"Segoe UI", Arial, Helvetica, sans-serif; touch-action:none; }
+  canvas { display:block; }
+  /* Responsive launch screen (Standard §9, 2026-11-15): the overlay scrolls
+     when its content is taller than the viewport; .box margin:auto centers it
+     when short and keeps the top reachable when tall (plain
+     align-items:center would clip the top). The ENTER VR button sits above
+     the detail paragraphs in the DOM so it is visible on load. */
+  #panel {
+    position:fixed; inset:0; height:100vh; height:100dvh; display:flex;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background:radial-gradient(900px 600px at 50% 30%, #1b0f3d 0%, #0a0620 55%, #040110 100%);
+    z-index:10; text-align:center; color:#fff;
+  }
+  #panel .box { width:100%; max-width:600px; margin:auto; min-width:0; }
+  #panel h1 {
+    font-size:clamp(30px, 9vw, 58px); letter-spacing:clamp(2px, 1vw, 5px); margin:0 0 4px 0; font-weight:900; font-style:italic;
+    overflow-wrap:break-word;
+    background:linear-gradient(92deg,#2f7fff 10%,#2bff88 55%,#ff2b2b 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    text-shadow:0 0 34px rgba(255,113,206,.25);
+  }
+  #panel .sub { font-size:15px; letter-spacing:3px; color:#ffd9ec; margin-bottom:22px; text-transform:uppercase; }
+  #panel p { font-size:16px; line-height:1.55; margin:8px 0; color:#ffeef8; }
+  #panel p.small { font-size:13px; color:#e8c9e2; }
+  #panel .backlink { margin-top:20px; font-size:13px; }
+  #panel .backlink a { color:#7d72a8; text-decoration:none; }
+  #panel .backlink a:hover { color:#bdb2e8; }
+  #vrBtn {
+    margin-top:20px; font-size:clamp(18px, 3.4vw, 22px); font-weight:800; letter-spacing:2px; cursor:pointer;
+    color:#06121f; background:linear-gradient(92deg,#2f7fff,#2bff88); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 6px 30px rgba(39,232,255,.45);
+    min-height:56px; width:min(100%, 340px);
+  }
+  #vrBtn:disabled { opacity:.55; cursor:wait; }
+  /* FQ1: perf-log export button — small outlined button, visually quieter
+     than ENTER VR (it is a diagnostics action, not the main call to action). */
+  #exportPerfBtn {
+    margin-top:10px; cursor:pointer; font-size:13px; letter-spacing:1px;
+    background:rgba(20,10,40,.7); color:#ffd9ec; border:1px solid #ff71ce; border-radius:8px;
+    padding:10px 18px; min-height:44px;
+  }
+  #status { margin-top:14px; font-size:13px; color:#ffd319; min-height:18px; }
+  /* Shared arcade scoreboard cell: small dark translucent rectangle, thin neon
+     border, TOP-LEFT. Mirrored 1:1 by the VR camera-attached plane below. */
+  #hud {
+    position:fixed; top:12px; left:12px; z-index:5;
+    background:rgba(8,6,20,0.72); border:2px solid #2f7fff; border-radius:10px;
+    padding:8px 12px; pointer-events:none; display:none; text-align:left;
+    text-shadow:0 2px 8px #000; letter-spacing:1px;
+  }
+  #hudL1 { color:#ffffff; font-size:20px; font-weight:900; letter-spacing:1px; }
+  #hudL2 { color:#2f7fff; font-size:14px; font-weight:700; letter-spacing:1px; margin-top:2px; }
+  #hudL3 { color:#ffd319; font-size:13px; font-weight:700; letter-spacing:1px; margin-top:2px; }
+  #muteBtn {
+    position:fixed; top:12px; right:12px; z-index:20; cursor:pointer;
+    background:rgba(20,10,40,.7); color:#ffd9ec; border:1px solid #ff71ce; border-radius:8px;
+    padding:8px 12px; font-size:13px; letter-spacing:1px;
+  }
+  #flash {
+    position:fixed; inset:0; z-index:8; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at center, rgba(255,30,30,0.55) 0%, rgba(255,0,0,0.25) 60%, rgba(255,0,0,0) 100%);
+    transition:opacity 0.08s linear;
+  }
+  /* Temporary collision-debug readout (see updateDebugViz): hidden unless
+     ?debug=collision or the C key enables it. */
+  #dbg {
+    position:fixed; left:12px; bottom:12px; z-index:20; display:none;
+    background:rgba(0,0,0,.75); color:#2bff88; font:12px/1.5 monospace;
+    padding:6px 10px; border-radius:6px; pointer-events:none; white-space:pre;
+  }
+  /* Short viewports (Quest 2 browser landscape): tighten the menu so ENTER VR
+     stays visible without scrolling. */
+  @media (max-height:560px) {
+    #panel h1 { font-size:36px; }
+    #panel .sub { margin-bottom:10px; }
+    #panel p { font-size:14px; margin:5px 0; }
+    #panel p.small { font-size:12px; }
+    #vrBtn { margin-top:12px; padding:12px 32px; min-height:48px; }
+    #status { margin-top:8px; }
+  }
+  @media (max-width:520px) {
+    #hudL1 { font-size:17px; } #hudL2 { font-size:12px; } #hudL3 { font-size:11px; }
+  }
+
+  #vrBtn, #startBtn { max-inline-size: 100%; min-block-size: 44px; margin-inline: auto; }
+  #vrBtn:focus-visible, #startBtn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<meta name="arcade-revision" content="CR2-preview">
+</head>
+<body>
+
+<div id="panel">
+  <div class="box">
+    <h1>RHYTHM SLICER</h1>
+    <div class="sub">Neon Rhythm Slice &middot; original rhythm-slicing &middot; PROTOTYPE</div>
+    <p class="small" style="color:#ffd319">Phase 2 prototype build — not the live version. Overhaul: energy blades, rebuilt hit detection, cinematic arena.</p>
+    <p>Open this page in your <b>Quest Browser</b>, then tap the button below to start.</p>
+    <button id="vrBtn">ENTER VR</button>
+    <div id="status"></div>
+    <p><b>VR:</b> slice the glowing cubes with the matching energy blade — <b style="color:#2f7fff">BLUE cubes = left hand</b>, <b style="color:#ff2b2b">RED cubes = right hand</b>. Cubes alternate sides, so follow the COLOR, not the side. Any swing direction counts. Dodge the bombs.</p>
+    <p><b>Desktop:</b> hold the mouse button and drag — your blade cuts any color. M mutes.</p>
+    <p class="small">No lives, no game over, ever — misses and bombs only reset your combo. Every track is original synth, generated live in your browser.</p>
+    <p class="small" id="perfLast" style="color:#9fd8ff">Performance: no session logged yet.</p>
+    <p class="small" id="perfLive" style="color:#9fd8ff">Build RHYTHM-CR2-20261117 · no frames recorded yet.</p>
+    <p class="small">Session performance (frame times + valve level) is logged locally on this device only — nothing is sent anywhere.</p>
+    <button id="exportPerfBtn">EXPORT PERF LOG</button>
+    <p class="small" id="buildIdLine" style="color:#7d72a8">Build RHYTHM-CR2-20261117</p>
+    <p class="backlink"><a href="../">← Danny's Arcade</a></p>
+  </div>
+</div>
+
+<div id="hud"><div id="hudL1">0 PTS · x1</div><div id="hudL2">COMBO 0 · MAX 0</div><div id="hudL3">LV1 · EASY</div></div>
+<button id="muteBtn">SOUND: ON</button>
+<div id="flash"></div>
+<div id="dbg"></div>
+
+<script>
+// Boot watchdog (2026-11-14): the module sets window.__rsBooted when it
+// starts and window.__rsRendered after its first frame. If the 3D library
+// (loaded from a CDN) fails to arrive, the module never runs and the page
+// would otherwise sit silently on the title screen — this says so out loud
+// instead of leaving a black screen with no explanation.
+window.__rsBooted = false; window.__rsRendered = false;
+setTimeout(function () {
+  var st = document.getElementById('status');
+  if (!st) return;
+  if (!window.__rsBooted) {
+    st.textContent = 'The game did not start: the 3D library did not load. Check your connection, then reload this page.';
+    st.style.color = '#ff5a5a';
+  } else if (!window.__rsRendered) {
+    st.textContent = 'The game started but the 3D view is not drawing. Try reloading; if it repeats, tell Echo this exact message.';
+    st.style.color = '#ff5a5a';
+  }
+}, 8000);
+</script>
+
+<script type="module">
+// MARKER: RHYTHM-SLICER-V1
+// MARKER: RHYTHM-SLICER-V2
+// MARKER: RHYTHM-SLICER-V3
+// MARKER: RHYTHM-SLICER-PROTOTYPE-PHASE2
+// Rhythm Slicer VR — PHASE 2 PROTOTYPE for Danny's Arcade.
+// Prototype work area: ~/workspace/games/rhythm-slicer-vr-prototype/ — this
+// file is NOT live. The live version is ~/workspace/games/rhythm-slicer-vr/.
+// Everything here (art, music, names) is original: synth loops are generated
+// live with the Web Audio API, all meshes are procedural neon geometry.
+import * as THREE from 'three';
+
+// FQ1 build ID (Finished-Quality Program, 2026-11-16): shown in the menu
+// footer + the perf line + the perf cell + the perf-log export, so Danny
+// can confirm which build he is testing. Bump on every shipped change.
+const BUILD_ID = 'RHYTHM-CR2-20261117';
+window.__rsBooted = true; // boot watchdog (see inline script above the module)
+
+// ============================== helpers ==============================
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp  = (a, b, t) => a + (b - a) * t;
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ============================================================================
+// SHARED VR FOUNDATION — MODULE 1 (Phase 2 prototype)
+// ----------------------------------------------------------------------------
+// This block is written to be LIFTED into the other six Danny's Arcade games
+// with only GAME_ID and the game-specific menu/layout code changed. It owns:
+//   1. Persistent prefs + high scores (localStorage, namespaced per game)
+//   2. The frame-time valve + adaptive resolution (Neon-style, hysteresis)
+//   3. Controller haptics (guarded; Quest 2 Touch via WebXR pulse())
+//   4. Volume-model values (the master/music/SFX buses live in audioSys
+//      below; this module owns the persisted values + the setter contract)
+// Nothing here assumes a headset is attached: every call degrades gracefully
+// on desktop. No FPS claim is made anywhere — Quest 2 frame rate can only be
+// measured on the owner's headset.
+// ============================================================================
+const GAME_ID = 'rhythm-slicer-vr';
+const LS_PREFS_KEY = GAME_ID + ':prefs';
+const LS_SCORES_KEY = GAME_ID + ':scores';
+const DEFAULT_PREFS = {
+  v: 1,
+  master: 1.0, music: 0.9, sfx: 0.9, muted: false,
+  hitWindow: 'normal', // 'lenient' | 'normal' | 'precise'
+  practice: false, singleHand: false, colorblind: false,
+  vignette: false, textLarge: false, showPerf: false,
+  level: 0, diff: 1,
+};
+function lsGet(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
+function lsSet(key, val) { try { window.localStorage.setItem(key, val); } catch (e) { /* storage unavailable: prefs stay in-memory only */ } }
+function loadPrefs() {
+  const out = Object.assign({}, DEFAULT_PREFS);
+  try {
+    const raw = lsGet(LS_PREFS_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      for (const k of Object.keys(DEFAULT_PREFS)) if (saved[k] !== undefined) out[k] = saved[k];
+    }
+  } catch (e) { /* corrupt prefs: fall back to defaults */ }
+  out.master = clamp(+out.master || 0, 0, 1);
+  out.music = clamp(+out.music || 0, 0, 1);
+  out.sfx = clamp(+out.sfx || 0, 0, 1);
+  if (['lenient', 'normal', 'precise'].indexOf(out.hitWindow) < 0) out.hitWindow = 'normal';
+  out.level = clamp(Math.floor(+out.level) || 0, 0, 2);
+  out.diff = clamp(Math.floor(+out.diff) || 0, 0, 2);
+  return out;
+}
+const prefs = loadPrefs();
+function savePrefs() { lsSet(LS_PREFS_KEY, JSON.stringify(prefs)); }
+function loadScores() { try { return JSON.parse(lsGet(LS_SCORES_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function getBest(level, diff) {
+  const s = loadScores()[level + '-' + diff];
+  return s || null;
+}
+function recordScore(level, diff, run) {
+  const all = loadScores();
+  const k = level + '-' + diff;
+  const prev = all[k] || null;
+  const isBest = !prev || run.score > prev.score;
+  if (isBest) {
+    all[k] = { score: run.score, accuracy: run.accuracy, maxCombo: run.maxCombo, date: new Date().toISOString() };
+    lsSet(LS_SCORES_KEY, JSON.stringify(all));
+  }
+  return { isBest, prevBest: prev };
+}
+
+// --- Frame-time valve + adaptive quality (Neon-style, with hysteresis) ---
+// Rolling-average frame time. Degrades one level after 1s sustained above
+// 20ms; recovers one level after 3s sustained below 16ms. Level changes are
+// the ONLY times the live levers are touched.
+// r160 REALITY (verified against the three.js r160 source, 2026-11-14,
+// SHA-256 prefix 76dea8151bc9352a): NEITHER setPixelRatio() NOR
+// setFramebufferScaleFactor() changes XR resolution during an active
+// immersive session — both are inert mid-session (warnings only); the scale
+// factor is consumed ONLY at layer creation inside setSession. The valve's
+// old pixel-ratio steps (1.25 → 1.0 → 0.9) therefore never changed VR
+// resolution. The live resolution lever mid-session is FIXED FOVEATION:
+// renderer.xr.setFoveation() writes directly to the live layer's
+// fixedFoveation property with no presenting guard. So the valve sheds
+// fragment work via foveation + particle/trail/glow scaling, and the
+// pixel-ratio steps are GONE. Session-start resolution presets are NOT
+// added here — they need a headset test first (Test B, baseline notes).
+const perfValve = {
+  ema: 13.9, level: 0, overMs: 0, underMs: 0, dwell: 0,
+  // Fixed-foveation steps per level. SEMANTICS (r160 source comment,
+  // lines 27350-27351): 0 = no foveation = full resolution, 1 = maximum
+  // foveation. The original mapping here was INVERTED (1.0/0.75/0.5) —
+  // caught by ChatGPT's status-review flag and verified against source
+  // 2026-11-14; L0 would have run at MAXIMUM foveation. Initial values
+  // pending headset A/B: L1 mild, L2 moderate. Foveation only reduces
+  // peripheral resolution; the center stays full resolution.
+  foveation: [0.0, 0.25, 0.5],
+  get particleScale() { return [1, 0.5, 0.25][this.level]; },
+  get trailsOn() { return this.level < 2; },
+  get glowsOn() { return this.level < 2; },
+  update(dt) {
+    const ms = dt * 1000;
+    this.ema += (ms - this.ema) * 0.05;
+    this.dwell += dt;
+    if (this.ema > 20) { this.overMs += dt; this.underMs = 0; }
+    else if (this.ema < 16) { this.underMs += dt; this.overMs = 0; }
+    else { this.overMs = 0; this.underMs = 0; }
+    // Minimum 2 s in a level before another change (ChatGPT status-review
+    // flag): stops oscillation from momentary spikes or menu transitions.
+    // Level changes are always one step at a time by construction.
+    if (this.dwell >= 2.0 && this.overMs > 1.0 && this.level < 2) this.setLevel(this.level + 1);
+    else if (this.dwell >= 2.0 && this.underMs > 3.0 && this.level > 0) this.setLevel(this.level - 1);
+  },
+  setLevel(l) {
+    this.level = l; this.overMs = 0; this.underMs = 0; this.dwell = 0;
+    // setFoveation is safe to call any time: it stores the value and applies
+    // it to the live XR layer immediately when presenting.
+    renderer.xr.setFoveation(this.foveation[l]);
+  },
+  reset() {
+    this.level = 0; this.ema = 13.9; this.overMs = 0; this.underMs = 0; this.dwell = 0;
+    renderer.xr.setFoveation(this.foveation[0]);
+  },
+};
+// Warm-up window (seconds) after level start / resume during which the EMA
+// is not fed — load and resume hitches are not gameplay frame time.
+let perfWarmup = 0;
+
+// ============================== local performance capture (V2.0 / Standard §4) ==============================
+// Browser-side frame-time + valve-state capture, stored LOCALLY on the
+// device (localStorage) ONLY — key `rhythm-slicer-vr:perf-log`. No personal
+// data of any kind, no network calls, nothing transmitted. One summary per
+// play session (last 5 sessions kept; samples capped at 1 h in memory).
+// What is logged per session: date, duration, sample count, min/median/p95
+// frame-time EMA (ms), seconds spent in each valve level. This exists so
+// Danny's headset sessions produce a performance record automatically — no
+// hand-copied numbers. Only what the browser can measure (frame times +
+// valve state); no GPU-level claims. The last session's summary shows on
+// the menu (see showLastPerfSummary). All storage is guarded: a storage
+// failure must never break the game. Same pattern as Marsh Shot / Longshot.
+const PERF_LOG_KEY = 'rhythm-slicer-vr:perf-log';
+const PERF_LOG_MAX_SESSIONS = 5;
+const perfSession = { active: false, startT: 0, samples: [], sampleT: 0, valveSec: [0, 0, 0] };
+function perfSessionStart() {
+  if (perfSession.active) return; // restarts / next levels continue the same sitting
+  perfSession.active = true;
+  perfSession.startT = performance.now();
+  perfSessionWallStart = new Date().toISOString(); // FQ1: wall-clock start for the export
+  frameRing.length = 0; maxDrawCalls = 0; lastDrawCalls = 0; updatePerfLive(); // FQ1: fresh distribution per sitting
+  perfSession.samples.length = 0;
+  perfSession.sampleT = 0;
+  perfSession.valveSec = [0, 0, 0];
+}
+function perfSessionTick(dt) {
+  if (!perfSession.active) return;
+  perfSession.valveSec[perfValve.level] = (perfSession.valveSec[perfValve.level] || 0) + dt;
+  perfSession.sampleT += dt;
+  if (perfSession.sampleT >= 1.0) {
+    perfSession.sampleT -= 1.0;
+    perfSession.samples.push({ ema: Math.round(perfValve.ema * 10) / 10, v: perfValve.level });
+    if (perfSession.samples.length > 3600) perfSession.samples.shift(); // cap: 1 h of samples
+  }
+}
+function perfSessionFlush() {
+  if (!perfSession.active) return;
+  perfSession.active = false;
+  try {
+    const ems = perfSession.samples.map(s => s.ema).sort((a, b) => a - b);
+    const n = ems.length;
+    const rec = {
+      date: new Date().toISOString(),
+      durSec: Math.round((performance.now() - perfSession.startT) / 1000),
+      samples: n,
+      emaMin: n ? ems[0] : 0,
+      emaMed: n ? ems[Math.floor(n / 2)] : 0,
+      emaP95: n ? ems[Math.min(n - 1, Math.floor(n * 0.95))] : 0,
+      valveSec: perfSession.valveSec.map(v => Math.round(v))
+    };
+    let log = [];
+    try { const raw = localStorage.getItem(PERF_LOG_KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) log = p; } } catch (e) { log = []; }
+    log.push(rec);
+    while (log.length > PERF_LOG_MAX_SESSIONS) log.shift();
+    localStorage.setItem(PERF_LOG_KEY, JSON.stringify(log));
+    showLastPerfSummary();
+  } catch (e) { /* local logging must never break the game */ }
+}
+function showLastPerfSummary() {
+  const el = document.getElementById('perfLast');
+  if (!el) return;
+  try {
+    const raw = localStorage.getItem(PERF_LOG_KEY);
+    const log = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(log) || !log.length) { el.textContent = 'Performance: no session logged yet.'; return; }
+    const r = log[log.length - 1];
+    const mins = Math.max(1, Math.round(r.durSec / 60));
+    const totalV = ((r.valveSec[0] || 0) + (r.valveSec[1] || 0) + (r.valveSec[2] || 0)) || 1;
+    const l0 = Math.round((r.valveSec[0] || 0) / totalV * 100);
+    const d = new Date(r.date);
+    const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    el.textContent = 'Last session (' + when + '): ' + mins + ' min · median ' + r.emaMed + ' ms · p95 ' + r.emaP95 + ' ms · valve L0 ' + l0 + '% of play.';
+  } catch (e) { el.textContent = 'Performance: last-session summary unavailable.'; }
+}
+showLastPerfSummary(); // menu shows the previous session before play starts
+window.addEventListener('pagehide', perfSessionFlush);
+
+// ============================== FQ1: build ID + perf-log export (2026-11-16) ==============================
+// Finished-Quality Program §1/§5/§6: the build ID is shown in the menu
+// footer + the perf line + the in-VR perf cell (drawPerfCell) so Danny can
+// confirm what he is testing, and the per-frame ring buffer + EXPORT PERF
+// LOG button replace the withdrawn assumption that anyone can read this
+// device's localStorage remotely — the downloaded JSON file IS the
+// delivery mechanism.
+// The ring buffer records RAW per-frame times (unclamped dt) during active
+// play only, after the 0.75 s warm-up skip at level start / resume — load
+// hitches are not gameplay frame time. Big hitch frames ARE recorded (no
+// 100 ms cap, unlike the valve feed): the distribution must show real
+// stalls, not hide them. The valve's own EMA feeding is untouched — this
+// is a measurement log, not a control signal. Draw calls are
+// renderer.info.render.calls sampled after each frame's render (both eyes
+// while presenting, single view on desktop).
+const FRAME_RING_MAX = 3600; // last 3600 frames (~50 s at 72 FPS)
+const frameRing = [];
+let perfSessionWallStart = null;
+let lastDrawCalls = 0, maxDrawCalls = 0, perfLiveTick = 0;
+function perfFrameRecord(rawMs) {
+  frameRing.push(Math.round(rawMs * 100) / 100);
+  if (frameRing.length > FRAME_RING_MAX) frameRing.shift();
+  if (++perfLiveTick >= 60) { perfLiveTick = 0; updatePerfLive(); }
+}
+function perfDist() {
+  const n = frameRing.length;
+  if (!n) return null;
+  const s = frameRing.slice().sort((a, b) => a - b);
+  const pct = (q) => s[Math.min(n - 1, Math.floor(n * q))];
+  let over = 0, sum = 0;
+  for (const v of frameRing) { sum += v; if (v > 13.9) over++; }
+  const tail = frameRing.slice(-60);
+  let tailSum = 0;
+  for (const v of tail) tailSum += v;
+  return {
+    frames: n,
+    p50: Math.round(pct(0.50) * 10) / 10,
+    p95: Math.round(pct(0.95) * 10) / 10,
+    p99: Math.round(pct(0.99) * 10) / 10,
+    mean: Math.round(sum / n * 10) / 10,
+    min: s[0],
+    max: s[n - 1],
+    over13_9Pct: Math.round(over / n * 1000) / 10,
+    rollingFps: Math.round(1000 / (tailSum / tail.length) * 10) / 10,
+    drawCallsLast: lastDrawCalls,
+    drawCallsMax: maxDrawCalls
+  };
+}
+function updatePerfLive() {
+  try {
+    const el = document.getElementById('perfLive');
+    if (!el) return;
+    const d = perfDist();
+    if (!d) { el.textContent = 'Build ' + BUILD_ID + ' · no frames recorded yet — play a session, then tap EXPORT PERF LOG.'; return; }
+    el.textContent = 'Build ' + BUILD_ID + ' · ' + d.frames + ' frames · p50 ' + d.p50 + ' ms · p95 ' + d.p95 + ' ms · p99 ' + d.p99 + ' ms · >13.9 ms ' + d.over13_9Pct + '% · rolling FPS ' + d.rollingFps + ' · draw calls ' + d.drawCallsLast + ' (max ' + d.drawCallsMax + ')';
+  } catch (e) { /* perf display must never break the game */ }
+}
+function exportPerfLog() {
+  try {
+    if (!frameRing.length) { setStatus('No frames recorded yet — play a session first, then export.'); return; }
+    const d = perfDist();
+    const payload = {
+      game: 'Rhythm Slicer VR',
+      buildId: BUILD_ID,
+      exportedAt: new Date().toISOString(),
+      sessionStart: perfSessionWallStart,
+      stats: d,
+      device: {
+        userAgent: (typeof navigator !== 'undefined' && navigator.userAgent) || null,
+        hardwareConcurrency: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || null,
+        deviceMemoryGB: (typeof navigator !== 'undefined' && navigator.deviceMemory) || null,
+        xrPresenting: renderer.xr.isPresenting,
+        xrLayerSize: (typeof xrLayerSize === 'function') ? xrLayerSize() : null,
+        viewport: window.innerWidth + 'x' + window.innerHeight
+      },
+      notes: [
+        'Frame times are raw per-frame deltas (ms) during active play, after a 0.75 s warm-up skip at level start / resume; hitch frames are included, not capped.',
+        'p50/p95/p99 are percentiles of the recorded frames; over13_9Pct is the share of frames slower than 13.9 ms (the 72 FPS budget).',
+        'rollingFps is 1000 / mean of the last 60 recorded frames — a rolling window, not a session average.',
+        'drawCalls are renderer.info.render.calls after each frame render (both eyes while presenting; single view on desktop).',
+        'No FPS claim is made from desktop runs — Quest 2 headset numbers come from Danny\'s sessions.'
+      ],
+      frameTimesMs: frameRing.slice()
+    };
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fname = 'rhythm-slicer-vr-perf-' + BUILD_ID + '-' + stamp + '.json';
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus('Perf log downloaded: ' + fname + ' (' + d.frames + ' frames).');
+  } catch (e) { try { setStatus('Perf log export failed: ' + (e && e.message ? e.message : e)); } catch (e2) {} }
+}
+// Menu wiring (FQ1): build-ID footer + export button + initial perf line.
+(function fq1MenuInit() {
+  try {
+    const b = document.getElementById('buildIdLine');
+    if (b) b.textContent = 'Build ' + BUILD_ID;
+    const btn = document.getElementById('exportPerfBtn');
+    if (btn) btn.addEventListener('click', exportPerfLog);
+    updatePerfLive();
+  } catch (e) { /* menu extras must never break the game */ }
+})();
+
+// The XR layer's ACTUAL framebuffer size — the resolution the headset really
+// renders at. The stored pixel ratio is NOT the resolution: in r160 the
+// pixel ratio never changes the XR layer mid-session, so showing it would
+// mislead. Returns 'n/a' when no XR layer exists (desktop / not presenting).
+function xrLayerSize() {
+  try {
+    const s = renderer.xr.getSession ? renderer.xr.getSession() : null;
+    const l = s && s.renderState ? s.renderState.baseLayer : null;
+    if (l && l.framebufferWidth) return l.framebufferWidth + '×' + l.framebufferHeight;
+    // Projection-layer path (XRWebGLBinding): baseLayer is null and the
+    // layer exposes textureWidth/textureHeight instead.
+    const layers = s && s.renderState ? s.renderState.layers : null;
+    if (layers && layers.length > 0 && layers[0] && layers[0].textureWidth) {
+      return layers[0].textureWidth + '×' + layers[0].textureHeight;
+    }
+  } catch (e) { /* no layer readable */ }
+  return 'n/a';
+}
+
+// --- Controller haptics (Quest 2 Touch; no-op on desktop / without actuators) ---
+function pulseHaptics(hand, strength, ms) {
+  if (!renderer.xr.isPresenting) return;
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const src of session.inputSources) {
+    if (src.handedness !== hand) continue;
+    const gp = src.gamepad;
+    if (!gp || !gp.hapticActuators || !gp.hapticActuators.length) continue;
+    const act = gp.hapticActuators[0];
+    try {
+      if (typeof act.pulse === 'function') act.pulse(clamp(strength, 0, 1), ms);
+      else if (typeof act.playEffect === 'function') act.playEffect('dual-rumble', { duration: ms, strongMagnitude: strength, weakMagnitude: strength * 0.6 });
+    } catch (e) { /* haptics are best-effort */ }
+  }
+}
+
+// ============================== renderer / scene ==============================
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+// Stereo VR is the expensive path — pixel ratio capped for the Quest browser.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+
+// Small, deterministic surface detail. Linear color space also lets the map drive roughness.
+const crSurface = (() => {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  let seed = 82741;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      const grain = seed >>> 27;
+      const band = Math.round(12 * Math.sin(y * Math.PI / 16));
+      const value = 204 + band + grain;
+      const offset = (y * size + x) * 4;
+      data[offset] = data[offset + 1] = data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+})();
+
+// Steel portal frames, stepped roof lanterns and side galleries share one draw batch.
+{
+  const beams = [];
+  function beam(x, y, z, width, height, depth, roll, tint) {
+    beams.push({ x, y, z, width, height, depth, roll, tint });
+  }
+  for (let bay = 0; bay < 10; bay++) {
+    const z = -2 - bay * 3.8;
+    for (const side of [-1, 1]) {
+      beam(side * 7, 2.8, z, .32, 5.65, .54, -side * .09, 0x474b5a);
+      beam(side * 5.35, 6.55, z, .27, 4.6, .54, side * 1.04, 0x5b5a66);
+      beam(side * 7.8, 2.5, z, 2, .25, 3.75, 0, 0x303340);
+      beam(side * 6.89, 3.22, z, .08, .09, 3.75, 0, 0x686873);
+      beam(side * 6.89, 2.88, z, .065, .72, .065, 0, 0x575966);
+      beam(side * 7.5, 1.8, z, .14, 1.7, .22, side * .58, 0x383b48);
+    }
+    beam(0, 7.71, z, 7.05, .3, .54, 0, 0x575a69);
+  }
+  const steel = new THREE.MeshStandardMaterial({ map: crSurface, roughness: .64, metalness: .36 });
+  const frame = new THREE.InstancedMesh(new THREE.BoxGeometry(), steel, beams.length);
+  const pose = new THREE.Object3D();
+  beams.forEach((b, i) => {
+    pose.position.set(b.x, b.y, b.z);
+    pose.scale.set(b.width, b.height, b.depth);
+    pose.rotation.z = b.roll;
+    pose.updateMatrix();
+    frame.setMatrixAt(i, pose.matrix);
+    frame.setColorAt(i, new THREE.Color(b.tint));
+  });
+  frame.computeBoundingSphere();
+  scene.add(frame);
+}
+
+scene.background = new THREE.Color(0x05021a);
+scene.fog = new THREE.Fog(0x05021a, 26, 60);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 900);
+
+// Player rig: dolly -> height holder -> camera (mirrors the arcade pattern;
+// in VR the headset pose drives the camera, on desktop the holder sets eye height)
+const dolly = new THREE.Group();
+const heightHolder = new THREE.Group();
+heightHolder.position.y = 1.6;
+dolly.add(heightHolder); heightHolder.add(camera);
+scene.add(dolly);
+// V2: live head-height tracking. In VR (local-floor) the HMD pose already IS
+// true head height, so the 1.6m rig offset must be zeroed while presenting —
+// leaving it on floated the camera ~1.6m above the player's real head, which
+// is why every note (spawned at a fixed 1.3m) looked like it was on the floor.
+const _headV = new THREE.Vector3();
+let smoothHeadY = 1.6;
+
+// Lights: hemisphere base + two colored stage lights that pulse on the beat
+const hemiLight = new THREE.HemisphereLight(0x8fb8ff, 0x1a0f2e, 0.8);
+scene.add(hemiLight);
+const stageL = new THREE.PointLight(0x2f7fff, 30, 30, 1.8);
+stageL.position.set(-4, 4, -4); scene.add(stageL);
+const stageR = new THREE.PointLight(0xff2b2b, 30, 30, 1.8);
+stageR.position.set(4, 4, -4); scene.add(stageR);
+
+// Shared radial glow texture (every fake glow in the game uses it)
+function makeGlowTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  gr.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const glowTex = makeGlowTexture();
+function glowSprite(color, scale, opacity) {
+  const m = new THREE.SpriteMaterial({
+    map: glowTex, color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false
+  });
+  const s = new THREE.Sprite(m);
+  s.scale.set(scale, scale, 1);
+  return s;
+}
+
+// ============================== environment: skybox, stars, grid, stage ==============================
+const COL_BLUE = 0x2f7fff, COL_RED = 0xff2b2b, COL_YEL = 0xffd319;
+{
+  // Gradient sky dome via vertex colors (one draw call, fog-exempt)
+  const skyGeo = new THREE.SphereGeometry(400, 24, 14);
+  const pos = skyGeo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const top = new THREE.Color(0x02010c), mid = new THREE.Color(0x12062e),
+        low = new THREE.Color(0x2a0f4a), hor = new THREE.Color(0x51155f);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = clamp(pos.getY(i) / 400, -1, 1);
+    if (t < 0) c.copy(hor).lerp(new THREE.Color(0x0a0420), clamp(-t * 2.2, 0, 1));
+    else if (t < 0.25) c.copy(hor).lerp(low, t / 0.25);
+    else if (t < 0.6) c.copy(low).lerp(mid, (t - 0.25) / 0.35);
+    else c.copy(mid).lerp(top, (t - 0.6) / 0.4);
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  skyGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const sky = new THREE.Mesh(skyGeo,
+    new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
+  scene.add(sky);
+  // Starfield (one Points draw call, static)
+  const n = 700, sp = new Float32Array(n * 3);
+  const srng = mulberry32(99);
+  for (let i = 0; i < n; i++) {
+    const th = srng() * Math.PI * 2, ph = Math.acos(srng() * 1.6 - 0.6), r = 380;
+    sp[i * 3] = r * Math.sin(ph) * Math.cos(th);
+    sp[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * 0.9 + 4;
+    sp[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({
+    color: 0xcfd8ff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.85
+  })));
+}
+// Beat-reactive floor grid
+const grid = new THREE.GridHelper(70, 35, COL_BLUE, 0x1a2a5a);
+grid.position.y = 0;
+grid.material.transparent = true; grid.material.opacity = 0.4;
+scene.add(grid);
+
+// Stage: two light towers with pulsing glow sprites, plus a back arch
+const towerGlows = [];
+{
+  const towerMat = new THREE.MeshBasicMaterial({ color: 0x0d0a24 });
+  const towerGeo = new THREE.BoxGeometry(0.5, 7, 0.5);
+  for (const sx of [-5.5, 5.5]) {
+    const t = new THREE.Mesh(towerGeo, towerMat);
+    t.position.set(sx, 3.5, -9); scene.add(t);
+    const glow = glowSprite(sx < 0 ? COL_BLUE : COL_RED, 3.2, 0.7);
+    glow.position.set(sx, 7.2, -9); scene.add(glow);
+    glow.userData.base = 3.2;
+    towerGlows.push(glow);
+  }
+  // Back arch ring
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(9, 0.16, 10, 48),
+    new THREE.MeshBasicMaterial({ color: 0xff2b2b, toneMapped: false }));
+  arch.position.set(0, 2.2, -16); scene.add(arch);
+  const archGlow = glowSprite(0xff2b2b, 20, 0.18);
+  archGlow.position.set(0, 2.2, -16); scene.add(archGlow);
+  archGlow.userData.base = 20;
+  towerGlows.push(archGlow);
+  // Second, larger arch ring (overhaul 2026-11-14): depth layering.
+  const arch2 = new THREE.Mesh(new THREE.TorusGeometry(12, 0.14, 10, 48),
+    new THREE.MeshBasicMaterial({ color: COL_BLUE, toneMapped: false }));
+  arch2.position.set(0, 2.2, -22); scene.add(arch2);
+  const arch2Glow = glowSprite(COL_BLUE, 26, 0.14);
+  arch2Glow.position.set(0, 2.2, -22); scene.add(arch2Glow);
+  arch2Glow.userData.base = 26;
+  towerGlows.push(arch2Glow);
+}
+// Neon side pillars (overhaul 2026-11-14): beat-pulsed light columns framing
+// the play area. Two shared materials, pulsed by opacity in the tick.
+const pillarMats = [
+  new THREE.MeshBasicMaterial({ color: COL_BLUE, transparent: true, opacity: 0.55, toneMapped: false }),
+  new THREE.MeshBasicMaterial({ color: COL_RED, transparent: true, opacity: 0.55, toneMapped: false })
+];
+{
+  const pillarGeo = new THREE.BoxGeometry(0.18, 6, 0.18);
+  for (const [sx, sz] of [[-3.2, -4], [-3.2, -8], [3.2, -4], [3.2, -8]]) {
+    const p = new THREE.Mesh(pillarGeo, pillarMats[sx < 0 ? 0 : 1]);
+    p.position.set(sx, 3, sz); scene.add(p);
+  }
+}
+
+// ============================== hit plane + lane guides ==============================
+const HIT_Z = -1.1, SPAWN_Z = -13;
+const LANES = [-0.62, -0.21, 0.21, 0.62];
+// V2: per-lane height offsets around the player's LIVE head height (the old
+// fixed LANE_Y = 1.3 is gone — notes anchor to eye level at spawn time).
+const LANE_YOFFS = [-0.45, -0.15, 0.15, 0.45];
+// NOTE (2026-11-15): there is deliberately NO handOfLane helper any more.
+// Cube color tells the HAND, not the side — hands alternate sides, so no
+// lane belongs to a hand. Anything that needs a note's hand reads n.hand /
+// e.hand. (The old helper was removed with the alternating-pattern change.)
+// V2: strike-zone frame + lane guides live in a group that rides the smoothed
+// head height, so the target zone is always at eye level.
+const strikeFrame = new THREE.Group();
+scene.add(strikeFrame);
+{
+  // Neon frame around the strike zone
+  const frameMat = new THREE.MeshBasicMaterial({ color: COL_BLUE, toneMapped: false });
+  const mkBar = (w, h, x, y) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frameMat);
+    m.position.set(x, y, HIT_Z); strikeFrame.add(m);
+  };
+  mkBar(1.9, 0.05, 0, 0.55); mkBar(1.9, 0.05, 0, 2.05);
+  mkBar(0.05, 1.55, -0.93, 1.3); mkBar(0.05, 1.55, 0.93, 1.3);
+  // Faint lane guide lines from spawn to hit plane — NEUTRAL violet since
+  // 2026-11-15: hands alternate sides, so a hand-colored guide would lie.
+  for (let li = 0; li < LANES.length; li++) {
+    const lx = LANES[li];
+    const col = 0xb9a8ff;
+    const g = new THREE.BufferGeometry().setFromPoints(
+      [new THREE.Vector3(lx, LANE_YOFFS[li], SPAWN_Z), new THREE.Vector3(lx, LANE_YOFFS[li], HIT_Z)]);
+    strikeFrame.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+      color: col, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false
+    })));
+  }
+}
+// Runway light strip (overhaul 2026-11-14): one additive plane on the floor
+// from spawn to the hit plane, red (far) → blue (near) via vertex colors.
+{
+  const runLen = HIT_Z - SPAWN_Z; // 11.9 m
+  const rg = new THREE.PlaneGeometry(0.4, runLen, 1, 8);
+  const rp = rg.attributes.position;
+  const rc = new Float32Array(rp.count * 3);
+  const cFar = new THREE.Color(COL_RED), cNear = new THREE.Color(COL_BLUE), cc = new THREE.Color();
+  for (let i = 0; i < rp.count; i++) {
+    // Local +Y maps to the FAR end after the -90° X rotation, so invert t:
+    // 0 = far (red), 1 = near (blue).
+    const t = 0.5 - rp.getY(i) / runLen;
+    cc.copy(cFar).lerp(cNear, t);
+    rc[i * 3] = cc.r; rc[i * 3 + 1] = cc.g; rc[i * 3 + 2] = cc.b;
+  }
+  rg.setAttribute('color', new THREE.BufferAttribute(rc, 3));
+  const runway = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending,
+    depthWrite: false, toneMapped: false
+  }));
+  runway.rotation.x = -Math.PI / 2;
+  runway.position.set(0, 0.02, (SPAWN_Z + HIT_Z) / 2);
+  scene.add(runway);
+}
+
+// ============================== VR controllers + energy blades ==============================
+// Left hand = BLUE blade, right hand = RED blade. The blade colors MATCH
+// the note/lane colors — color-matching is the core mechanic.
+// PALETTE (owner decision, final Nov 15, 2026): clearly distinguishable red
+// and blue, subject to the owner's visual confirmation. Full retheme applied
+// Nov 15 (notes + blades + lanes + markers + UI). Bombs use AMBER markers
+// and emissive so they stay distinct from the red right-hand cubes.
+// Energy-blade design (overhaul 2026-11-14): 1.0 m visible blade, white-hot
+// core + colored mid layer + soft additive outer shell + glow sprites —
+// layered geometry, NOT full-screen bloom (forbidden on Quest 2).
+// BLADES ATTACH BY HANDEDNESS, NOT BY CONTROLLER INDEX (fix 2026-11-14):
+// getController(0/1) enumerate in session order, which is NOT guaranteed to
+// be left-then-right — attaching bladeL to getController(0) could put the
+// blue blade in the right hand while the collision system treats that hand
+// as 'right', turning every correct-color swing into WRONG BLADE. Each blade
+// is parented to its controller only once the 'connected' event reports the
+// handedness, so the visible blade, the collision capsule, and the hand
+// identity always agree. (If a controller disconnects, its blade stays
+// parented to the dead group but is hidden by the visibility rule below.)
+const BLADE_LEN = 1.0;      // visible blade length (m) — target range 0.9–1.1
+const BLADE_BASE_Z = -0.07; // blade starts here (local z); tip at -1.07
+// Shared handle materials (PBR standard materials, lit by the scene lights).
+const gripMat = new THREE.MeshStandardMaterial({ color: 0x44464c, metalness: 0.68, roughness: 0.52, roughnessMap: crSurface });
+const gripDarkMat = new THREE.MeshStandardMaterial({ color: 0x20242a, metalness: 0.47, roughness: 0.72, roughnessMap: crSurface });
+// L2 (Round 3): blade energy gradient — a canvas gradient along the blade
+// length, hot white at the emitter fading to the blade color at the tip.
+// CylinderGeometry v=1 is the +Y end, rotation.x = π/2 points +Y toward +Z
+// (the emitter), and CanvasTexture flipY puts the canvas top at v=1 — so the
+// canvas gradient runs white (top = emitter) → color (bottom = tip). Same
+// geometry, same draw calls, same silhouette.
+function makeBladeGradientTexture(colorHex) {
+  const cv = document.createElement('canvas'); cv.width = 4; cv.height = 64;
+  const g = cv.getContext('2d');
+  const col = '#' + new THREE.Color(colorHex).getHexString();
+  const gr = g.createLinearGradient(0, 0, 0, 64);
+  gr.addColorStop(0, '#ffffff');
+  gr.addColorStop(0.3, '#ffffff');
+  gr.addColorStop(0.65, col);
+  gr.addColorStop(1, col);
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 64);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+// L4 (Round 3): blade shell falloff — a soft alpha gradient along the shell
+// so its ends fade instead of ending at a hard cylinder rim. Shared by both
+// blades (it carries no color).
+const shellFalloffTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = 4; cv.height = 64;
+  const g = cv.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 64);
+  gr.addColorStop(0, '#000000');
+  gr.addColorStop(0.2, '#ffffff');
+  gr.addColorStop(0.8, '#ffffff');
+  gr.addColorStop(1, '#000000');
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 64);
+  return new THREE.CanvasTexture(cv);
+})();
+function buildBlade(color) {
+  const g = new THREE.Group();
+  // --- Handle: metallic grip + band + pommel + glowing emitter ring ---
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.025, 0.15, 12), gripMat);
+  grip.rotation.x = Math.PI / 2; grip.position.z = 0.015; g.add(grip);
+  const gripBand = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.02, 12), gripDarkMat);
+  gripBand.rotation.x = Math.PI / 2; gripBand.position.z = 0.075; g.add(gripBand);
+  const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.02, 0.025, 12), gripMat);
+  pommel.rotation.x = Math.PI / 2; pommel.position.z = 0.1; g.add(pommel);
+  const emitter = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.008, 8, 20),
+    new THREE.MeshBasicMaterial({ color, toneMapped: false }));
+  emitter.position.z = BLADE_BASE_Z; g.add(emitter);
+  // --- Blade: layered cylinders, center at base - LEN/2 ---
+  const midZ = BLADE_BASE_Z - BLADE_LEN / 2;
+  const gradTex = makeBladeGradientTexture(color); // L2: white-hot emitter → blade color at tip
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, BLADE_LEN, 10),
+    new THREE.MeshBasicMaterial({ map: gradTex, toneMapped: false }));
+  core.rotation.x = Math.PI / 2; core.position.z = midZ; g.add(core);
+  const mid = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, BLADE_LEN, 12),
+    new THREE.MeshBasicMaterial({ map: gradTex, transparent: true, opacity: 0.85, toneMapped: false }));
+  mid.rotation.x = Math.PI / 2; mid.position.z = midZ; g.add(mid);
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, BLADE_LEN, 12),
+    new THREE.MeshBasicMaterial({ color, alphaMap: shellFalloffTex, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  shell.rotation.x = Math.PI / 2; shell.position.z = midZ; g.add(shell);
+  // Rounded tip cap (hemisphere, dome toward -Z).
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.021, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color, toneMapped: false }));
+  cap.rotation.x = -Math.PI / 2; cap.position.z = BLADE_BASE_Z - BLADE_LEN; g.add(cap);
+  // Glow sprites: bright at the tip, soft along the blade.
+  const tip = glowSprite(color, 0.4, 0.9); tip.position.z = BLADE_BASE_Z - BLADE_LEN; g.add(tip);
+  const edge = glowSprite(color, 0.55, 0.3); edge.position.z = midZ; g.add(edge);
+  g.visible = false;
+  return g;
+}
+const bladeL = buildBlade(COL_BLUE), bladeR = buildBlade(COL_RED);
+const ctlL = renderer.xr.getController(0), ctlR = renderer.xr.getController(1);
+let rightCtl = null, leftCtl = null;
+[ctlL, ctlR].forEach(c => {
+  c.addEventListener('connected', e => {
+    c.userData.handedness = e.data.handedness;
+    c.userData.connected = true;
+    if (e.data.handedness === 'right') { rightCtl = c; c.add(bladeR); }
+    if (e.data.handedness === 'left') { leftCtl = c; c.add(bladeL); }
+  });
+  c.addEventListener('disconnected', () => {
+    c.userData.connected = false;
+    if (rightCtl === c) rightCtl = null;
+    if (leftCtl === c) leftCtl = null;
+  });
+  scene.add(c);
+});
+// Blade tip trackers: world position of the blade tip this frame and last frame
+const tipPrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
+const tipCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
+const sliceCd = { left: 0, right: 0, desk: 0 };
+// V3: blade base trackers (world position of the blade base this/prev frame).
+// The hit volume is a capsule from base to tip, using the exact same world
+// transform as the rendered blade mesh — no offset between seen and colliding.
+const basePrev = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
+const baseCur  = { left: new THREE.Vector3(), right: new THREE.Vector3(), desk: new THREE.Vector3() };
+// Mid-blade velocity — the speed-gate + direction signal. ROOT-CAUSE FIX
+// (2026-11-14): the old gate used the CONTROLLER's translational velocity.
+// During a wrist flick — the natural rhythm-game swing — the controller
+// translates ~0.3 m/s while the blade tip sweeps ~7 m/s, so the 1.5 m/s gate
+// never opened and EVERY strike read MISS (proven in a headless simulation
+// of the verbatim collision code: wrist flick, tip 0.067 m from the note
+// center, 11 frames in the zone, gate open 0 frames). The mid-blade point
+// (base+tip)/2 captures both translation AND rotation, with half the noise
+// amplification of the tip. The desktop path already used tip speed — the VR
+// path was the inconsistent one.
+const bladeVel = { left: new THREE.Vector3(), right: new THREE.Vector3() };
+const bladeInit = { left: false, right: false };
+// Round 3 (X-1): per-hand tracking-loss latch. r160 hides the target-ray
+// Group when its input pose is null (tracking lost) while its matrix keeps
+// the LAST GOOD value — slicing from it would score stale-pose slices, and
+// the pose jump on recovery would read as a supersonic swing. While a hand
+// is lost, the tick holds its bladeInit false AFTER trackBlade runs (order
+// matters: trackBlade's init branch sets the flag true, so a hold placed
+// BEFORE the call would be undone in the same frame and the recovery frame
+// would read the full jump — caught by round3-controller-tests.js), so the
+// first live frame re-zeroes the velocity; the latch also fires the
+// one-time in-VR notice (see tick) instead of spamming it every frame.
+const trackLost = { left: false, right: false };
+const _midPrev = new THREE.Vector3(), _midCur = new THREE.Vector3();
+function trackBlade(key, dt) {
+  _midPrev.copy(basePrev[key]).add(tipPrev[key]).multiplyScalar(0.5);
+  _midCur.copy(baseCur[key]).add(tipCur[key]).multiplyScalar(0.5);
+  if (!bladeInit[key]) { bladeInit[key] = true; bladeVel[key].set(0, 0, 0); return; }
+  if (dt > 0) bladeVel[key].copy(_midCur).sub(_midPrev).divideScalar(dt);
+  else bladeVel[key].set(0, 0, 0);
+}
+function vrBladeSpeed(key) { return bladeVel[key].length(); }
+// V2 (overhaul 2026-11-14): ribbon trails — a triangle strip swept by the
+// WHOLE blade (base→tip), last 14 poses, vertex colors fading blade-color
+// → black. Additive blending makes black read as transparent. 2 meshes,
+// 26 triangles each. Opacity is speed-gated in the tick (fades out at rest).
+const V_TRAIL_N = 14;
+function makeVrTrail(color) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(V_TRAIL_N * 2 * 3);
+  const col = new Float32Array(V_TRAIL_N * 2 * 3);
+  const c = new THREE.Color(color);
+  for (let i = 0; i < V_TRAIL_N; i++) {
+    pos[i * 6 + 1] = -999; pos[i * 6 + 4] = -999; // both verts of pose i offscreen
+    const f = 1 - i / (V_TRAIL_N - 1); // 1 at the blade, 0 at the tail
+    const fade = f * f; // quadratic falloff
+    col[i * 6] = c.r * fade; col[i * 6 + 1] = c.g * fade; col[i * 6 + 2] = c.b * fade;
+    col[i * 6 + 3] = c.r * fade; col[i * 6 + 4] = c.g * fade; col[i * 6 + 5] = c.b * fade;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const idx = [];
+  for (let i = 0; i < V_TRAIL_N - 1; i++) {
+    const a = i * 2, b = a + 1, d = a + 2, e = a + 3;
+    idx.push(a, b, d, b, e, d);
+  }
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending,
+    depthWrite: false, side: THREE.DoubleSide, toneMapped: false
+  }));
+  mesh.frustumCulled = false; mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+const vrTrailL = makeVrTrail(COL_BLUE), vrTrailR = makeVrTrail(COL_RED);
+function pushVrTrail(ribbon, base, tip) {
+  const a = ribbon.geometry.attributes.position.array;
+  // Shift poses down by one (pose i <- pose i-1); copyWithin is overlap-safe.
+  a.copyWithin(6, 0, (V_TRAIL_N - 1) * 6);
+  a[0] = base.x; a[1] = base.y; a[2] = base.z;
+  a[3] = tip.x; a[4] = tip.y; a[5] = tip.z;
+  ribbon.geometry.attributes.position.needsUpdate = true;
+}
+function resetVrTrails() {
+  for (const ribbon of [vrTrailL, vrTrailR]) {
+    const a = ribbon.geometry.attributes.position.array;
+    for (let i = 0; i < V_TRAIL_N; i++) { a[i * 6 + 1] = -999; a[i * 6 + 4] = -999; }
+    ribbon.geometry.attributes.position.needsUpdate = true;
+  }
+}
+// MUST stay a numeric literal: the collision regression tests read TIP_LEN
+// from this line by regex. Tip = BLADE_BASE_Z - BLADE_LEN = -0.07 - 1.0.
+const _tipLocal = new THREE.Vector3(0, 0, -1.07);
+const _ctlQ = new THREE.Quaternion();
+function controllerTip(ctl, out) {
+  ctl.getWorldQuaternion(_ctlQ);
+  out.setFromMatrixPosition(ctl.matrixWorld);
+  _tipLocal.set(0, 0, -1.07).applyQuaternion(_ctlQ);
+  out.add(_tipLocal);
+  return out;
+}
+// V3: world position of the blade BASE (local z=-0.07, where the visible
+// energy blade starts). Same transform chain as controllerTip — the capsule
+// base->tip matches the rendered mesh exactly.
+const _baseLocal = new THREE.Vector3(0, 0, -0.07);
+function controllerBase(ctl, out) {
+  ctl.getWorldQuaternion(_ctlQ);
+  out.setFromMatrixPosition(ctl.matrixWorld);
+  _baseLocal.set(0, 0, -0.07).applyQuaternion(_ctlQ);
+  out.add(_baseLocal);
+  return out;
+}
+
+// ============================== TEMPORARY collision debug visualization ==============================
+// Diagnostic aid for the 2026-11-14 MISS investigation. Enable with the URL
+// ?debug=collision, or press C on desktop. Shows, per hand, the collision
+// capsule axis (the exact segment bladeHits tests — compare it against the
+// visible blade), wireframe hitboxes on notes/bombs near the hit plane, and
+// live blade speeds with the gate threshold. This is NOT part of the shipped
+// game feel and stays OFF unless explicitly enabled. Safe to delete once the
+// collision system is validated on the headset.
+let debugCollision = false;
+try { debugCollision = new URLSearchParams(window.location.search).has('debug'); } catch (e) { /* no URL API: stays off */ }
+const dbgEl = document.getElementById('dbg');
+function makeDebugCapsule(color) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, toneMapped: false, depthTest: false, transparent: true, opacity: 0.95 }));
+  line.frustumCulled = false; line.visible = false; line.renderOrder = 999;
+  scene.add(line);
+  const dotGeo = new THREE.SphereGeometry(0.03, 8, 6);
+  const dotMat = new THREE.MeshBasicMaterial({ color, toneMapped: false, depthTest: false, transparent: true, opacity: 0.95 });
+  const tipDot = new THREE.Mesh(dotGeo, dotMat); tipDot.visible = false; tipDot.renderOrder = 999; scene.add(tipDot);
+  const baseDot = new THREE.Mesh(dotGeo, dotMat); baseDot.visible = false; baseDot.renderOrder = 999; scene.add(baseDot);
+  return { line, tipDot, baseDot };
+}
+const debugCapsuleL = makeDebugCapsule(COL_BLUE), debugCapsuleR = makeDebugCapsule(COL_RED);
+// Hitbox wireframes: pooled, assigned each frame to notes/bombs near the plane.
+const debugHitboxes = [];
+{
+  const hbGeo = new THREE.SphereGeometry(1, 10, 8);
+  for (let i = 0; i < 8; i++) {
+    const m = new THREE.Mesh(hbGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.6, toneMapped: false, depthTest: false }));
+    m.visible = false; m.renderOrder = 998; scene.add(m);
+    debugHitboxes.push(m);
+  }
+}
+let _dbgLast = 0;
+function updateDebugViz() {
+  const on = debugCollision;
+  const showCapsule = (dc, key, ctl) => {
+    const vis = on && !!ctl;
+    dc.line.visible = vis; dc.tipDot.visible = vis; dc.baseDot.visible = vis;
+    if (!vis) return;
+    const p = dc.line.geometry.attributes.position.array;
+    p[0] = baseCur[key].x; p[1] = baseCur[key].y; p[2] = baseCur[key].z;
+    p[3] = tipCur[key].x; p[4] = tipCur[key].y; p[5] = tipCur[key].z;
+    dc.line.geometry.attributes.position.needsUpdate = true;
+    dc.tipDot.position.copy(tipCur[key]);
+    dc.baseDot.position.copy(baseCur[key]);
+  };
+  showCapsule(debugCapsuleL, 'left', leftCtl);
+  showCapsule(debugCapsuleR, 'right', rightCtl);
+  let hi = 0;
+  if (on) {
+    const place = (x, y, z, r, color) => {
+      if (hi >= debugHitboxes.length) return;
+      const m = debugHitboxes[hi++];
+      m.visible = true;
+      m.position.set(x, y, z); m.scale.set(r, r, r);
+      m.material.color.setHex(color);
+    };
+    for (const n of notes) {
+      if (!n.active || Math.abs(n.z - HIT_Z) > 1.2) continue;
+      place(n.grp.position.x, n.grp.position.y, n.grp.position.z, NOTE_R, 0xffffff);
+    }
+    for (const b of bombs) {
+      if (!b.active || Math.abs(b.z - HIT_Z) > 1.2) continue;
+      place(b.grp.position.x, b.grp.position.y, b.grp.position.z, BOMB_R, 0xffaa00);
+    }
+  }
+  for (; hi < debugHitboxes.length; hi++) debugHitboxes[hi].visible = false;
+  // DOM readout (desktop + 2D preview): live blade speeds + gate state.
+  // The VR perf cell shows the same speeds when debug is on (drawPerfCell).
+  if (on) {
+    dbgEl.style.display = 'block';
+    const now = performance.now();
+    if (now - _dbgLast > 250) {
+      _dbgLast = now;
+      dbgEl.textContent = 'BLADE L ' + vrBladeSpeed('left').toFixed(2) + ' m/s · R ' + vrBladeSpeed('right').toFixed(2) + ' m/s (gate 0.50)\nHITS ' + dbgHits + ' · MISS ' + dbgMiss + '\nC toggles debug viz';
+    }
+  } else dbgEl.style.display = 'none';
+}
+
+// Aim laser for the 3D menu (visible only on menu/results screens in VR)
+const laserGeo = new THREE.BufferGeometry();
+laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage));
+const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({
+  color: 0xffffff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+laser.frustumCulled = false; laser.visible = false;
+scene.add(laser);
+
+// ============================== scoreboard: DOM cell + VR camera-attached cell ==============================
+const hud = document.getElementById('hud');
+const hudL1 = document.getElementById('hudL1'), hudL2 = document.getElementById('hudL2'), hudL3 = document.getElementById('hudL3');
+const scoreCellCanvas = document.createElement('canvas');
+scoreCellCanvas.width = 512; scoreCellCanvas.height = 224;
+const scoreCellCtx = scoreCellCanvas.getContext('2d');
+const scoreCellTex = new THREE.CanvasTexture(scoreCellCanvas);
+scoreCellTex.colorSpace = THREE.SRGBColorSpace;
+const scoreCell = new THREE.Mesh(new THREE.PlaneGeometry(0.80, 0.35),
+  new THREE.MeshBasicMaterial({ map: scoreCellTex, transparent: true, toneMapped: false }));
+scoreCell.position.set(-0.55, 0.81, -1.5);
+scoreCell.visible = false;
+camera.add(scoreCell);
+function drawScoreCell(l1, l2, l3) {
+  const g = scoreCellCtx;
+  g.clearRect(0, 0, 512, 224);
+  const r = 22;
+  g.beginPath();
+  g.moveTo(8 + r, 8); g.lineTo(504 - r, 8); g.arcTo(504, 8, 504, 8 + r, r);
+  g.lineTo(504, 216 - r); g.arcTo(504, 216, 504 - r, 216, r);
+  g.lineTo(8 + r, 216); g.arcTo(8, 216, 8, 216 - r, 216 - r); g.arcTo(8, 216, 8, 216 - r, r);
+  g.lineTo(8, 8 + r); g.arcTo(8, 8, 8 + r, 8, r); g.closePath();
+  g.fillStyle = 'rgba(8,6,20,0.72)'; g.fill();
+  g.lineWidth = 5; g.strokeStyle = '#2f7fff'; g.stroke();
+  g.textAlign = 'left';
+  const fit = (txt, weight, px) => {
+    let s = px;
+    g.font = weight + ' ' + s + 'px Arial';
+    while (g.measureText(txt).width > 460 && s > 18) { s -= 2; g.font = weight + ' ' + s + 'px Arial'; }
+  };
+  fit(l1, '900', 52); g.fillStyle = '#ffffff'; g.fillText(l1, 26, 74);
+  fit(l2, '700', 34); g.fillStyle = '#2f7fff'; g.fillText(l2, 26, 128);
+  fit(l3, '700', 29); g.fillStyle = '#ffd319'; g.fillText(l3, 26, 182);
+  scoreCellTex.needsUpdate = true;
+}
+drawScoreCell('0 PTS · x1', 'COMBO 0 · MAX 0', 'LV1 · EASY');
+function updateScoreboard() {
+  const l1 = score + ' PTS · x' + mult;
+  const l2 = 'COMBO ' + combo + ' · MAX ' + maxCombo;
+  const l3 = 'LV' + (selLevel + 1) + ' ' + LEVELS[selLevel].name + ' · ' + DIFFS[selDiff].label + (prefs.practice ? ' · PRACTICE' : '');
+  hudL1.textContent = l1; hudL2.textContent = l2; hudL3.textContent = l3;
+  drawScoreCell(l1, l2, l3);
+}
+
+// ============================== 3D menu (level/difficulty/results, in-world) ==============================
+// One canvas-texture plane head-locked to the camera: visible on desktop and
+// in VR alike, so the menu is the same surface in both. Interacted via mouse
+// click on desktop, controller-ray + trigger in VR.
+const menuCanvas = document.createElement('canvas');
+menuCanvas.width = 1024; menuCanvas.height = 640;
+const menuCtx = menuCanvas.getContext('2d');
+const menuTex = new THREE.CanvasTexture(menuCanvas);
+menuTex.colorSpace = THREE.SRGBColorSpace;
+const menuPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.0625),
+  new THREE.MeshBasicMaterial({ map: menuTex, transparent: true, toneMapped: false }));
+menuPlane.position.set(0, 0.05, -2.3);
+menuPlane.visible = false;
+camera.add(menuPlane);
+let screen = 'menu'; // 'menu' | 'playing' | 'paused' | 'settings' | 'results'
+let selLevel = prefs.level, selDiff = prefs.diff; // restored from saved prefs
+let menuButtons = [];
+function drawButton(g, b) {
+  g.fillStyle = b.selected ? 'rgba(39,232,255,0.9)' : 'rgba(255,255,255,0.07)';
+  g.strokeStyle = b.selected ? '#ffffff' : 'rgba(255,255,255,0.35)';
+  g.lineWidth = b.selected ? 5 : 3;
+  const r = 16;
+  g.beginPath();
+  g.moveTo(b.x + r, b.y); g.lineTo(b.x + b.w - r, b.y); g.arcTo(b.x + b.w, b.y, b.x + b.w, b.y + r, r);
+  g.lineTo(b.x + b.w, b.y + b.h - r); g.arcTo(b.x + b.w, b.y + b.h, b.x + b.w - r, b.y + b.h, r);
+  g.lineTo(b.x + r, b.y + b.h); g.arcTo(b.x, b.y + b.h, b.x, b.y + b.h - r, r);
+  g.lineTo(b.x, b.y + r); g.arcTo(b.x, b.y, b.x + r, b.y, r); g.closePath();
+  g.fill(); g.stroke();
+  // Font scales to button height so the compact Settings rows (38px) stay
+  // legible; the big menu buttons (72–92px) render exactly as before.
+  // Auto-fit: the label must fit INSIDE the button rect. Measured widths
+  // (Liberation Bold ≈ Arial, 44px): '3 · OVERDRIVE' is 323px, 'SETTINGS'
+  // 220px, 'PRAC: OFF' 240px — all wider than a 200px button, so labels
+  // used to spill past their rects and the next button's fill covered the
+  // spill (desktop check 2026-11-14: START appeared to overlap SETTINGS /
+  // PRAC, and '1 · WARMUP' read as 'WARMU'). Shrink until it fits w-24px.
+  let fs = Math.min(44, b.h - 8, b.maxFs || 44);
+  g.font = '900 ' + fs + 'px Arial';
+  while (fs > 18 && g.measureText(b.label).width > b.w - 24) {
+    fs -= 2; g.font = '900 ' + fs + 'px Arial';
+  }
+  g.textAlign = 'center';
+  g.fillStyle = b.selected ? '#06121f' : '#ffffff';
+  g.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + fs * 0.35);
+}
+function drawMenu() {
+  const g = menuCtx;
+  g.clearRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
+  g.strokeStyle = '#2f7fff'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.textAlign = 'center';
+  g.font = '900 64px Arial';
+  const grad = g.createLinearGradient(200, 0, 824, 0);
+  grad.addColorStop(0, '#2f7fff'); grad.addColorStop(0.55, '#2bff88'); grad.addColorStop(1, '#ff2b2b');
+  g.fillStyle = grad;
+  g.fillText('RHYTHM SLICER', 512, 92);
+  g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
+  g.fillText('LEVEL', 512, 152);
+  menuButtons = [];
+  const lvNames = ['1 · WARMUP', '2 · PULSE', '3 · OVERDRIVE'];
+  for (let i = 0; i < 3; i++) {
+    // Wide buttons (280px) + maxFs 36: the level names are long ('3 ·
+    // OVERDRIVE' is 323px at 44px), so the row uses a smaller uniform cap
+    // and drawButton's auto-fit guarantees no label ever spills its rect.
+    const b = { id: 'lvl' + i, x: 72 + i * 300, y: 172, w: 280, h: 88, label: lvNames[i], selected: selLevel === i, maxFs: 36 };
+    menuButtons.push(b); drawButton(g, b);
+  }
+  g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
+  g.fillText('DIFFICULTY', 512, 316);
+  const dNames = ['EASY', 'NORMAL', 'HARD'];
+  for (let i = 0; i < 3; i++) {
+    const b = { id: 'dif' + i, x: 72 + i * 300, y: 336, w: 280, h: 88, label: dNames[i], selected: selDiff === i };
+    menuButtons.push(b); drawButton(g, b);
+  }
+  // Bottom row: SETTINGS 60–300, START 320–704, PRAC 724–964 — 20px gaps,
+  // no rect touches another, and auto-fit keeps every label inside its rect.
+  const st = { id: 'settings', x: 60, y: 452, w: 240, h: 92, label: 'SETTINGS', selected: false };
+  menuButtons.push(st); drawButton(g, st);
+  const sb = { id: 'start', x: 320, y: 452, w: 384, h: 92, label: 'START', selected: true };
+  menuButtons.push(sb); drawButton(g, sb);
+  const pr = { id: 'practice', x: 724, y: 452, w: 240, h: 92, label: prefs.practice ? 'PRAC: ON' : 'PRAC: OFF', selected: prefs.practice };
+  menuButtons.push(pr); drawButton(g, pr);
+  const best = getBest(selLevel, selDiff);
+  g.font = '700 26px Arial'; g.fillStyle = '#ffd319'; g.textAlign = 'center';
+  g.fillText(best ? ('BEST ' + best.score.toLocaleString() + ' PTS · ' + best.accuracy + '% ACC · COMBO ' + best.maxCombo)
+    : 'NO BEST YET FOR THIS LEVEL + DIFFICULTY', 512, 570);
+  // Footer (Round 2 comparison fix): the old single line was ~1180px wide at
+  // 20px — wider than the 1008px panel, so both ends clipped on desktop
+  // ("lue LEFT / red RIGHT … hold mous…"). Split into two lines (same words,
+  // colorblind note stays with the color instruction) and auto-fit
+  // (drawButton pattern): shrink until the wider line fits the panel with
+  // 20px margins, so the colorblind variant fits too. BEST moved up 8px to
+  // make room; baselines 596/620 keep descenders inside the panel (inner
+  // bottom edge y=629).
+  g.font = '400 20px Arial'; g.fillStyle = '#c9b8e8';
+  let foot1 = 'VR: slice blue LEFT / red RIGHT — colors alternate sides, follow the color';
+  if (prefs.colorblind) foot1 += ' (circle = LEFT, triangle = RIGHT)';
+  const foot2 = 'Any swing direction counts · Desktop: hold mouse + drag.';
+  let footFs = 20;
+  g.font = '400 ' + footFs + 'px Arial';
+  while (footFs > 14 && Math.max(g.measureText(foot1).width, g.measureText(foot2).width) > 984) {
+    footFs -= 1; g.font = '400 ' + footFs + 'px Arial';
+  }
+  g.fillText(foot1, 512, 596);
+  g.fillText(foot2, 512, 620);
+  menuTex.needsUpdate = true;
+}
+function drawResults() {
+  const g = menuCtx;
+  g.clearRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
+  g.strokeStyle = '#ffd319'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.textAlign = 'center';
+  g.font = '900 60px Arial'; g.fillStyle = '#2bff88';
+  g.fillText('TRACK COMPLETE', 512, 96);
+  g.font = '700 30px Arial'; g.fillStyle = '#ffd9ec';
+  g.fillText('LV' + (selLevel + 1) + ' ' + LEVELS[selLevel].name + ' · ' + DIFFS[selDiff].label, 512, 146);
+  const acc = notesTotal > 0 ? Math.round(100 * notesHit / notesTotal) : 0;
+  g.font = '900 44px Arial'; g.fillStyle = '#ffffff'; g.textAlign = 'left';
+  g.fillText('SCORE', 240, 230); g.fillText('MAX COMBO', 240, 292);
+  g.fillText('ACCURACY', 240, 354); g.fillText('NOTES', 240, 416);
+  g.fillStyle = '#2f7fff'; g.textAlign = 'right';
+  g.fillText('' + score, 790, 230); g.fillText('' + maxCombo, 790, 292);
+  g.fillText(acc + '%', 790, 354); g.fillText(notesHit + ' / ' + notesTotal, 790, 416);
+  g.font = '700 28px Arial'; g.textAlign = 'center';
+  if (prefs.practice) {
+    g.fillStyle = '#c9b8e8';
+    g.fillText('PRACTICE RUN — SCORES NOT SAVED', 512, 478);
+  } else if (lastResult && lastResult.isBest) {
+    g.fillStyle = '#2bff88';
+    g.fillText('★ NEW BEST! ★', 512, 478);
+  } else if (lastResult && lastResult.prevBest) {
+    g.fillStyle = '#ffd319';
+    g.fillText('BEST: ' + lastResult.prevBest.score.toLocaleString() + ' PTS', 512, 478);
+  }
+  menuButtons = [];
+  let bx = 112;
+  if (selLevel < 2) {
+    const b = { id: 'next', x: bx, y: 520, w: 250, h: 80, label: 'NEXT LEVEL', selected: false };
+    menuButtons.push(b); drawButton(g, b); bx += 280;
+  }
+  const r = { id: 'replay', x: bx, y: 520, w: 250, h: 80, label: 'REPLAY', selected: true };
+  menuButtons.push(r); drawButton(g, r); bx += 280;
+  const m = { id: 'menu', x: bx, y: 520, w: 250, h: 80, label: 'MENU', selected: false };
+  menuButtons.push(m); drawButton(g, m);
+  menuTex.needsUpdate = true;
+}
+function drawPause() {
+  const g = menuCtx;
+  g.clearRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
+  g.strokeStyle = '#2f7fff'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.textAlign = 'center';
+  g.font = '900 64px Arial'; g.fillStyle = '#ffffff';
+  g.fillText('PAUSED', 512, 96);
+  const acc = notesTotal > 0 ? Math.round(100 * notesHit / notesTotal) : 0;
+  g.font = '700 28px Arial'; g.fillStyle = '#ffd9ec';
+  g.fillText(score.toLocaleString() + ' PTS · COMBO ' + combo + ' · ' + acc + '% ACC · LV' + (selLevel + 1) + ' ' + LEVELS[selLevel].name + ' · ' + DIFFS[selDiff].label, 512, 148);
+  menuButtons = [];
+  const defs = [
+    { id: 'resume', label: 'RESUME', y: 192 },
+    { id: 'restart', label: 'RESTART LEVEL', y: 288 },
+    { id: 'settings', label: 'SETTINGS', y: 384 },
+    { id: 'quit', label: 'QUIT TO MENU', y: 480 },
+  ];
+  for (const d of defs) {
+    const b = { id: d.id, x: 332, y: d.y, w: 360, h: 72, label: d.label, selected: d.id === 'resume' };
+    menuButtons.push(b); drawButton(g, b);
+  }
+  g.font = '400 24px Arial'; g.fillStyle = '#2bff88';
+  // The EMA holds the last ACTIVE-PLAY average while paused (menu/paused
+  // frames are not fed to it), and FB is the XR layer's real framebuffer
+  // size — 'n/a' on desktop, where no XR layer exists.
+  let perfLine = 'PERF ' + perfValve.ema.toFixed(1) + 'ms AVG (PLAY) · VALVE L' + perfValve.level + ' · FB ' + xrLayerSize();
+  if (debugCollision) perfLine += ' · HITS ' + dbgHits + ' · MISS ' + dbgMiss; // TEMPORARY diagnostic
+  g.fillText(perfLine, 512, 584);
+  g.fillStyle = '#c9b8e8';
+  g.fillText('B/Y or Esc to resume · Trigger to choose', 512, 614);
+  menuTex.needsUpdate = true;
+}
+function drawSettings() {
+  const g = menuCtx;
+  g.clearRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(6,3,26,0.94)'; g.fillRect(0, 0, 1024, 640);
+  g.strokeStyle = '#2bff88'; g.lineWidth = 6; g.strokeRect(8, 8, 1008, 624);
+  g.textAlign = 'center';
+  g.font = '900 56px Arial'; g.fillStyle = '#ffffff';
+  g.fillText('SETTINGS', 512, 72);
+  menuButtons = [];
+  const pct = v => Math.round(v * 100) + '%';
+  const rowY = i => 104 + i * 46;
+  const label = (txt, i) => {
+    g.font = '700 28px Arial'; g.fillStyle = '#ffd9ec'; g.textAlign = 'left';
+    g.fillText(txt, 60, rowY(i) + 30);
+  };
+  const volRow = (i, key, txt) => {
+    label(txt, i);
+    const y = rowY(i);
+    const dn = { id: 'vol-' + key + '-down', x: 560, y, w: 64, h: 38, label: '−', selected: false };
+    const up = { id: 'vol-' + key + '-up', x: 740, y, w: 64, h: 38, label: '+', selected: false };
+    menuButtons.push(dn, up); drawButton(g, dn); drawButton(g, up);
+    g.font = '700 28px Arial'; g.fillStyle = '#ffffff'; g.textAlign = 'center';
+    g.fillText(pct(prefs[key]), 682, y + 30);
+  };
+  const togRow = (i, id, txt, val, valLabel) => {
+    label(txt, i);
+    const b = { id, x: 560, y: rowY(i), w: 244, h: 38, label: valLabel, selected: !!val };
+    menuButtons.push(b); drawButton(g, b);
+  };
+  volRow(0, 'master', 'MASTER VOLUME');
+  const mb = { id: 'mute', x: 830, y: rowY(0), w: 130, h: 38, label: audioSys.muted ? 'MUTED' : 'MUTE', selected: audioSys.muted };
+  menuButtons.push(mb); drawButton(g, mb);
+  volRow(1, 'music', 'MUSIC VOLUME');
+  volRow(2, 'sfx', 'EFFECTS VOLUME');
+  togRow(3, 'hitwin', 'HIT WINDOW', true, { lenient: 'LENIENT', normal: 'NORMAL', precise: 'PRECISE' }[prefs.hitWindow]);
+  togRow(4, 'practice-set', 'PRACTICE MODE (0.65×)', prefs.practice, prefs.practice ? 'ON' : 'OFF');
+  togRow(5, 'single', 'SINGLE-HAND MODE', prefs.singleHand, prefs.singleHand ? 'ON' : 'OFF');
+  togRow(6, 'colorblind', 'COLORBLIND SHAPES', prefs.colorblind, prefs.colorblind ? 'ON' : 'OFF');
+  togRow(7, 'vignette', 'COMFORT VIGNETTE', prefs.vignette, prefs.vignette ? 'ON' : 'OFF');
+  togRow(8, 'textsize', 'LARGE HUD TEXT', prefs.textLarge, prefs.textLarge ? 'ON' : 'OFF');
+  togRow(9, 'perf', 'FRAME-TIME READOUT', prefs.showPerf, prefs.showPerf ? 'ON' : 'OFF');
+  const bk = { id: 'back', x: 332, y: 576, w: 360, h: 48, label: 'BACK', selected: true };
+  menuButtons.push(bk); drawButton(g, bk);
+  menuTex.needsUpdate = true;
+}
+function menuHit(cx, cy) {
+  for (const b of menuButtons) {
+    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) return b.id;
+  }
+  return null;
+}
+const raycaster = new THREE.Raycaster();
+function menuTapFromRay(origin, dir) {
+  raycaster.set(origin, dir);
+  const hits = raycaster.intersectObject(menuPlane);
+  if (!hits.length) return;
+  const uv = hits[0].uv;
+  const cx = uv.x * 1024, cy = (1 - uv.y) * 640;
+  const id = menuHit(cx, cy);
+  if (id) activateButton(id);
+}
+function activateButton(id) {
+  sfxClick();
+  if (id === 'lvl0' || id === 'lvl1' || id === 'lvl2') { selLevel = +id.slice(3); prefs.level = selLevel; savePrefs(); drawMenu(); }
+  else if (id === 'dif0' || id === 'dif1' || id === 'dif2') { selDiff = +id.slice(3); prefs.diff = selDiff; savePrefs(); drawMenu(); }
+  else if (id === 'start') startLevel();
+  else if (id === 'replay') startLevel();
+  else if (id === 'menu') { screen = 'menu'; menuPlane.visible = true; hud.style.display = 'none'; drawMenu(); }
+  else if (id === 'next') { selLevel = Math.min(2, selLevel + 1); prefs.level = selLevel; savePrefs(); startLevel(); }
+  else if (id === 'practice') { prefs.practice = !prefs.practice; savePrefs(); drawMenu(); }
+  else if (id === 'settings') { settingsFrom = screen; screen = 'settings'; drawSettings(); }
+  else if (id === 'back') { screen = settingsFrom; if (screen === 'paused') drawPause(); else drawMenu(); }
+  else if (id === 'resume') resumeGame();
+  else if (id === 'restart') startLevel();
+  else if (id === 'quit') quitToMenu();
+  else if (id === 'mute') { audioSys.ensure(); setMuted(!audioSys.muted); drawSettings(); }
+  else if (id.indexOf('vol-') === 0) {
+    const parts = id.split('-'); // vol-<bus>-<up|down>
+    const bus = parts[1], dir = parts[2] === 'up' ? 0.1 : -0.1;
+    audioSys.ensure();
+    audioSys.setVolume(bus, prefs[bus] + dir);
+    drawSettings();
+  }
+  else if (id === 'hitwin') {
+    const order = ['lenient', 'normal', 'precise'];
+    prefs.hitWindow = order[(order.indexOf(prefs.hitWindow) + 1) % 3];
+    savePrefs(); drawSettings();
+  }
+  else if (id === 'practice-set') { prefs.practice = !prefs.practice; savePrefs(); drawSettings(); }
+  else if (id === 'single') { prefs.singleHand = !prefs.singleHand; savePrefs(); drawSettings(); }
+  else if (id === 'colorblind') { prefs.colorblind = !prefs.colorblind; savePrefs(); drawSettings(); }
+  else if (id === 'vignette') { prefs.vignette = !prefs.vignette; savePrefs(); drawSettings(); }
+  else if (id === 'textsize') { prefs.textLarge = !prefs.textLarge; savePrefs(); applyTextSize(); drawSettings(); }
+  else if (id === 'perf') { prefs.showPerf = !prefs.showPerf; savePrefs(); drawSettings(); }
+}
+
+// ============================== pause / settings flow (shared pattern) ==============================
+// Pause freezes the game by suspending the audio clock: notes are positioned
+// from audioSys.now, so suspending the context freezes music, spawning, and
+// note motion consistently. The render loop keeps running so the spatial
+// pause menu stays interactive.
+let settingsFrom = 'menu';
+function pauseGame() {
+  if (!levelActive || screen !== 'playing') return;
+  screen = 'paused';
+  // R3: seed the pause edge from live state — a B/Y held when the pause
+  // menu appears (e.g. auto-pause on session exit) must not instantly
+  // resume on the first poll after re-entry.
+  prevPauseBtn = vrButtonPressed(5);
+  if (audioSys.ctx) audioSys.ctx.suspend();
+  hideApproachMarkers();
+  menuPlane.visible = true;
+  drawPause();
+}
+function resumeGame() {
+  if (screen !== 'paused') return;
+  screen = 'playing';
+  perfWarmup = 0.75; // resume hitches are not gameplay frame time
+  resyncDeskBlade(); // stale blade history would fake a supersonic swing
+  audioSys.resume();
+  menuPlane.visible = false;
+  laser.visible = false;
+}
+function quitToMenu() {
+  audioSys.stop();
+  audioSys.resume(); // un-suspend so menu clicks sound again
+  levelActive = false;
+  for (const n of notes) { n.active = false; n.grp.visible = false; }
+  for (const b of bombs) { b.active = false; b.grp.visible = false; }
+  for (const t of texts) { t.life = 0; t.sp.visible = false; }
+  resetHalves();
+  hideApproachMarkers();
+  screen = 'menu';
+  menuPlane.visible = true;
+  hud.style.display = 'none';
+  drawMenu();
+}
+// Large-HUD-text preference: scales the VR score cell + floating hit text.
+function applyTextSize() {
+  const s = prefs.textLarge ? 1.25 : 1;
+  scoreCell.scale.set(0.80 * s, 0.35 * s, 1);
+  for (const t of texts) t.sp.scale.set(0.7 * s, 0.26 * s, 1);
+}
+
+// ============================== audio: all synthesized, Web Audio API only ==============================
+// Every loop is an original composition generated live — no audio files, no
+// borrowed melodies. Three levels, three keys, three drum/bass/lead patterns.
+const LEVELS = [
+  { name: 'WARMUP', bpm: 90, dur: 60, root: 110.00, // A2
+    kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    hat:   [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,1],
+    bass:  [0,-1,-1,-1, 0,-1,-1,-1, -2,-1,-1,-1, -4,-1,-1,-1],
+    lead:  [12,-1,-1,15, -1,-1,19,-1, -1,17,-1,15, 12,-1,-1,-1] },
+  { name: 'PULSE', bpm: 110, dur: 70, root: 146.83, // D3
+    kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,1,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,1],
+    hat:   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+    bass:  [0,-1,0,-1, 0,-1,0,-1, -2,-1,-2,-1, -4,-1,-4,-1],
+    lead:  [12,-1,15,-1, 17,-1,19,-1, 22,-1,19,-1, 17,-1,15,-1] },
+  { name: 'OVERDRIVE', bpm: 130, dur: 80, root: 82.41, // E2
+    kick:  [1,0,0,0, 1,0,0,1, 1,0,0,0, 1,0,0,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    hat:   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+    bass:  [0,0,-1,0, 0,0,-1,0, -2,-2,-1,-2, -4,-4,-1,-4],
+    lead:  [12,12,-1,12, -1,15,-1,17, 19,-1,19,22, -1,19,17,15] },
+];
+// Direction gating REMOVED 2026-11-15 (Danny's headset feedback): notes
+// carried random chevron directions and the dominant-axis snap misjudged
+// natural swings (diagonals, thrusts, wrist flicks), so clean contact
+// read OFF ANGLE / WRONG WAY with no points and no haptics. Contact with
+// the correct blade always scores now; difficulty comes from travel time
+// and bomb rate. dirStrict/wrongDirReset stay in the table as inert
+// documentation of the removed mechanic — do not re-enable without an
+// owner decision.
+const DIFFS = [
+  { label: 'EASY',   travel: 1.8, bombRate: 0,    dirStrict: false, wrongDirReset: false },
+  { label: 'NORMAL', travel: 1.4, bombRate: 0.06, dirStrict: false, wrongDirReset: false },
+  { label: 'HARD',   travel: 1.1, bombRate: 0.12, dirStrict: false, wrongDirReset: false },
+];
+const DIR_VECS = [ { x: 0, y: 1 }, { x: 1, y: 0 }, { x: 0, y: -1 }, { x: -1, y: 0 } ]; // up,right,down,left
+const DIR_NAMES = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+
+const audioSys = {
+  ctx: null, master: null, musicBus: null, sfxBus: null, noiseBuf: null, muted: prefs.muted,
+  running: false, baseTime: 0, stepDur: 0, nextStep: 0, stepIdx: 0, totalSteps: 0, lv: null,
+  kickTimes: [], // R1: kick times queued at schedule time; the tick fires the beat pulse when audioSys.now crosses them
+  ensure() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : prefs.master;
+    this.master.connect(this.ctx.destination);
+    // Shared-foundation audio buses: music and SFX get their own gains so
+    // the Settings menu can mix them independently. Defaults preserve the
+    // original loudness (master 1.0 x music 0.9 ~= old master 0.9).
+    this.musicBus = this.ctx.createGain();
+    this.musicBus.gain.value = prefs.music;
+    this.musicBus.connect(this.master);
+    this.sfxBus = this.ctx.createGain();
+    this.sfxBus.gain.value = prefs.sfx;
+    this.sfxBus.connect(this.master);
+    const len = this.ctx.sampleRate;
+    this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  },
+  resume() { this.ensure(); if (this.ctx.state === 'suspended') this.ctx.resume(); },
+  setMuted(m) {
+    this.muted = m;
+    if (this.master) this.master.gain.setTargetAtTime(m ? 0 : prefs.master, this.ctx.currentTime, 0.02);
+  },
+  setVolume(bus, v) {
+    prefs[bus] = clamp(v, 0, 1);
+    savePrefs();
+    if (!this.ctx) return;
+    const node = bus === 'master' ? this.master : bus === 'music' ? this.musicBus : this.sfxBus;
+    if (node) node.gain.setTargetAtTime(bus === 'master' && this.muted ? 0 : prefs[bus], this.ctx.currentTime, 0.02);
+  },
+  semi(root, s) { return root * Math.pow(2, s / 12); },
+  kick(t) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+    g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    o.connect(g); g.connect(this.musicBus); o.start(t); o.stop(t + 0.16);
+  },
+  snare(t) {
+    const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuf;
+    const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1800;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.32, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    n.connect(f); f.connect(g); g.connect(this.musicBus); n.start(t); n.stop(t + 0.1);
+    const o = this.ctx.createOscillator(), g2 = this.ctx.createGain();
+    o.type = 'triangle'; o.frequency.value = 190;
+    g2.gain.setValueAtTime(0.2, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    o.connect(g2); g2.connect(this.musicBus); o.start(t); o.stop(t + 0.08);
+  },
+  hat(t, loud) {
+    const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuf;
+    const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7500;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(loud ? 0.16 : 0.09, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+    n.connect(f); f.connect(g); g.connect(this.musicBus); n.start(t); n.stop(t + 0.05);
+  },
+  bass(t, f0) {
+    const o = this.ctx.createOscillator(), fl = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    o.type = 'sawtooth'; o.frequency.value = f0;
+    fl.type = 'lowpass'; fl.frequency.value = 520;
+    g.gain.setValueAtTime(0.34, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+    o.connect(fl); fl.connect(g); g.connect(this.musicBus); o.start(t); o.stop(t + 0.26);
+  },
+  lead(t, f0) {
+    const o = this.ctx.createOscillator(), fl = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    o.type = 'square'; o.frequency.value = f0;
+    fl.type = 'lowpass'; fl.frequency.value = 2400;
+    g.gain.setValueAtTime(0.14, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(fl); fl.connect(g); g.connect(this.musicBus); o.start(t); o.stop(t + 0.22);
+  },
+  scheduleStep(idx, t) {
+    const lv = this.lv, s = idx % 16;
+    if (lv.kick[s]) { this.kick(t); this.kickTimes.push(t); } // R1: queue the kick time — the tick fires the visual pulse when the kick SOUNDS, not when it is scheduled (up to 0.25 s early)
+    if (lv.snare[s]) this.snare(t);
+    if (lv.hat[s]) this.hat(t, s % 4 === 0);
+    if (lv.bass[s] >= 0) this.bass(t, this.semi(lv.root, lv.bass[s]));
+    if (lv.lead[s] >= 0) this.lead(t, this.semi(lv.root * 4, lv.lead[s]));
+  },
+  startLevel(lv, speed = 1) {
+    this.resume();
+    this.lv = lv;
+    // Step COUNT is fixed by the track (unscaled tempo); the step DURATION
+    // stretches with practice speed, so the whole track plays slower at the
+    // same pitch (synth notes are generated per step — no time-stretch
+    // artifacts). endTime below is derived from the stretched duration.
+    const baseStep = 60 / lv.bpm / 4;
+    this.totalSteps = Math.ceil(lv.dur / baseStep);
+    this.stepDur = baseStep / speed;
+    this.baseTime = this.ctx.currentTime + 0.6;
+    this.nextStep = this.baseTime;
+    this.stepIdx = 0;
+    this.kickTimes.length = 0; // R1: no stale kicks from a previous level
+    this.running = true;
+  },
+  stop() { this.running = false; this.kickTimes.length = 0; },
+  tick() {
+    if (!this.running || !this.ctx) return;
+    const ahead = this.ctx.currentTime + 0.25;
+    while (this.nextStep < ahead && this.stepIdx < this.totalSteps) {
+      this.scheduleStep(this.stepIdx, this.nextStep);
+      this.stepIdx++;
+      this.nextStep += this.stepDur;
+    }
+    if (this.stepIdx >= this.totalSteps) this.running = false;
+  },
+  get now() { return this.ctx ? this.ctx.currentTime : 0; },
+  get endTime() { return this.baseTime + this.totalSteps * this.stepDur; },
+};
+// R1 (Round 3): beat-pulse firing, driven by the AUDIO CLOCK. scheduleStep
+// runs up to 0.25 s ahead of the audible kick (the scheduler's lookahead),
+// so a pulse set there peaked before the kick landed and had decayed to
+// ~0.58 by the time it sounded. Kicks are queued at schedule time
+// (kickTimes) and fire HERE, when audioSys.now crosses them — the 0.25 s
+// audio lookahead is unchanged; only the VISUAL pulse moved to the audible
+// beat. Kicks already past (e.g. after a hitch) fire immediately instead of
+// piling up. While paused the AudioContext is suspended, so now is frozen
+// and no kick can cross mid-pause.
+function fireDueBeatPulses() {
+  if (!audioSys.ctx) return;
+  const now = audioSys.now;
+  const q = audioSys.kickTimes;
+  while (q.length && q[0] <= now) { q.shift(); beatPulse = 1; }
+}
+// One-shot SFX (all synthesized)
+// R7 (Round 3): pooled HRTF panners for one-shot impacts + whooshes — the
+// same HRTF pattern as the blade hums (createPanner, HRTF, inverse), so
+// slices localize in 3D (left/right + height + distance) instead of stereo
+// L/R only. 3 reusable nodes, round-robin: a new impact re-points the
+// oldest panner, so a fast double-slice never snaps a still-ringing impact
+// to a new position. refDistance 1.2 m (not the hums' 0.5 m) keeps the
+// impact mix level at the typical slice distance (~1.1–1.4 m from the
+// listener); the hums' 0.5 m would attenuate impacts ~3x.
+const sfxPanners = [];
+let sfxPanHead = 0;
+function sfxPannerAt(x, y, z) {
+  const c = audioSys.ctx;
+  if (!c || typeof c.createPanner !== 'function') return null;
+  while (sfxPanners.length < 3) {
+    const pan = c.createPanner();
+    pan.panningModel = 'HRTF'; pan.distanceModel = 'inverse';
+    pan.refDistance = 1.2; pan.maxDistance = 8; pan.rolloffFactor = 1;
+    pan.connect(audioSys.sfxBus);
+    sfxPanners.push(pan);
+  }
+  const pan = sfxPanners[sfxPanHead];
+  sfxPanHead = (sfxPanHead + 1) % sfxPanners.length;
+  if (pan.positionX) { pan.positionX.value = x; pan.positionY.value = y; pan.positionZ.value = z; }
+  else pan.setPosition(x, y, z);
+  return pan;
+}
+function sfxSlice(comboN, x = 0, y = 1.3, z = HIT_Z) {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  // R7: HRTF impact at the slice point (falls back to the dry bus if the
+  // browser has no PannerNode).
+  const out = sfxPannerAt(x, y, z) || audioSys.sfxBus;
+  const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
+  const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 1.2;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  n.connect(f); f.connect(g); g.connect(out); n.start(t); n.stop(t + 0.13);
+  const o = c.createOscillator(), g2 = c.createGain();
+  o.type = 'sine';
+  const p = 620 + Math.min(comboN, 60) * 9;
+  o.frequency.setValueAtTime(p, t); o.frequency.exponentialRampToValueAtTime(p * 1.6, t + 0.09);
+  g2.gain.setValueAtTime(0.22, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  o.connect(g2); g2.connect(out); o.start(t); o.stop(t + 0.11);
+  // Deeper thunk layer: the impact body under the slice shimmer.
+  const o3 = c.createOscillator(), g3 = c.createGain();
+  o3.type = 'sine';
+  o3.frequency.setValueAtTime(180, t); o3.frequency.exponentialRampToValueAtTime(60, t + 0.1);
+  g3.gain.setValueAtTime(0.32, t); g3.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  o3.connect(g3); g3.connect(out); o3.start(t); o3.stop(t + 0.13);
+}
+function sfxPerfect() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  for (const pair of [[1320, 0], [1760, 0.07]]) {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sine'; o.frequency.value = pair[0];
+    g.gain.setValueAtTime(0.18, t + pair[1]); g.gain.exponentialRampToValueAtTime(0.001, t + pair[1] + 0.14);
+    o.connect(g); g.connect(audioSys.sfxBus); o.start(t + pair[1]); o.stop(t + pair[1] + 0.15);
+  }
+}
+function sfxThud() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(150, t);
+  o.frequency.exponentialRampToValueAtTime(70, t + 0.08);
+  g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  o.connect(g); g.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.11);
+}
+function sfxMiss() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(330, t); o.frequency.exponentialRampToValueAtTime(215, t + 0.16);
+  g.gain.setValueAtTime(0.16, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+  o.connect(g); g.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.18);
+}
+function sfxBomb() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
+  const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.7, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+  n.connect(f); f.connect(g); g.connect(audioSys.sfxBus); n.start(t); n.stop(t + 0.52);
+  const o = c.createOscillator(), g2 = c.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(32, t + 0.4);
+  g2.gain.setValueAtTime(0.55, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+  o.connect(g2); g2.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.47);
+}
+function sfxClick() {
+  if (!audioSys.ctx || audioSys.muted) return;
+  const t = audioSys.now, c = audioSys.ctx;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'square'; o.frequency.value = 880;
+  g.gain.setValueAtTime(0.1, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  o.connect(g); g.connect(audioSys.sfxBus); o.start(t); o.stop(t + 0.06);
+}
+
+// ============================== blade hum, whoosh, spatial listener (overhaul 2026-11-14) ==============================
+// Per-blade hum: a low sawtooth through a lowpass, spatialized with an HRTF
+// panner at the blade midpoint, gain tied to blade speed (quiet at rest).
+// The oscillators are created once and left running with gain 0 when idle —
+// no start/stop churn. They route through the SFX bus, so mute/volume work.
+const bladeHum = { left: null, right: null }; // { osc, gain, pan }
+function ensureBladeHums() {
+  if (!audioSys.ctx) return;
+  for (const key of ['left', 'right']) {
+    if (bladeHum[key]) continue;
+    const c = audioSys.ctx;
+    const osc = c.createOscillator(); osc.type = 'sawtooth';
+    osc.frequency.value = key === 'left' ? 55 : 65;
+    const flt = c.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = 320; flt.Q.value = 0.7;
+    const gain = c.createGain(); gain.gain.value = 0;
+    const pan = c.createPanner(); pan.panningModel = 'HRTF'; pan.distanceModel = 'inverse';
+    pan.refDistance = 0.5; pan.maxDistance = 8; pan.rolloffFactor = 1;
+    osc.connect(flt); flt.connect(gain); gain.connect(pan); pan.connect(audioSys.sfxBus);
+    osc.start();
+    bladeHum[key] = { osc, gain, pan };
+  }
+}
+function updateBladeHums() {
+  if (!bladeHum.left || !bladeHum.right) ensureBladeHums();
+  const active = renderer.xr.isPresenting && screen === 'playing' && audioSys.ctx && !audioSys.muted;
+  for (const key of ['left', 'right']) {
+    const h = bladeHum[key]; if (!h) continue;
+    const ctl = key === 'left' ? leftCtl : rightCtl;
+    if (!active || !ctl) { h.gain.gain.setTargetAtTime(0, audioSys.now, 0.05); continue; }
+    const speed = vrBladeSpeed(key);
+    h.gain.gain.setTargetAtTime(0.012 + Math.min(1, speed / 6) * 0.05, audioSys.now, 0.06);
+    _midCur.copy(baseCur[key]).add(tipCur[key]).multiplyScalar(0.5);
+    if (h.pan.positionX) { h.pan.positionX.value = _midCur.x; h.pan.positionY.value = _midCur.y; h.pan.positionZ.value = _midCur.z; }
+    else h.pan.setPosition(_midCur.x, _midCur.y, _midCur.z);
+  }
+}
+// Whoosh: edge-triggered when a blade's speed crosses 2.5 m/s upward, with a
+// per-hand cooldown and a re-arm below 1.5 m/s (so one swing = one whoosh).
+const whooshCd = { left: 0, right: 0 };
+const whooshArmed = { left: true, right: true };
+function maybeWhoosh(key) {
+  if (!audioSys.ctx || audioSys.muted || screen !== 'playing') return;
+  const speed = vrBladeSpeed(key);
+  if (speed < 1.5) { whooshArmed[key] = true; return; }
+  if (!whooshArmed[key] || speed < 2.5) return;
+  const now = audioSys.now;
+  if (now - whooshCd[key] < 0.18) return;
+  whooshArmed[key] = false; whooshCd[key] = now;
+  const c = audioSys.ctx, t = now;
+  const n = c.createBufferSource(); n.buffer = audioSys.noiseBuf;
+  const f = c.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.0;
+  f.frequency.setValueAtTime(400, t); f.frequency.exponentialRampToValueAtTime(1800, t + 0.14);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+  n.connect(f); f.connect(g);
+  // R7: HRTF whoosh at the blade midpoint (the same point the hums use).
+  _midCur.copy(baseCur[key]).add(tipCur[key]).multiplyScalar(0.5);
+  g.connect(sfxPannerAt(_midCur.x, _midCur.y, _midCur.z) || audioSys.sfxBus);
+  n.start(t); n.stop(t + 0.24);
+}
+// Keep the Web Audio listener on the headset (position + orientation) so the
+// HRTF panners spatialize correctly. Best-effort: never throws.
+const _lisPos = new THREE.Vector3(), _lisQuat = new THREE.Quaternion();
+const _lisFwd = new THREE.Vector3(), _lisUp = new THREE.Vector3();
+function updateAudioListener() {
+  if (!renderer.xr.isPresenting || !audioSys.ctx) return;
+  try {
+    const l = audioSys.ctx.listener;
+    camera.getWorldPosition(_lisPos);
+    camera.getWorldQuaternion(_lisQuat);
+    _lisFwd.set(0, 0, -1).applyQuaternion(_lisQuat);
+    _lisUp.set(0, 1, 0).applyQuaternion(_lisQuat);
+    if (l.positionX) {
+      l.positionX.value = _lisPos.x; l.positionY.value = _lisPos.y; l.positionZ.value = _lisPos.z;
+      l.forwardX.value = _lisFwd.x; l.forwardY.value = _lisFwd.y; l.forwardZ.value = _lisFwd.z;
+      l.upX.value = _lisUp.x; l.upY.value = _lisUp.y; l.upZ.value = _lisUp.z;
+    } else {
+      l.setPosition(_lisPos.x, _lisPos.y, _lisPos.z);
+      l.setOrientation(_lisFwd.x, _lisFwd.y, _lisFwd.z, _lisUp.x, _lisUp.y, _lisUp.z);
+    }
+  } catch (e) { /* listener update is best-effort */ }
+}
+
+// ============================== game state ==============================
+let score = 0, combo = 0, maxCombo = 0, mult = 1;
+let notesHit = 0, notesTotal = 0;
+// TEMPORARY HIT/MISS diagnostic counter (owner request 2026-11-14, for the
+// headset retest of the MISS fix): counts scored slices (HITS) and notes
+// that passed the boundary unhit (MISS) separately, per run. Displayed only
+// when the collision debug viz is on (perf cell, pause line, DOM readout).
+// Remove together with the debug visualization once validated.
+let dbgHits = 0, dbgMiss = 0;
+let beatPulse = 0;
+let chart = [], chartIdx = 0;
+let levelActive = false;
+let levelSpeed = 1;   // 1 = full tempo, 0.65 = practice mode
+let curTravel = 1.4;  // effective note travel time for the current run
+let lastResult = null; // { isBest, prevBest } from the last recorded run
+
+// Direction arrow textures (chevron, 4 rotations) — currently unused:
+// direction gating was removed 2026-11-15, so no note carries a direction
+// and the arrows stay hidden. Kept for a possible future optional mode.
+const arrowTex = [];
+{
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.strokeStyle = '#ffffff'; g.lineWidth = 22; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.beginPath(); g.moveTo(28, 88); g.lineTo(64, 44); g.lineTo(100, 88); g.stroke();
+  const base = new THREE.CanvasTexture(cv); base.colorSpace = THREE.SRGBColorSpace;
+  for (let i = 0; i < 4; i++) {
+    const t = base.clone();
+    t.center.set(0.5, 0.5); t.rotation = -i * Math.PI / 2; t.needsUpdate = true;
+    arrowTex.push(t);
+  }
+}
+
+// Colorblind mode: shape decals on the note face IN ADDITION to color —
+// circle = left hand, triangle = right hand. Shown only when the toggle is on.
+const shapeTex = [];
+{
+  const mk = (draw) => {
+    const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+    const g = cv.getContext('2d'); draw(g);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  shapeTex.push(mk(g => { g.strokeStyle = '#ffffff'; g.lineWidth = 14; g.beginPath(); g.arc(64, 64, 44, 0, Math.PI * 2); g.stroke(); }));
+  shapeTex.push(mk(g => { g.strokeStyle = '#ffffff'; g.lineWidth = 14; g.lineJoin = 'round'; g.beginPath(); g.moveTo(64, 22); g.lineTo(106, 100); g.lineTo(22, 100); g.closePath(); g.stroke(); }));
+}
+
+// ============================== object pools (zero per-frame allocation) ==============================
+// Edge-frame texture for the note cubes: dark glassy base + bright frame.
+// Used as both map and emissiveMap on the standard materials, so the cube
+// edges glow in the hand color with ZERO extra draw calls.
+function makeEdgeFrameTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 8, 64, 64, 90);
+  gr.addColorStop(0, '#3d3d52'); gr.addColorStop(0.7, '#23232f'); gr.addColorStop(1, '#101018');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 12; g.lineJoin = 'round';
+  g.strokeRect(8, 8, 112, 112);
+  g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 3;
+  g.strokeRect(22, 22, 84, 84);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const edgeFrameTex = makeEdgeFrameTexture();
+const noteGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+const noteMats = {
+  left: new THREE.MeshStandardMaterial({ color: COL_BLUE, map: edgeFrameTex, emissive: COL_BLUE, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 }),
+  right: new THREE.MeshStandardMaterial({ color: COL_RED, map: edgeFrameTex, emissive: COL_RED, emissiveMap: edgeFrameTex, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.35 })
+};
+const arrowGeo = new THREE.PlaneGeometry(0.22, 0.22);
+const notes = [];
+for (let i = 0; i < 26; i++) {
+  const grp = new THREE.Group();
+  const cube = new THREE.Mesh(noteGeo, noteMats.left);
+  grp.add(cube);
+  const arrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({
+    map: arrowTex[0], transparent: true, toneMapped: false, depthWrite: false
+  }));
+  arrow.position.z = 0.17; arrow.visible = false;
+  grp.add(arrow);
+  // Colorblind shape decal (circle = left, triangle = right); hidden unless
+  // the toggle is on. Sits just behind the arrow plane.
+  const shape = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({
+    map: shapeTex[0], transparent: true, toneMapped: false, depthWrite: false
+  }));
+  shape.position.z = 0.165; shape.visible = false;
+  grp.add(shape);
+  // Glow halo behind the cube so notes read earlier at distance. The valve
+  // hides these at level 2 (they are pure decoration, never gameplay).
+  const nglow = glowSprite(COL_BLUE, 0.55, 0.45);
+  nglow.position.z = -0.12;
+  grp.add(nglow);
+  grp.visible = false; scene.add(grp);
+  notes.push({ grp, cube, arrow, shape, nglow, active: false, x: 0, y: 0, z: 0, vz: 0, hand: 'left', dir: -1, bomb: false, judged: false, hitTime: 0 });
+}
+const bombGeo = new THREE.SphereGeometry(0.19, 14, 12);
+const bombMat = new THREE.MeshStandardMaterial({ color: 0x1a1a22, metalness: 0.9, roughness: 0.3, emissive: 0xffaa00, emissiveIntensity: 0.15 });
+const ringGeo = new THREE.TorusGeometry(0.26, 0.03, 8, 24);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, toneMapped: false });
+const bombs = [];
+for (let i = 0; i < 8; i++) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(bombGeo, bombMat));
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  grp.add(ring);
+  const glow = glowSprite(0xffaa00, 0.7, 0.5);
+  grp.add(glow);
+  grp.visible = false; scene.add(grp);
+  bombs.push({ grp, ring, active: false, x: 0, y: 0, z: 0, vz: 0, judged: false, spin: 0, hitTime: 0 });
+}
+// L1 (Round 3): procedural environment map for the PBR metals. The grips
+// (metalness 0.9) and bomb shells (metalness 0.9) had NO envMap, so in a
+// 3-light scene they read near-black instead of metal. One small PMREM
+// envMap, generated once at boot from a canvas equirect of the arena's own
+// neon (blue/red stage lights, purple sky, dark floor) — no external
+// assets, no new lights. Notes get a low envMapIntensity so the neon look
+// is not washed out. Assigned before the first render, so no needsUpdate.
+function makeArenaEnvMap() {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const g = cv.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, 128);
+  sky.addColorStop(0, '#0a1030'); sky.addColorStop(0.45, '#2a0f4a');
+  sky.addColorStop(0.55, '#12062e'); sky.addColorStop(1, '#05021a');
+  g.fillStyle = sky; g.fillRect(0, 0, 256, 128);
+  // Neon blobs where the stage lights sit: blue left, red right, amber
+  // center-low, cool skylight above.
+  const blob = (x, y, r, color) => {
+    const gr = g.createRadialGradient(x, y, 2, x, y, r);
+    gr.addColorStop(0, color); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  };
+  blob(48, 52, 42, 'rgba(47,127,255,0.95)');
+  blob(208, 52, 42, 'rgba(255,43,43,0.95)');
+  blob(128, 84, 30, 'rgba(255,170,0,0.7)');
+  blob(128, 20, 36, 'rgba(143,184,255,0.5)');
+  const tex = new THREE.CanvasTexture(cv);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envRT = pmrem.fromEquirectangular(tex);
+  tex.dispose(); pmrem.dispose();
+  return envRT.texture;
+}
+const arenaEnvMap = makeArenaEnvMap();
+gripMat.envMap = arenaEnvMap; gripMat.envMapIntensity = 1.0;
+gripDarkMat.envMap = arenaEnvMap; gripDarkMat.envMapIntensity = 0.8;
+bombMat.envMap = arenaEnvMap; bombMat.envMapIntensity = 0.8;
+noteMats.left.envMap = arenaEnvMap; noteMats.left.envMapIntensity = 0.35;
+noteMats.right.envMap = arenaEnvMap; noteMats.right.envMapIntensity = 0.35;
+// Particles (slice bursts): pooled additive sprites
+const PMAX = 96;
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(PMAX * 3);
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
+const pMat = new THREE.PointsMaterial({
+  color: 0xffffff, size: 0.09, transparent: true, opacity: 0.95,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+});
+const pPoints = new THREE.Points(pGeo, pMat);
+pPoints.frustumCulled = false; scene.add(pPoints);
+const pVel = new Float32Array(PMAX * 3), pLife = new Float32Array(PMAX);
+let pHead = 0;
+function burst(x, y, z, color, count, speed) {
+  pMat.color.setHex(color);
+  for (let i = 0; i < count; i++) {
+    const k = pHead; pHead = (pHead + 1) % PMAX;
+    pPos[k * 3] = x; pPos[k * 3 + 1] = y; pPos[k * 3 + 2] = z;
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 2 - 1);
+    pVel[k * 3] = speed * Math.sin(ph) * Math.cos(th);
+    pVel[k * 3 + 1] = speed * Math.cos(ph);
+    pVel[k * 3 + 2] = speed * Math.sin(ph) * Math.sin(th);
+    pLife[k] = 0.55;
+  }
+}
+// Cube splitting (overhaul 2026-11-14): pooled halves that fly apart on a
+// scored slice. 12 halves = up to 6 simultaneous splits; each half reuses
+// the note materials (no new materials, no per-slice allocation). The split
+// axis is perpendicular to the slice direction in the XY plane.
+const halfGeo = new THREE.BoxGeometry(0.15, 0.3, 0.3);
+const halves = [];
+for (let i = 0; i < 12; i++) {
+  const m = new THREE.Mesh(halfGeo, noteMats.left);
+  m.visible = false; scene.add(m);
+  halves.push({ m, life: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0 });
+}
+let halfHead = 0;
+function spawnHalves(x, y, z, hand, dirIdx) {
+  const dv = DIR_VECS[dirIdx] || DIR_VECS[0];
+  const px = -dv.y, py = dv.x; // split axis, perpendicular to the swing
+  const ang = Math.atan2(py, px); // align the half's thin axis with the split
+  for (let s = -1; s <= 1; s += 2) {
+    const h = halves[halfHead]; halfHead = (halfHead + 1) % halves.length;
+    h.m.material = noteMats[hand];
+    h.m.position.set(x + px * s * 0.08, y + py * s * 0.08, z);
+    h.m.rotation.set(0, 0, ang);
+    h.m.scale.set(1, 1, 1);
+    h.m.visible = true;
+    h.life = 0.5;
+    h.vx = px * s * 1.6; h.vy = py * s * 1.6 - 0.4; h.vz = 0.6 + Math.random() * 0.4;
+    h.rx = (Math.random() - 0.5) * 8; h.ry = (Math.random() - 0.5) * 8;
+  }
+}
+function updateHalves(sdt) {
+  for (const h of halves) {
+    if (h.life <= 0) continue;
+    h.life -= sdt;
+    if (h.life <= 0) { h.m.visible = false; continue; }
+    h.m.position.x += h.vx * sdt; h.m.position.y += h.vy * sdt; h.m.position.z += h.vz * sdt;
+    h.vy -= 3.5 * sdt; // slight gravity
+    h.m.rotation.x += h.rx * sdt; h.m.rotation.y += h.ry * sdt;
+    const s = Math.max(0.01, h.life / 0.5);
+    h.m.scale.set(s, s, s);
+  }
+}
+function resetHalves() { for (const h of halves) { h.life = 0; h.m.visible = false; } }
+// Floating hit text: pooled canvas sprites
+const texts = [];
+for (let i = 0; i < 10; i++) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false, toneMapped: false
+  }));
+  sp.scale.set(0.7, 0.26, 1); sp.visible = false; scene.add(sp);
+  texts.push({ sp, cv, tex, life: 0 });
+}
+let textHead = 0;
+function floatText(str, color, x, y, z) {
+  const t = texts[textHead]; textHead = (textHead + 1) % texts.length;
+  const g = t.cv.getContext('2d');
+  g.clearRect(0, 0, 256, 96);
+  g.font = '900 52px Arial'; g.textAlign = 'center';
+  g.fillStyle = color; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.lineWidth = 8;
+  g.strokeText(str, 128, 64); g.fillText(str, 128, 64);
+  t.tex.needsUpdate = true;
+  t.sp.position.set(x, y, z); t.sp.visible = true; t.life = 0.8;
+}
+// Screen flash: DOM overlay on desktop, camera-attached red quad in VR
+const flashEl = document.getElementById('flash');
+const flashQuad = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6),
+  new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+flashQuad.position.set(0, 0, -1.2);
+flashQuad.visible = false; // R8: never render the quad at opacity 0 (1 wasted draw/eye)
+camera.add(flashQuad);
+let flashAmt = 0;
+function doFlash(a) {
+  flashAmt = Math.max(flashAmt, a);
+  if (a > 0) flashQuad.visible = true;
+  flashEl.style.opacity = String(clamp(a, 0, 0.9));
+}
+
+// ============================== prototype additions: approach markers, ring flashes, vignette, perf readout ==============================
+// Approach markers: one pulsing ring per lane at the hit plane, showing where
+// the next note in that lane will land (red ring = incoming bomb). The ring
+// takes the incoming note's HAND color (blue = left hand, red = right
+// hand), not the lane's side — hands alternate sides since 2026-11-15.
+// Gameplay feedback, so the valve never hides these — they are only 4 meshes.
+const approachMarkers = [];
+{
+  const ringG = new THREE.TorusGeometry(0.2, 0.025, 8, 28);
+  for (let li = 0; li < LANES.length; li++) {
+    const m = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({
+      color: 0xffffff, // neutral default; updateApproachMarkers sets the live hand color
+      transparent: true, opacity: 0, toneMapped: false, depthWrite: false
+    }));
+    m.position.set(LANES[li], LANE_YOFFS[li], HIT_Z);
+    m.visible = false;
+    strikeFrame.add(m);
+    approachMarkers.push(m);
+  }
+}
+function updateApproachMarkers(now) {
+  // Nearest in-flight event per lane (note or bomb), within 0.9 s of arrival.
+  const best = [null, null, null, null];
+  for (const n of notes) {
+    if (!n.active || n.judged) continue;
+    const li = LANES.indexOf(n.x);
+    if (li < 0) continue;
+    const tLeft = n.hitTime - now;
+    if (tLeft < 0 || tLeft > 0.9) continue;
+    if (!best[li] || tLeft < best[li].tLeft) best[li] = { tLeft, bomb: false, hand: n.hand };
+  }
+  for (const b of bombs) {
+    if (!b.active || b.judged) continue;
+    const li = LANES.indexOf(b.x);
+    if (li < 0) continue;
+    const tLeft = b.hitTime - now;
+    if (tLeft < 0 || tLeft > 0.9) continue;
+    if (!best[li] || tLeft < best[li].tLeft) best[li] = { tLeft, bomb: true };
+  }
+  for (let li = 0; li < 4; li++) {
+    const m = approachMarkers[li];
+    const ev = best[li];
+    if (!ev || screen !== 'playing') { m.visible = false; continue; }
+    const k = 1 - ev.tLeft / 0.9; // 0 far -> 1 at the plane
+    m.visible = true;
+    m.material.color.setHex(ev.bomb ? 0xffaa00 : (ev.hand === 'left' ? COL_BLUE : COL_RED));
+    m.material.opacity = 0.25 + 0.65 * k;
+    const s = 1.35 - 0.45 * k;
+    m.scale.set(s, s, 1);
+  }
+}
+function hideApproachMarkers() {
+  for (const m of approachMarkers) m.visible = false;
+}
+// Ring flashes: pooled expanding rings at slice points (cheap, 6 meshes).
+const ringFlashes = [];
+{
+  const rg = new THREE.RingGeometry(0.14, 0.2, 28);
+  for (let i = 0; i < 6; i++) {
+    const m = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    m.visible = false; scene.add(m);
+    ringFlashes.push({ m, life: 0 });
+  }
+}
+let ringHead = 0;
+function ringFlash(x, y, z, color) {
+  const r = ringFlashes[ringHead]; ringHead = (ringHead + 1) % ringFlashes.length;
+  r.m.position.set(x, y, z);
+  r.m.quaternion.copy(camera.quaternion);
+  r.m.material.color.setHex(color);
+  r.m.visible = true; r.life = 0.3;
+}
+function updateRingFlashes(dt) {
+  for (const r of ringFlashes) {
+    if (r.life <= 0) continue;
+    r.life -= dt;
+    const k = 1 - Math.max(0, r.life) / 0.3;
+    const s = 0.6 + 1.6 * k;
+    r.m.scale.set(s, s, 1);
+    r.m.material.opacity = 0.9 * (1 - k);
+    if (r.life <= 0) r.m.visible = false;
+  }
+}
+// Comfort vignette (toggleable): soft dark edges while playing. Stationary
+// game — this is a comfort preference, not a locomotion aid.
+const vignette = (() => {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(128, 128, 60, 128, 128, 180);
+  gr.addColorStop(0, 'rgba(0,0,0,0)');
+  gr.addColorStop(0.75, 'rgba(0,0,0,0)');
+  gr.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }));
+  m.position.set(0, 0, -1.3);
+  m.visible = false;
+  camera.add(m);
+  return m;
+})();
+// Optional in-VR frame-time readout (profiling aid; toggle in Settings).
+// Shows rolling-average ACTIVE-PLAY frame time + valve level + the XR
+// layer's actual framebuffer size. This is a measurement display, not a
+// performance claim — Quest 2 numbers come only from the owner's headset.
+const perfCanvas = document.createElement('canvas');
+perfCanvas.width = 512; perfCanvas.height = 144; // 1 line normally, 3 lines in debug mode
+const perfCtx = perfCanvas.getContext('2d');
+const perfTex = new THREE.CanvasTexture(perfCanvas);
+perfTex.colorSpace = THREE.SRGBColorSpace;
+const perfCell = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.14),
+  new THREE.MeshBasicMaterial({ map: perfTex, transparent: true, toneMapped: false }));
+perfCell.position.set(0.55, -0.75, -1.5);
+perfCell.visible = false;
+camera.add(perfCell);
+let perfDrawAt = 0;
+function drawPerfCell() {
+  const g = perfCtx;
+  g.clearRect(0, 0, 512, 144);
+  g.fillStyle = 'rgba(8,6,20,0.72)'; g.fillRect(0, 0, 512, 144);
+  g.strokeStyle = '#2bff88'; g.lineWidth = 3; g.strokeRect(3, 3, 506, 138);
+  g.textAlign = 'left'; g.fillStyle = '#ffffff';
+  if (debugCollision) {
+    // Debug mode: three lines — perf, live blade speeds (the speed-gate
+    // diagnostic; gate is 0.50 m/s), and the TEMPORARY HIT/MISS counter.
+    g.font = '700 26px Arial';
+    g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 16, 36);
+    g.fillStyle = '#2bff88';
+    g.fillText('BLADE L ' + vrBladeSpeed('left').toFixed(2) + ' · R ' + vrBladeSpeed('right').toFixed(2) + ' m/s', 16, 76);
+    g.fillStyle = '#7CFF6B';
+    g.fillText('HITS ' + dbgHits + '   ·   MISS ' + dbgMiss, 16, 116);
+    g.font = '700 16px Arial'; g.fillStyle = '#9fd8ff';
+    g.fillText(BUILD_ID, 16, 136); // FQ1: build ID on the debug perf cell
+  } else {
+    g.font = '700 30px Arial';
+    g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 16, 64);
+    // FQ1: build ID + frame-time distribution on the perf cell (18px keeps
+    // the line inside the 512px canvas).
+    const d = perfDist();
+    g.font = '700 18px Arial'; g.fillStyle = '#9fd8ff';
+    g.fillText(d ? (BUILD_ID + ' · p50 ' + d.p50 + ' · p95 ' + d.p95 + ' · DC ' + d.drawCallsLast)
+                 : (BUILD_ID + ' · no frames yet'), 16, 104);
+  }
+  perfTex.needsUpdate = true;
+}
+
+// ============================== chart builder (spawn locked to the audio clock) ==============================
+function buildChart(lv, di, baseTime, speed = 1) {
+  const diff = DIFFS[di];
+  const rng = mulberry32(1234 + (selLevel + 1) * 77 + (di + 1) * 13);
+  const beat = 60 / lv.bpm / speed;
+  // R5: the chart is shifted one bar later (see the +4*beat offset below),
+  // so it also ENDS one bar earlier — same length, same musical span, no
+  // notes landing after the results tail. (Without this, the shift pushed
+  // the last WARMUP note ~0.5 s past endTime + 1.6 at practice speed, so it
+  // would never spawn — caught by the P0-fix test suite.)
+  const nBeats = Math.floor(lv.dur / (60 / lv.bpm)) - 1 - 4;
+  // Alternating color/position patterns (2026-11-15, owner directive):
+  // the two cube colors ALTERNATE sides — color tells the HAND, not the
+  // side. A blue cube can come down a right lane (left hand crosses over)
+  // and a red cube down a left lane. Sequences vary: same-side pairs,
+  // cross pairs, alternating hands on one side, short same-hand runs.
+  // FAIRNESS RULES (hard, pinned by chart-pattern-tests.js):
+  //  - Cross-body notes use ONLY the inner lanes (1 and 2), so every reach
+  //    stays comfortable — never a far cross to lane 0 or 3.
+  //  - Hands drum along the beat grid: mostly alternating, same-hand runs
+  //    capped at 3, so neither arm is overloaded and patterns stay musical.
+  //  - Cross rate rises with difficulty (EASY 15%, NORMAL 30%, HARD 40%).
+  const CROSS_RATE = { EASY: 0.15, NORMAL: 0.30, HARD: 0.40 }[diff.label] ?? 0.30;
+  let lastHand = null, runLength = 0;
+  function pickHand() {
+    let hand;
+    if (!lastHand) hand = rng() < 0.5 ? 'left' : 'right';
+    else if (runLength >= 3) hand = lastHand === 'left' ? 'right' : 'left';
+    else hand = rng() < 0.65 ? (lastHand === 'left' ? 'right' : 'left') : lastHand;
+    runLength = (hand === lastHand) ? runLength + 1 : 1;
+    lastHand = hand;
+    return hand;
+  }
+  // Lane for a hand: same side = either lane on that side; cross = the
+  // INNER lane of the opposite side only. Never a far cross, ever.
+  function pickLaneForHand(hand, usedLanes) {
+    const sideLanes = hand === 'left' ? [0, 1] : [2, 3];
+    const innerOpposite = hand === 'left' ? 2 : 1;
+    if (rng() < CROSS_RATE && !usedLanes.includes(innerOpposite)) return innerOpposite;
+    const free = sideLanes.filter(l => !usedLanes.includes(l));
+    if (free.length) return free[Math.floor(rng() * free.length)];
+    return sideLanes[0]; // unreachable with <=2 slots/beat; never a far cross
+  }
+  const evts = [];
+  for (let b = 0; b < nBeats; b++) {
+    const slots = [];
+    // Density per level: L1 half-time-ish, L2 every beat, L3 beats + offbeats
+    if (selLevel === 0) {
+      if (rng() < (b % 2 === 0 ? 0.85 : 0.4)) slots.push(0);
+    } else if (selLevel === 1) {
+      if (rng() < 0.75) slots.push(0);
+      if (rng() < 0.2) slots.push(0.5);
+    } else {
+      if (rng() < 0.88) slots.push(0);
+      if (rng() < 0.35) slots.push(0.5);
+    }
+    const usedLanes = [];
+    for (const off of slots) {
+      // R5: chart offset by one bar — the first event used to sit at beat 0,
+      // and baseTime is only 0.6 s after level start (shorter than any travel
+      // time), so the first note spawned mid-runway at near-full scale. One
+      // bar (4 beats = one full 16-step pattern) preserves musical alignment
+      // and gives the first note the full runway; nBeats is reduced by the
+      // same bar, so the chart ends where it used to — a count-in bar, then
+      // the same notes, then a quiet outro bar, no notes past the music.
+      const T = baseTime + 4 * beat + (b + off) * beat;
+      const isBomb = rng() < diff.bombRate;
+      if (isBomb) {
+        let lane = Math.floor(rng() * 4);
+        let guard = 0;
+        while (usedLanes.includes(lane) && guard++ < 8) lane = Math.floor(rng() * 4);
+        usedLanes.push(lane);
+        evts.push({ hitTime: T, lane, kind: 'bomb', hand: null, dir: -1 });
+        continue;
+      }
+      const hand = pickHand();
+      const lane = pickLaneForHand(hand, usedLanes);
+      usedLanes.push(lane);
+      evts.push({
+        hitTime: T, lane, kind: 'note', hand,
+        dir: -1 // no required direction (removed 2026-11-15): any swing counts
+      });
+    }
+  }
+  evts.sort((a, b2) => a.hitTime - b2.hitTime);
+  return evts;
+}
+function spawnNote(e) {
+  const diff = DIFFS[selDiff];
+  const travel = curTravel;
+  const x = LANES[e.lane];
+  // V2: anchor each note's height to the player's LIVE head height at spawn
+  // time, so in-flight notes never jump if he crouches mid-run.
+  const y = smoothHeadY + LANE_YOFFS[e.lane];
+  const vz = (HIT_Z - SPAWN_Z) / travel;
+  if (e.kind === 'bomb') {
+    const b = bombs.find(o => !o.active);
+    if (!b) return;
+    b.active = true; b.judged = false; b.x = x; b.y = y; b.z = SPAWN_Z; b.vz = vz; b.spin = 0; b.hitTime = e.hitTime;
+    b.grp.position.set(x, y, SPAWN_Z); b.grp.visible = true;
+  } else {
+    const n = notes.find(o => !o.active);
+    if (!n) return;
+    const hand = e.hand || (x < 0 ? 'left' : 'right'); // color = hand, not side (alternating patterns, 2026-11-15); the lane fallback is defensive only
+    n.active = true; n.judged = false; n.x = x; n.y = y; n.z = SPAWN_Z; n.vz = vz;
+    n.hand = hand; n.dir = e.dir; n.bomb = false; n.hitTime = e.hitTime;
+    n.cube.material = noteMats[hand];
+    n.nglow.material.color.setHex(hand === 'left' ? COL_BLUE : COL_RED);
+    n.nglow.visible = perfValve.glowsOn;
+    if (prefs.colorblind) {
+      n.shape.visible = true;
+      n.shape.material.map = shapeTex[hand === 'left' ? 0 : 1];
+      n.shape.material.needsUpdate = true;
+    } else n.shape.visible = false;
+    if (e.dir >= 0) {
+      n.arrow.visible = true;
+      n.arrow.material.map = arrowTex[e.dir];
+      n.arrow.material.needsUpdate = true;
+    } else n.arrow.visible = false;
+    n.grp.position.set(x, y, SPAWN_Z);
+    const s = 0.6; n.grp.scale.set(s, s, s);
+    n.grp.visible = true;
+    notesTotal++;
+  }
+}
+// ============================== slicing ==============================
+const _bd = new THREE.Vector3();
+function bladeDir(key, dt) {
+  // XY-plane blade direction (normalized) — desktop mouse path only in V2.
+  _bd.set(tipCur[key].x - tipPrev[key].x, tipCur[key].y - tipPrev[key].y, 0);
+  const len = _bd.length();
+  if (len < 1e-5 || dt <= 0) { _bd.set(0, 0, 0); return _bd; }
+  return _bd.multiplyScalar(1 / len);
+}
+function bladeSpeed(key, dt) {
+  if (dt <= 0) return 0;
+  return tipCur[key].distanceTo(tipPrev[key]) / dt;
+}
+// VR slice direction = dominant axis of the MID-BLADE velocity, projected
+// onto the plane perpendicular to the player's view direction (camera world
+// quaternion). Returns 0=up,1=right,2=down,3=left, -1=indeterminate. Uses the
+// same mid-blade signal as the speed gate: controller translation is too weak
+// during a wrist flick to give a direction at all (same root cause as the
+// 2026-11-14 MISS bug — a flick's controller velocity is ~0.3 m/s, below the
+// 0.4 direction threshold, so every flick read "no clear direction").
+const _sv = new THREE.Vector3(), _camQ = new THREE.Quaternion();
+const _vRight = new THREE.Vector3(), _vUp = new THREE.Vector3();
+function sliceDirIndex(key) {
+  camera.getWorldQuaternion(_camQ);
+  _vRight.set(1, 0, 0).applyQuaternion(_camQ);
+  _vUp.set(0, 1, 0).applyQuaternion(_camQ);
+  _sv.copy(bladeVel[key]);
+  const px = _sv.dot(_vRight), py = _sv.dot(_vUp);
+  const ax = Math.abs(px), ay = Math.abs(py);
+  if (Math.max(ax, ay) < 0.4) return -1; // straight thrust: no clear direction
+  if (ax > ay) return px > 0 ? 1 : 3;
+  return py > 0 ? 0 : 2;
+}
+// Snap a 2D direction vector to the dominant axis (desktop path).
+function snapDir2D(bdir) {
+  const ax = Math.abs(bdir.x), ay = Math.abs(bdir.y);
+  if (Math.max(ax, ay) < 1e-3) return -1;
+  if (ax > ay) return bdir.x > 0 ? 1 : 3;
+  return bdir.y > 0 ? 0 : 2;
+}
+function applyMult() {
+  mult = combo >= 50 ? 8 : combo >= 25 ? 4 : combo >= 10 ? 2 : 1;
+}
+function resolveNoteSlice(n, hand, dirIdx) {
+  n.active = false; n.grp.visible = false;
+  if (hand !== 'both' && hand !== n.hand) {
+    // Wrong blade: note consumed, combo kept, no points — clear feedback
+    floatText('WRONG BLADE', '#9aa0ac', n.x, n.y + 0.35, n.z);
+    sfxThud();
+    return;
+  }
+  // Contact with the correct blade ALWAYS scores (2026-11-15, Danny's
+  // headset feedback): the old direction gate rejected clean contact with
+  // OFF ANGLE / WRONG WAY whenever a natural swing (diagonal, thrust,
+  // wrist flick) didn't match the note's random chevron direction.
+  // Direction still shapes the cube-split visual (spawnHalves) but never
+  // gates scoring.
+  combo++; maxCombo = Math.max(maxCombo, combo);
+  // PERFECT: sliced within the timing band of the note's beat-locked hit time.
+  const perfect = !!audioSys.ctx && Math.abs(audioSys.now - n.hitTime) <= perfectWin();
+  const pts = perfect ? 150 : 100;
+  applyMult();
+  const gained = pts * mult;
+  score += gained;
+  notesHit++;
+  dbgHits++; // TEMPORARY diagnostic counter
+  const col = n.hand === 'left' ? '#2f7fff' : '#ff2b2b';
+  floatText((perfect ? 'PERFECT +' : '+') + gained, perfect ? '#2bff88' : col, n.x, n.y + 0.35, n.z);
+  burst(n.x, n.y, n.z, n.hand === 'left' ? COL_BLUE : COL_RED, Math.max(2, Math.round((perfect ? 18 : 12) * perfValve.particleScale)), perfect ? 2.8 : 2.2);
+  ringFlash(n.x, n.y, n.z, n.hand === 'left' ? COL_BLUE : COL_RED);
+  spawnHalves(n.x, n.y, n.z, n.hand, dirIdx);
+  if (perfect) sfxPerfect(); else sfxSlice(combo, n.x, n.y, n.z); // R7: slice point for the HRTF impact
+  // Haptics on EVERY successful slice (Danny, 2026-11-15): a firm buzz the
+  // player can always feel, not a light tap.
+  if (hand === 'left' || hand === 'right') pulseHaptics(hand, perfect ? 0.9 : 0.8, perfect ? 90 : 80);
+  updateScoreboard();
+}
+function resolveBombHit(b, hand) {
+  b.active = false; b.grp.visible = false;
+  combo = 0; applyMult();
+  score = Math.max(0, score - 50);
+  burst(b.x, b.y, b.z, 0xffaa00, Math.max(2, Math.round(16 * perfValve.particleScale)), 3.5);
+  floatText('-50', '#ff5555', b.x, b.y + 0.4, b.z);
+  doFlash(0.75);
+  sfxBomb();
+  if (hand === 'left' || hand === 'right') pulseHaptics(hand, 0.9, 150);
+  else { pulseHaptics('left', 0.7, 120); pulseHaptics('right', 0.7, 120); }
+  updateScoreboard();
+}
+// Hit registration — CONTINUOUS SWEPT blade collision (2026-11-14 overhaul).
+// The blade collides as a capsule from base to tip (same world transform as
+// the rendered blade mesh, no offset). The capsule is tested at 5 poses
+// interpolated between the previous and current frame, so a fast swing cannot
+// tunnel through a note between frames even on a 50 ms hitch frame. The old
+// code tested only the two endpoint poses; the swept test is strictly more
+// correct and costs 5 segment tests per candidate — only run for notes/bombs
+// inside the strike zone while the speed gate is open. Speed gate +
+// direction judgment use mid-blade velocity (see trackBlade) instead of
+// controller translation (gate 0.5 m/s since 2026-11-15, was 1.5; the
+// direction threshold stays 0.4 m/s, used only for the split visual).
+const BLADE_R = 0.25;  // generous capsule radius around the visible blade
+const NOTE_R = 0.20;   // ~1.3x the note cube's visual half-size
+const BOMB_R = 0.25;
+// Adjustable hit window (Settings): scales the strike-zone depth and the
+// PERFECT timing band. With audio-clock note positioning, the spatial zone
+// IS a timing window, so the two stay consistent. Practice mode always uses
+// the lenient window.
+const HIT_WINDOWS = {
+  lenient: { zone: 0.85, perfect: 0.12 },
+  normal: { zone: 0.6, perfect: 0.08 },
+  precise: { zone: 0.4, perfect: 0.05 },
+};
+function hitWindowCfg() {
+  const w = prefs.practice ? 'lenient' : prefs.hitWindow;
+  return HIT_WINDOWS[w] || HIT_WINDOWS.normal;
+}
+function zoneZ() { return hitWindowCfg().zone; }
+function perfectWin() { return hitWindowCfg().perfect; }
+const _ab = new THREE.Vector3(), _ap = new THREE.Vector3();
+function segPointDist2(ax, ay, az, bx, by, bz, px, py, pz) {
+  _ab.set(bx - ax, by - ay, bz - az);
+  _ap.set(px - ax, py - ay, pz - az);
+  const len2 = _ab.lengthSq();
+  let t = len2 > 1e-8 ? _ap.dot(_ab) / len2 : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  const dx = px - (ax + _ab.x * t), dy = py - (ay + _ab.y * t), dz = pz - (az + _ab.z * t);
+  return dx * dx + dy * dy + dz * dz;
+}
+// True if the blade capsule — SWEPT from its previous-frame pose to its
+// current-frame pose — touches a sphere of radius r centered at (px,py,pz).
+// The sweep is sampled at 5 interpolated poses; linear interpolation
+// undercuts the true rotational arc by <2 mm at 72 Hz, far below the capsule
+// radius. Desktop's blade is a point, so its capsule degenerates to a swept
+// sphere there.
+function bladeHits(key, px, py, pz, r) {
+  const rr = (BLADE_R + r) * (BLADE_R + r);
+  const bp = basePrev[key], bc = baseCur[key], tp = tipPrev[key], tc = tipCur[key];
+  for (let s = 0; s <= 4; s++) {
+    const t = s * 0.25;
+    const ax = bp.x + (bc.x - bp.x) * t, ay = bp.y + (bc.y - bp.y) * t, az = bp.z + (bc.z - bp.z) * t;
+    const bx = tp.x + (tc.x - tp.x) * t, by = tp.y + (tc.y - tp.y) * t, bz = tp.z + (tc.z - tp.z) * t;
+    if (segPointDist2(ax, ay, az, bx, by, bz, px, py, pz) < rr) return true;
+  }
+  return false;
+}
+function trySlice(key, hand, dt) {
+  // VR uses MID-BLADE velocity (speed gate 0.5 m/s so a stationary or
+  // drifting blade never counts, while a slow deliberate swing does —
+  // lowered from 1.5 m/s on 2026-11-15: Danny's slow swings visibly passed
+  // through cubes and still read MISS because the gate never opened);
+  // desktop keeps its tip path. The gate MUST use blade motion, not
+  // controller translation — a wrist flick moves the controller ~0.3 m/s
+  // while the blade sweeps ~7 m/s (2026-11-14 MISS root cause: the old
+  // controller-velocity gate never opened).
+  const isDesk = key === 'desk';
+  const spd = isDesk ? bladeSpeed(key, dt) : vrBladeSpeed(key);
+  if (spd < 0.5 || sliceCd[key] > 0) return;
+  const dirIdx = isDesk ? snapDir2D(bladeDir(key, dt)) : sliceDirIndex(key);
+  // Notes + bombs near the hit plane — positions read live from the meshes
+  for (const n of notes) {
+    if (!n.active || n.judged) continue;
+    if (Math.abs(n.z - HIT_Z) > zoneZ()) continue;
+    const np = n.grp.position;
+    if (bladeHits(key, np.x, np.y, np.z, NOTE_R)) { n.judged = true; sliceCd[key] = 0.08; resolveNoteSlice(n, hand, dirIdx); return; }
+  }
+  for (const b of bombs) {
+    if (!b.active || b.judged) continue;
+    if (Math.abs(b.z - HIT_Z) > zoneZ()) continue;
+    const bp = b.grp.position;
+    if (bladeHits(key, bp.x, bp.y, bp.z, BOMB_R)) { b.judged = true; sliceCd[key] = 0.08; resolveBombHit(b, hand); return; }
+  }
+}
+
+// ============================== level flow ==============================
+function startLevel() {
+  const lv = LEVELS[selLevel], diff = DIFFS[selDiff];
+  // Practice mode: 0.65x tempo + lenient window; scores are not saved.
+  levelSpeed = prefs.practice ? 0.65 : 1;
+  curTravel = diff.travel / levelSpeed;
+  prefs.level = selLevel; prefs.diff = selDiff; savePrefs();
+  // Reset state
+  score = 0; combo = 0; maxCombo = 0; mult = 1;
+  notesHit = 0; notesTotal = 0;
+  dbgHits = 0; dbgMiss = 0; // TEMPORARY diagnostic counter, per run
+  for (const n of notes) { n.active = false; n.grp.visible = false; }
+  for (const b of bombs) { b.active = false; b.grp.visible = false; }
+  for (const t of texts) { t.life = 0; t.sp.visible = false; }
+  resetHalves();
+  resetVrTrails();
+  bladeInit.left = false; bladeInit.right = false;
+  audioSys.startLevel(lv, levelSpeed);
+  ensureBladeHums(); // hum oscillators (created once; gain-gated in tick)
+  chart = buildChart(lv, selDiff, audioSys.baseTime, levelSpeed);
+  chartIdx = 0;
+  screen = 'playing';
+  perfSessionStart(); // a new play session begins (next levels continue it)
+  perfWarmup = 0.75; // load/compilation hitches are not gameplay frame time
+  resyncDeskBlade(); // stale blade history would fake a supersonic swing
+  levelActive = true;
+  menuPlane.visible = false;
+  laser.visible = false;
+  hud.style.display = 'block';
+  updateScoreboard();
+  drawScoreCell('GET READY', lv.name + ' · ' + diff.label, 'FIRST NOTES INCOMING');
+}
+function endLevel() {
+  levelActive = false;
+  audioSys.stop();
+  hideApproachMarkers();
+  screen = 'results';
+  menuPlane.visible = true;
+  hud.style.display = 'none';
+  // High scores: practice runs never count.
+  lastResult = null;
+  if (!prefs.practice) {
+    const acc = notesTotal > 0 ? Math.round(100 * notesHit / notesTotal) : 0;
+    lastResult = recordScore(selLevel, selDiff, { score, accuracy: acc, maxCombo });
+  }
+  drawResults();
+}
+
+// ============================== desktop mouse blade ==============================
+const mouseNDC = new THREE.Vector2();
+let mouseDown = false, mouseSeen = false;
+const _ray = new THREE.Raycaster();
+const _planeZ = new THREE.Plane(new THREE.Vector3(0, 0, 1), 1.15);
+const _hitP = new THREE.Vector3();
+const TRAIL_N = 26;
+const trailGeo = new THREE.BufferGeometry();
+const trailPos = new Float32Array(TRAIL_N * 3);
+trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3).setUsage(THREE.DynamicDrawUsage));
+const trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
+  color: COL_YEL, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+}));
+trailLine.frustumCulled = false; trailLine.visible = false;
+scene.add(trailLine);
+function mouseBladePoint() {
+  _ray.setFromCamera(mouseNDC, camera);
+  _ray.ray.intersectPlane(_planeZ, _hitP);
+  return _hitP;
+}
+// Re-sync the desktop blade history to the current mouse point. The blade
+// speed gate compares tipCur to tipPrev, and the history is NOT updated
+// while paused or in the menu — so a mouse move across a pause used to look
+// like a supersonic swing on the first playing frame, defeating the gate
+// and letting the RESUME click itself register a phantom slice (desktop
+// check 2026-11-14). Called on level start and on resume.
+function resyncDeskBlade() {
+  if (!mouseSeen) return;
+  mouseBladePoint();
+  tipPrev.desk.copy(_hitP); tipCur.desk.copy(_hitP);
+  basePrev.desk.copy(_hitP); baseCur.desk.copy(_hitP);
+}
+window.addEventListener('pointermove', e => {
+  mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  mouseSeen = true;
+});
+renderer.domElement.addEventListener('pointerdown', e => {
+  // The mouse button arms the blade ONLY if play is already in progress.
+  // A click on a menu button (START / RESUME / settings) must never arm
+  // it: the click that resumes the game used to leave mouseDown=true for
+  // the first playing tick, and the stale blade position from before the
+  // pause defeated the speed gate — a phantom slice (desktop check
+  // 2026-11-14). Read the screen BEFORE the menu tap can change it.
+  mouseDown = (screen === 'playing');
+  mouseNDC.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  mouseSeen = true;
+  audioSys.resume();
+  if (screen !== 'playing' && menuPlane.visible) {
+    _ray.setFromCamera(mouseNDC, camera);
+    menuTapFromRay(_ray.ray.origin, _ray.ray.direction);
+  }
+});
+window.addEventListener('pointerup', () => { mouseDown = false; });
+
+// ============================== sound toggle ==============================
+const muteBtn = document.getElementById('muteBtn');
+function setMuted(m) {
+  audioSys.setMuted(m);
+  prefs.muted = m; savePrefs();
+  muteBtn.textContent = m ? 'SOUND: OFF' : 'SOUND: ON';
+}
+muteBtn.addEventListener('click', () => { audioSys.ensure(); setMuted(!audioSys.muted); });
+window.addEventListener('keydown', e => {
+  if (e.key === 'm' || e.key === 'M') { audioSys.ensure(); setMuted(!audioSys.muted); }
+  else if (e.key === 'c' || e.key === 'C') { debugCollision = !debugCollision; updateDebugViz(); }
+  else if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+    if (screen === 'playing') pauseGame();
+    else if (screen === 'paused') resumeGame();
+  }
+});
+
+// ============================== VR session menu interaction ==============================
+let prevTrigger = false;
+const _aimO = new THREE.Vector3(), _aimD = new THREE.Vector3(), _aimQ = new THREE.Quaternion();
+// Live gamepad button state (any input source) — the edge detectors are
+// SEEDED from this instead of assuming "released" (R3).
+function vrButtonPressed(idx) {
+  const session = renderer.xr.getSession();
+  if (!session) return false;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (gp && gp.buttons && gp.buttons[idx] && gp.buttons[idx].pressed) return true;
+  }
+  return false;
+}
+function pollMenuInput() {
+  if (!renderer.xr.isPresenting || (screen !== 'menu' && screen !== 'results' && screen !== 'paused' && screen !== 'settings')) {
+    laser.visible = false;
+    // R3: seed from LIVE state — a trigger already held when a menu appears
+    // must not read as a fresh edge on the first menu frame.
+    prevTrigger = vrButtonPressed(0);
+    return;
+  }
+  // R4 (X-1 pattern): aim only from a controller whose pose is live. If the
+  // preferred hand lost tracking, the other hand still aims the menu; if
+  // both are lost, hide the laser and skip the tap — never aim from a stale
+  // pose. (Seeds prevTrigger too, so a trigger held through the loss does
+  // not tap on recovery.)
+  const aimCtl = (rightCtl && rightCtl.visible) ? rightCtl : (leftCtl && leftCtl.visible) ? leftCtl : null;
+  if (!aimCtl) { laser.visible = false; prevTrigger = vrButtonPressed(0); return; }
+  aimCtl.getWorldQuaternion(_aimQ);
+  _aimO.setFromMatrixPosition(aimCtl.matrixWorld);
+  _aimD.set(0, 0, -1).applyQuaternion(_aimQ);
+  const lp = laserGeo.attributes.position.array;
+  lp[0] = _aimO.x; lp[1] = _aimO.y; lp[2] = _aimO.z;
+  lp[3] = _aimO.x + _aimD.x * 6; lp[4] = _aimO.y + _aimD.y * 6; lp[5] = _aimO.z + _aimD.z * 6;
+  laserGeo.attributes.position.needsUpdate = true;
+  laser.visible = true;
+  // Trigger edge -> menu tap
+  const pressed = vrButtonPressed(0);
+  if (pressed && !prevTrigger) menuTapFromRay(_aimO, _aimD);
+  prevTrigger = pressed;
+}
+// VR pause button: B/Y (gamepad buttons[5]) edge toggles pause while playing
+// or paused. A/X (buttons[4]) is left untouched.
+let prevPauseBtn = false;
+function pollPauseButton() {
+  const pressed = vrButtonPressed(5);
+  if (pressed && !prevPauseBtn) {
+    if (screen === 'playing') pauseGame();
+    else if (screen === 'paused') resumeGame();
+  }
+  prevPauseBtn = pressed;
+}
+
+// ============================== ENTER VR flow ==============================
+const vrBtn = document.getElementById('vrBtn');
+const statusEl = document.getElementById('status');
+const panel = document.getElementById('panel');
+let xrSupported = false;
+function setStatus(msg) { statusEl.textContent = msg; }
+function hidePanel() { panel.style.display = 'none'; }
+function showPanel() { panel.style.display = 'flex'; }
+// NOTE: there is deliberately NO pixel-ratio change on session start/end.
+// In r160 setPixelRatio() cannot change XR resolution after setSession (the
+// layer already exists) — the old xrPixelDown()/xrPixelUp() pair was inert
+// and only produced console warnings. XR resolution is fixed at layer
+// creation; mid-session the valve sheds work via fixed foveation instead.
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrSupported = ok;
+    if (!ok) {
+      vrBtn.textContent = 'START DESKTOP PREVIEW';
+      setStatus('WebXR VR is not available in this browser. For the full experience, open this page in the Quest Browser.');
+    }
+  }).catch(() => { xrSupported = false; });
+} else {
+  vrBtn.textContent = 'START DESKTOP PREVIEW';
+  setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
+}
+vrBtn.addEventListener('click', async () => {
+  audioSys.resume();
+  if (!xrSupported) { hidePanel(); menuPlane.visible = true; screen = 'menu'; drawMenu(); return; }
+  vrBtn.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    hidePanel();
+    menuPlane.visible = true;
+    perfValve.reset();
+    bladeInit.left = false; bladeInit.right = false; // stale blade history would fake a velocity spike
+    prevTrigger = vrButtonPressed(0); prevPauseBtn = vrButtonPressed(5); // R3: seed the menu/pause edges from live state on session start
+    // Re-entering after an auto-pause restores the pause menu, not the menu.
+    if (screen === 'paused') { drawPause(); }
+    else { screen = 'menu'; drawMenu(); audioSys.resume(); }
+    session.addEventListener('end', () => { perfSessionFlush(); if (levelActive && screen === 'playing') pauseGame(); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+  } catch (err) {
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      hidePanel();
+      menuPlane.visible = true;
+      perfValve.reset();
+      bladeInit.left = false; bladeInit.right = false; // stale blade history would fake a velocity spike
+      prevTrigger = vrButtonPressed(0); prevPauseBtn = vrButtonPressed(5); // R3: seed the menu/pause edges from live state on session start
+      if (screen === 'paused') { drawPause(); }
+      else { screen = 'menu'; drawMenu(); audioSys.resume(); }
+      session.addEventListener('end', () => { perfSessionFlush(); if (levelActive && screen === 'playing') pauseGame(); showPanel(); vrBtn.disabled = false; });
+    } catch (err2) {
+      setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
+      vrBtn.disabled = false;
+      hidePanel();
+      // A paused run whose VR restart failed falls back to the menu cleanly.
+      if (screen === 'paused') quitToMenu();
+      else { menuPlane.visible = true; screen = 'menu'; drawMenu(); }
+    }
+  }
+});
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ============================== main loop ==============================
+const clock = new THREE.Clock();
+function tick() {
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  const presenting = renderer.xr.isPresenting;
+  // While paused the simulation clock is frozen (sdt = 0): notes hold their
+  // audio-clock positions, particles/texts/flash hold still, and the beat
+  // pulse stops decaying. The render loop itself keeps running so the
+  // spatial pause menu stays interactive.
+  const frozen = (screen === 'paused');
+  const sdt = frozen ? 0 : dt;
+  audioSys.tick();
+  // Perf measurement hygiene: the valve EMA tracks ACTIVE PLAY only. Menu,
+  // paused, and warm-up frames are not gameplay frame time — feeding them
+  // in lets load hitches and menu rendering move the valve and mislabel the
+  // readout. While paused the EMA holds its last gameplay value, so the
+  // pause screen reports what play actually cost. Single frames over 100ms
+  // (background-tab return, OS hitch) are ignored as unrepresentative.
+  if (perfWarmup > 0) perfWarmup -= dt;
+  else if (screen === 'playing' && rawDt < 0.1) { perfValve.update(dt); perfSessionTick(dt); }
+  // FQ1 ring buffer: raw per-frame times during active play, post-warm-up.
+  // Unlike the valve feed above, big hitch frames (>100 ms) ARE recorded —
+  // the distribution must show real stalls, not hide them.
+  if (screen === 'playing' && perfWarmup <= 0) perfFrameRecord(rawDt * 1000);
+  if (!frozen) {
+    beatPulse = Math.max(0, beatPulse - dt * 2.2);
+    fireDueBeatPulses(); // R1: pulse on the audio clock, not the scheduler
+  }
+
+  // V2: zero the rig height offset in VR (local-floor already reports true
+  // head height); ride the strike zone on the smoothed live head Y.
+  heightHolder.position.y = presenting ? 0 : 1.6;
+  camera.getWorldPosition(_headV);
+  smoothHeadY += (_headV.y - smoothHeadY) * Math.min(1, dt * 5);
+  strikeFrame.position.y = smoothHeadY - 1.3;
+
+  // Beat-reactive stage
+  grid.material.opacity = 0.3 + 0.45 * beatPulse;
+  stageL.intensity = 20 + 45 * beatPulse;
+  stageR.intensity = 20 + 45 * beatPulse;
+  hemiLight.intensity = 0.8 + 0.2 * beatPulse;
+  for (const pm of pillarMats) pm.opacity = 0.55 + 0.45 * beatPulse;
+  for (let i = 0; i < towerGlows.length; i++) {
+    const tg = towerGlows[i];
+    const s = 1 + beatPulse * 0.35;
+    tg.scale.set(tg.userData.base * s, tg.userData.base * s, 1);
+  }
+
+  pollMenuInput();
+  if (presenting) pollPauseButton();
+
+  // Blade visibility + tip tracking
+  bladeL.visible = presenting && !!leftCtl;
+  bladeR.visible = presenting && !!rightCtl;
+  if (presenting) {
+    if (leftCtl) {
+      tipPrev.left.copy(tipCur.left); controllerTip(leftCtl, tipCur.left);
+      basePrev.left.copy(baseCur.left); controllerBase(leftCtl, baseCur.left);
+      trackBlade('left', dt);
+      // Round 3 (X-1): when the pose is null the target-ray Group goes
+      // invisible but its matrix freezes at the last good pose. Hold
+      // bladeInit false AFTER trackBlade ran — the flag must still be
+      // false on the recovery frame, so trackBlade's init branch zeroes
+      // the velocity instead of reading the pose jump as a supersonic
+      // swing (same class of bug resyncDeskBlade fixes for desktop); zero
+      // this frame's velocity outright too. The loss notice fires once
+      // per loss (latched), not every frame.
+      if (!leftCtl.visible) {
+        bladeInit.left = false;
+        bladeVel.left.set(0, 0, 0);
+        if (!trackLost.left) { trackLost.left = true; if (screen === 'playing') floatText('LEFT — TRACKING LOST', '#ffaa00', -0.6, 1.7, HIT_Z); }
+      } else trackLost.left = false;
+      pushVrTrail(vrTrailL, baseCur.left, tipCur.left);
+      vrTrailL.material.opacity = 0.9 * Math.min(1, vrBladeSpeed('left') / 1.5);
+    }
+    if (rightCtl) {
+      tipPrev.right.copy(tipCur.right); controllerTip(rightCtl, tipCur.right);
+      basePrev.right.copy(baseCur.right); controllerBase(rightCtl, baseCur.right);
+      trackBlade('right', dt);
+      // Round 3 (X-1): same hold as the left hand (see the comment above).
+      if (!rightCtl.visible) {
+        bladeInit.right = false;
+        bladeVel.right.set(0, 0, 0);
+        if (!trackLost.right) { trackLost.right = true; if (screen === 'playing') floatText('RIGHT — TRACKING LOST', '#ffaa00', 0.6, 1.7, HIT_Z); }
+      } else trackLost.right = false;
+      pushVrTrail(vrTrailR, baseCur.right, tipCur.right);
+      vrTrailR.material.opacity = 0.9 * Math.min(1, vrBladeSpeed('right') / 1.5);
+    }
+    vrTrailL.visible = screen === 'playing' && !!leftCtl && perfValve.trailsOn;
+    vrTrailR.visible = screen === 'playing' && !!rightCtl && perfValve.trailsOn;
+    if (screen === 'playing') {
+      // Single-hand mode: either blade slices any color.
+      const handL = prefs.singleHand ? 'both' : 'left';
+      const handR = prefs.singleHand ? 'both' : 'right';
+      // Round 3 (X-1): a hand slices only while its pose is live — the
+      // blade is hidden while tracking is lost (it is a child of the
+      // invisible target-ray Group), so a stale-pose slice would score a
+      // hit the player cannot see. The bladeInit hold above also makes
+      // the recovery frame safe (velocity re-zeroed, no phantom swing).
+      if (leftCtl && leftCtl.visible) trySlice('left', handL, dt);
+      if (rightCtl && rightCtl.visible) trySlice('right', handR, dt);
+    }
+    updateAudioListener();
+    updateBladeHums();
+    maybeWhoosh('left');
+    maybeWhoosh('right');
+  } else if (screen === 'playing' && mouseSeen) {
+    tipPrev.desk.copy(tipCur.desk);
+    mouseBladePoint();
+    tipCur.desk.copy(_hitP);
+    // V3: desktop blade is a point — capsule degenerates to a tip sphere
+    basePrev.desk.copy(baseCur.desk);
+    baseCur.desk.copy(tipCur.desk);
+    trailLine.visible = mouseDown;
+    if (mouseDown) {
+      // Shift-register trail history, newest at index 0
+      for (let i = TRAIL_N - 1; i > 0; i--) {
+        trailPos[i * 3] = trailPos[(i - 1) * 3];
+        trailPos[i * 3 + 1] = trailPos[(i - 1) * 3 + 1];
+        trailPos[i * 3 + 2] = trailPos[(i - 1) * 3 + 2];
+      }
+      trailPos[0] = _hitP.x; trailPos[1] = _hitP.y; trailPos[2] = _hitP.z;
+      trailGeo.attributes.position.needsUpdate = true;
+      trySlice('desk', 'both', dt);
+    }
+  } else {
+    trailLine.visible = false;
+  }
+  for (const k of ['left', 'right', 'desk']) sliceCd[k] = Math.max(0, sliceCd[k] - dt);
+  updateDebugViz(); // no-op visuals when debug is off (all debug objects hidden)
+
+  // Level simulation (frozen while paused)
+  if (levelActive && audioSys.ctx && !frozen) {
+    const now = audioSys.now;
+    const travel = curTravel;
+    // Spawn anything whose hit time is within one travel window
+    while (chartIdx < chart.length && chart[chartIdx].hitTime - now <= travel) {
+      const e = chart[chartIdx];
+      if (e.hitTime > now - 0.5) spawnNote(e); // skip notes we fell too far behind on
+      chartIdx++;
+    }
+    // Move notes/bombs; misses break combo (never end the run)
+    let minTLeft = Infinity; // L3: time until the nearest active note arrives
+    for (const n of notes) {
+      if (!n.active) continue;
+      // Audio-clock positioning: depth comes from the music clock, so a
+      // hitched frame can never desync notes from the beat — and pausing
+      // (which suspends the audio clock) freezes notes exactly in place.
+      n.z = HIT_Z - (n.hitTime - now) * n.vz;
+      n.grp.position.z = n.z;
+      if (!n.judged) { const tl = n.hitTime - now; if (tl < minTLeft) minTLeft = tl; } // L3
+      n.nglow.visible = perfValve.glowsOn;
+      const pop = clamp((n.z - SPAWN_Z) / 2, 0, 1);
+      const s = 0.6 + 0.4 * pop;
+      n.grp.scale.set(s, s, s);
+      if (n.z >= HIT_Z + zoneZ() + 0.05) { // R6: MISS boundary from the active zone, not a fixed 0.65 — lenient promises ±0.85 m, so its late window is now 0.90 m
+        n.active = false; n.grp.visible = false;
+        combo = 0; applyMult();
+        dbgMiss++; // TEMPORARY diagnostic counter
+        floatText('MISS', '#8a8f9e', n.x, n.y + 0.35, HIT_Z);
+        sfxMiss();
+        updateScoreboard();
+      }
+    }
+    for (const b of bombs) {
+      if (!b.active) continue;
+      b.z = HIT_Z - (b.hitTime - now) * b.vz;
+      b.grp.position.z = b.z;
+      b.spin += dt * 3;
+      b.ring.rotation.x = b.spin; b.ring.rotation.y = b.spin * 0.7;
+      const pulse = 1 + Math.sin(now * 10) * 0.15;
+      b.ring.scale.set(pulse, pulse, 1);
+      if (b.z >= HIT_Z + 0.45) { b.active = false; b.grp.visible = false; }
+    }
+    // L3: note emissive approach pulse — the shared note materials brighten
+    // (0.55 → 0.9) as the nearest active note approaches the hit plane, so
+    // notes brighten as they arrive. Tuning only: a few float writes per
+    // frame, driven by the same hitTime - now the approach markers use.
+    const approachK = minTLeft === Infinity ? 0 : 1 - clamp(Math.max(0, minTLeft) / 1.2, 0, 1);
+    const noteEI = 0.55 + 0.35 * approachK;
+    noteMats.left.emissiveIntensity = noteEI;
+    noteMats.right.emissiveIntensity = noteEI;
+    updateApproachMarkers(now);
+    // Track end -> results (no fail state ever)
+    if (now > audioSys.endTime + 1.6) endLevel();
+  } else if (!levelActive) {
+    // L3: no level running — notes are invisible, but keep the shared
+    // materials at their resting emissive (a paused run holds its pulse).
+    noteMats.left.emissiveIntensity = 0.55;
+    noteMats.right.emissiveIntensity = 0.55;
+  }
+
+  // Particles (frozen while paused: sdt = 0 holds everything in place)
+  let pDirty = false;
+  for (let i = 0; i < PMAX; i++) {
+    if (pLife[i] <= 0) continue;
+    pLife[i] -= sdt;
+    pPos[i * 3] += pVel[i * 3] * sdt;
+    pPos[i * 3 + 1] += pVel[i * 3 + 1] * sdt;
+    pPos[i * 3 + 2] += pVel[i * 3 + 2] * sdt;
+    pVel[i * 3 + 1] -= 3 * sdt;
+    if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; }
+    pDirty = true;
+  }
+  if (pDirty) pGeo.attributes.position.needsUpdate = true;
+
+  // Ring flashes
+  updateRingFlashes(sdt);
+
+  // Cube split halves
+  updateHalves(sdt);
+
+  // Floating text
+  for (const t of texts) {
+    if (t.life <= 0) continue;
+    t.life -= sdt;
+    t.sp.position.y += sdt * 0.7;
+    t.sp.material.opacity = clamp(t.life / 0.8, 0, 1);
+    if (t.life <= 0) t.sp.visible = false;
+  }
+
+  // Flash decay
+  if (flashAmt > 0) {
+    flashAmt = Math.max(0, flashAmt - sdt * 2.4);
+    flashEl.style.opacity = String(clamp(flashAmt, 0, 0.9));
+    flashQuad.material.opacity = clamp(flashAmt, 0, 0.85);
+    flashQuad.visible = flashAmt > 0; // R8: hide the quad once the flash has decayed
+  }
+
+  // Scoreboard: VR cell while presenting, DOM cell on desktop
+  scoreCell.visible = presenting && screen === 'playing';
+  // Comfort vignette + frame-time readout follow their toggles
+  vignette.visible = presenting && screen === 'playing' && prefs.vignette;
+  const showPerfCell = presenting && (prefs.showPerf || debugCollision);
+  perfCell.visible = showPerfCell;
+  if (showPerfCell && clock.elapsedTime > perfDrawAt) { drawPerfCell(); perfDrawAt = clock.elapsedTime + 0.5; }
+
+  renderer.render(scene, camera);
+  // FQ1: draw-call sample for the perf log (gameplay only; info counts both
+  // eyes while presenting — see the export notes).
+  if (perfSession.active) { lastDrawCalls = renderer.info.render.calls; if (lastDrawCalls > maxDrawCalls) maxDrawCalls = lastDrawCalls; }
+  if (!window.__rsRendered) window.__rsRendered = true; // boot watchdog
+}
+renderer.setAnimationLoop(tick);
+
+// Prototype boot: apply saved prefs that affect static objects.
+applyTextSize();
+muteBtn.textContent = prefs.muted ? 'SOUND: OFF' : 'SOUND: ON';
+</script>
+</body>
+</html>
