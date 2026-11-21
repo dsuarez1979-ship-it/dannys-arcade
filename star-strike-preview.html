@@ -84,12 +84,22 @@
      blocks menu clicks.
      D2c: top 52px, BELOW the SOUND button (top 12px, ~34px tall) — at
      top 12px the pill sat exactly on the button and its text showed
-     through. The DOM #hud is top-left, so the right side is clear. */
+     through. The DOM #hud is top-left, so the right side is clear.
+     FQ1: two lines now (build ID + distribution) — white-space:pre-line
+     so the \n in the text breaks the line; text-align:right keeps the
+     pill hugging the right edge. Always visible (no ?debug=perf gate) —
+     it is the build-ID + frame-time instrument for headset sessions. */
   #perf {
     position:fixed; right:12px; top:52px; z-index:30; display:none;
-    color:#8fb8ff; font:700 13px/1.5 monospace; letter-spacing:0.5px; white-space:nowrap;
+    color:#8fb8ff; font:700 13px/1.5 monospace; letter-spacing:0.5px; white-space:pre-line; text-align:right;
     background:rgba(2,8,24,.78); border:1px solid #27e8ff; border-radius:8px; padding:6px 10px;
     pointer-events:none;
+  }
+  /* FQ1: perf-log export button (menu, under the last-session line). */
+  #exportPerfBtn {
+    cursor:pointer; color:#bfeaff; background:rgba(10,16,38,.6);
+    border:1px solid rgba(39,232,255,.6); border-radius:10px; padding:8px 18px;
+    font-family:inherit; font-size:13px; font-weight:700; letter-spacing:1px; margin-top:6px;
   }
   #banner {
     position:fixed; left:50%; top:16%; transform:translateX(-50%); z-index:6;
@@ -134,13 +144,17 @@
   @media (max-width:520px) {
     #hud { font-size:12px; }
   }
+
+  #vrBtn, #startBtn { max-inline-size: 100%; min-block-size: 44px; margin-inline: auto; }
+  #vrBtn:focus-visible, #startBtn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 </style>
 <script type="importmap">
 { "imports": {
-  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  "three": "./vendor/three/three.module.js",
+  "three/addons/": "./vendor/three/addons/"
 } }
 </script>
+<meta name="arcade-revision" content="CR1-preview">
 </head>
 <body>
 
@@ -178,10 +192,12 @@
       <label>Secondary <select id="setSecondary"><option value="grip">Grip</option><option value="button">B / Y</option><option value="trigger">Left trigger</option><option value="double">Double-tap trigger</option></select></label>
     </div>
     <p class="small" id="perfLast" style="color:#9fd8ff">Performance: no session logged yet.</p>
+    <p class="small" id="buildId" style="color:#8fb8ff"></p>
+    <button id="exportPerfBtn">EXPORT PERF LOG</button>
     <details id="aboutDetails">
       <summary>About · controls · how to play</summary>
       <p><strong>Story:</strong> Commander Nova Vega leads the last fighter wing of the United Earth Fleet. You are the wing's ace pilot — the Meridian's escort, flying a Kestrel-class strike fighter.</p>
-      <p><strong>VR controls:</strong> Left stick thrust/strafe · Right stick yaw/pitch · Right trigger fire · Grip secondary weapon (remappable) · Left trigger barrel roll · B/Y brake · A/X cycle target · Stick click recenter heading · Hold stick click pause. Pause: A/X toggles sound, grip restarts the run, thrust selects a setting and yaw changes it.</p>
+      <p><strong>VR controls:</strong> Left stick thrust/strafe · Right stick yaw/pitch · Right trigger fire · Grip secondary weapon (remappable) · B/Y brake · A/X cycle target · Hold stick click to pause. Pause: A/X toggles sound, grip restarts the run, thrust selects a setting and yaw changes it.</p>
       <p><strong>Desktop:</strong> W/S thrust · A/D strafe · Mouse yaw/pitch · Click/Space fire · Q secondary · Shift barrel roll · B brake · Tab cycle target · N Nova · M mute · P pause · R recenter (restart while paused).</p>
       <p><strong>Weapons:</strong> Pulse Lasers, Scatter Cannon, Nova Torpedoes — plus Nova missiles from the Kestrel on demand. Three upgrade tiers: damage, fire rate, and heat (reheat + cooling).</p>
       <p><strong>Difficulty:</strong> waves escalate enemy speed and numbers; every 5th wave the Ravager carrier attacks (each appearance adds a pattern). Your hull refills over time, and there is no game over — the run always continues.</p>
@@ -233,6 +249,11 @@ const rand = (a, b) => a + Math.random() * (b - a);
 // (same pattern as Longshot/Marsh Shot).
 const debugParams = new URLSearchParams(location.search).get('debug') || '';
 const perfDebug = debugParams.includes('perf');
+// FQ1 build identifier (Finished-Quality Program, directive §1): shown in
+// the menu footer + the perf cell + the exported perf log, so Danny can
+// confirm exactly which build he is testing. Bump on every FQ revision.
+const BUILD_ID = 'STARSTRIKE-CR4-20261121';
+{ const _b = document.getElementById('buildId'); if (_b) _b.textContent = 'Build ' + BUILD_ID; }
 // 2.0 (Phase 3): ?debug=aim draws the TRUE muzzle→aim line (red) plus an
 // aim-point marker — the alignment-rule diagnostic (Standard §5). Dev only,
 // off in normal play; see updateAimDebug() in the main loop.
@@ -255,6 +276,32 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+
+// Small, deterministic surface detail. Linear color space also lets the map drive roughness.
+const crSurface = (() => {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  let seed = 82741;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      const grain = seed >>> 27;
+      const band = Math.round(12 * Math.sin(y * Math.PI / 16));
+      const value = 204 + band + grain;
+      const offset = (y * size + x) * 4;
+      data[offset] = data[offset + 1] = data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+})();
+
 scene.background = new THREE.Color(0x040110);
 scene.fog = new THREE.Fog(0x040110, 60, 260);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 1200);
@@ -312,7 +359,7 @@ const shootTex = new THREE.CanvasTexture(shootCanvas);
 const shootMat = new THREE.MeshBasicMaterial({ map: shootTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide });
 const shootStar = new THREE.Mesh(new THREE.PlaneGeometry(14, 0.5), shootMat);
 shootStar.visible = false; shootStar.frustumCulled = false; scene.add(shootStar);
-let shootTimer = rand(6, 12), shootT = 0, shootDur = 0, shootVX = 0, shootVY = 0;
+let shootTimer = 5 * rand(6, 12), shootT = 0, shootDur = 0, shootVX = 0, shootVY = 0;
 function updateShootingStar(dt) {
   if (!shootStar.visible) {
     shootTimer -= dt;
@@ -327,7 +374,7 @@ function updateShootingStar(dt) {
   }
   shootT += dt;
   const t = shootT / shootDur;
-  if (t >= 1) { shootStar.visible = false; shootTimer = rand(9, 16); return; }
+  if (t >= 1) { shootStar.visible = false; shootTimer = 5 * rand(9, 16) + 4 * shootDur; return; }
   shootStar.position.x += shootVX * dt;
   shootStar.position.y += shootVY * dt;
   shootMat.opacity = Math.min(t * 3, 1) * (1 - t) * 0.9;
@@ -412,7 +459,7 @@ const MAT = {
   rail: new THREE.MeshBasicMaterial({ color: 0xaefcff, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9, toneMapped: false, fog: false }),
   gold: new THREE.MeshBasicMaterial({ color: 0xffc845, toneMapped: false }),
   green: new THREE.MeshStandardMaterial({ color: 0x33ff88, emissive: 0x0a8833, emissiveIntensity: 1.6 }),
-  bossHull: new THREE.MeshStandardMaterial({ color: 0x372059, emissive: 0x9d5cff, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.4 }),
+  bossHull: new THREE.MeshStandardMaterial({ color: 0x3c4255, emissive: 0x533c69, emissiveIntensity: 0.19, metalness: 0.62, roughness: 0.58, roughnessMap: crSurface }),
   bossStripe: new THREE.MeshBasicMaterial({ color: 0xff2e88, toneMapped: false }),
   navRed: new THREE.MeshBasicMaterial({ color: 0xff2222, toneMapped: false }),
   navGreen: new THREE.MeshBasicMaterial({ color: 0x22ff66, toneMapped: false }),
@@ -421,7 +468,7 @@ const MAT = {
   // maps land on these when the files exist — see loadMetalPlate below);
   // merged multi-tone parts use weaponParts with vertex colors (see
   // mergeGeos). Emissive cores/lenses are tone-mapping-exempt neon.
-  weaponMetal: new THREE.MeshStandardMaterial({ color: 0x9aa4b5, metalness: 0.85, roughness: 0.38 }),
+  weaponMetal: new THREE.MeshStandardMaterial({ color: 0x9aa4b5, metalness: 0.72, roughness: 0.52, roughnessMap: crSurface }),
   weaponDark: new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.7, roughness: 0.5 }),
   weaponParts: new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 0.8, roughness: 0.4 }),
   chargeCore: new THREE.MeshStandardMaterial({ color: 0x66eaff, emissive: 0x27e8ff, emissiveIntensity: 2.0, metalness: 0.1, roughness: 0.3 }),
@@ -499,6 +546,57 @@ function mergeGeos(parts) {
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return out;
+}
+// ---- runtime static-mesh merge (FQ1 draw-call optimization) ----
+// Merges the STATIC meshes of a cloned GLB scene by material object:
+// same material + same parent space = one draw call instead of N.
+// Geometry is identical (mergeGeos concatenates the original vertices
+// with baked transforms) and materials are untouched, so the merged mesh
+// renders pixel-identically to the originals — no visible content is
+// removed, nothing is re-textured.
+//   root: the cloned scene/group to merge inside (NEVER the cached asset
+//     in blenderKit — clones share the asset's geometry/materials, and
+//     hiding an original inside the cache would hide it everywhere).
+//   exclude: mesh/subtree NAMES to leave alone — animated parts (gimbals,
+//     barrels, cores, doors, slides, pivots), visibility-toggled parts
+//     (emitters, damage components), and rotating subtrees (ring_spin).
+//     A mesh is skipped if its own name OR any ancestor's name (down to
+//     root) is in the set.
+// Originals are HIDDEN (visible=false), never removed: getObjectByName
+// lookups, damage-registry references, and collider bindings keep
+// working. Merged meshes are tagged userData.mergedRuntime so
+// disposeEnvGroup can free their fresh geometry on env switch (the
+// shared GLB geometry/materials are never disposed).
+// Returns the number of draw calls saved. Wiring-time only.
+// NOTE: this helper sits between mergeGeos and _partMatrix on purpose —
+// environment-tests.js extracts the mergeGeos.._partMatrix slice, and
+// the env section (buildBlenderStation) calls it.
+function mergeStaticMeshes(root, exclude) {
+  const excluded = new Set(exclude || []);
+  root.updateMatrixWorld(true);
+  const invRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const byMat = new Map();
+  const _rel = new THREE.Matrix4();
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    let p = o, skip = false;
+    while (p && p !== root) { if (excluded.has(p.name)) { skip = true; break; } p = p.parent; }
+    if (skip) return;
+    if (!byMat.has(o.material)) byMat.set(o.material, []);
+    _rel.copy(invRoot).multiply(o.matrixWorld);
+    byMat.get(o.material).push({ mesh: o, matrix: _rel.clone() });
+  });
+  let saved = 0;
+  for (const [mat, parts] of byMat) {
+    if (parts.length < 2) continue;
+    const merged = new THREE.Mesh(mergeGeos(parts.map((pt) => ({ geo: pt.mesh.geometry, matrix: pt.matrix }))), mat);
+    merged.name = 'Merged_' + (mat.name || 'static');
+    merged.userData.mergedRuntime = true;
+    root.add(merged);
+    for (const pt of parts) pt.mesh.visible = false;
+    saved += parts.length - 1;
+  }
+  return saved;
 }
 // Matrix helper for mergeGeos parts: compose a transform from a translation
 // plus an optional Euler rotation (radians) and scale. Boot-time only.
@@ -1056,45 +1154,167 @@ function skyboxTextureFor(palette) {
   tex.userData.envOwned = true; // disposed on env switch
   return tex;
 }
-// Starfield shell: vertex-colored points, fog-exempt, tone-mapping-exempt.
-// Returns the Points (the caller adds it to the star group, which follows
-// the camera — stars are infinitely far, so they never get closer).
-function makeStars(count, radius, size) {
-  const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
+// Starfield shell (FQ1 draw-call optimization): ALL star layers in ONE
+// Points (was one Points per layer — 4 draw calls, 2 in the nebula).
+// A per-star `size` attribute keeps every layer's exact pixel size, so
+// the merged shell is pixel-identical to the old layers: same positions,
+// same vertex colors, same sizes, same 0.95 opacity, no fog, no tone
+// mapping. The fragment applies linearToOutputTexel like the built-in
+// PointsMaterial does, so the output conversion matches too.
+// (ShaderMaterial note: `color` is declared by three's prefix when
+// vertexColors is set; `size` is our own attribute — no name clash.)
+const STAR_VERT = [
+  'attribute float size;',
+  'varying vec3 vColor;',
+  'void main() {',
+  '  vColor = color;',
+  '  vec4 mv = modelViewMatrix * vec4( position, 1.0 );',
+  '  gl_PointSize = size;',
+  '  gl_Position = projectionMatrix * mv;',
+  '}',
+].join('\n');
+const STAR_FRAG = [
+  'varying vec3 vColor;',
+  'void main() {',
+  '  gl_FragColor = linearToOutputTexel( vec4( vColor, 0.95 ) );',
+  '}',
+].join('\n');
+// layers: [{ count, size }] — the env config's star layers. Returns the
+// Points (the caller adds it to the star group, which follows the camera
+// — stars are infinitely far, so they never get closer).
+function makeStarfield(layers, radius) {
+  let total = 0;
+  for (const l of layers) total += l.count;
+  const pos = new Float32Array(total * 3), col = new Float32Array(total * 3), sizes = new Float32Array(total);
   const palette = [new THREE.Color(0xffffff), new THREE.Color(0xbfeaff), new THREE.Color(0xffd9ec), new THREE.Color(0x9fd8ff)];
   const c = new THREE.Color();
-  for (let i = 0; i < count; i++) {
-    const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1)), r = radius;
-    pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
-    pos[i * 3 + 1] = r * Math.cos(ph);
-    pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
-    c.copy(palette[i % palette.length]).multiplyScalar(rand(0.35, 1));
-    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  let o = 0;
+  for (const s of layers) {
+    for (let i = 0; i < s.count; i++) {
+      const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1)), r = radius;
+      pos[o * 3] = r * Math.sin(ph) * Math.cos(th);
+      pos[o * 3 + 1] = r * Math.cos(ph);
+      pos[o * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+      c.copy(palette[i % palette.length]).multiplyScalar(rand(0.35, 1));
+      col[o * 3] = c.r; col[o * 3 + 1] = c.g; col[o * 3 + 2] = c.b;
+      sizes[o] = s.size;
+      o++;
+    }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const m = new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false, fog: false, toneMapped: false });
+  g.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  const m = new THREE.ShaderMaterial({
+    vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
+    vertexColors: true, transparent: true, depthWrite: false,
+  });
   m.userData.envOwned = true;
   const p = new THREE.Points(g, m);
   p.frustumCulled = false;
   return p;
 }
-// Nebula sprite (canvas radial gradient). Returns the sprite; the caller
-// sets opacity/position and adds it.
-function nebulaSprite(hex, size) {
+// Nebula field texture (FQ1): ONE shared radial gradient (white — the
+// per-nebula color comes from instanceColor). Built with the exact
+// gradient the old per-sprite canvases used (256², inner radius 8,
+// opaque center → transparent edge), so the merged field reproduces
+// each sprite's falloff exactly. No colorSpace set — like the old
+// canvases (sampled raw).
+let nebulaTex = null;
+function getNebulaTexture() {
+  if (nebulaTex) return nebulaTex;
   const c = document.createElement('canvas'); c.width = c.height = 256;
   const x = c.getContext('2d');
   const grd = x.createRadialGradient(128, 128, 8, 128, 128, 128);
-  grd.addColorStop(0, hex); grd.addColorStop(1, 'rgba(0,0,0,0)');
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
   x.fillStyle = grd; x.fillRect(0, 0, 256, 256);
-  const tex = new THREE.CanvasTexture(c);
-  tex.userData.envOwned = true;
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.5, depthWrite: false, toneMapped: false, fog: false });
+  nebulaTex = new THREE.CanvasTexture(c);
+  return nebulaTex;
+}
+// Nebula field (FQ1 draw-call optimization): ONE InstancedMesh of
+// billboarded planes (was one Sprite per nebula — 5–12 draw calls).
+// Per-instance color + opacity reproduce each sprite exactly: the
+// fragment does the SpriteMaterial math (rgb = color × texel,
+// alpha = texel alpha × opacity, normal blending) plus the same
+// linearToOutputTexel conversion. Colors are set with setHex on the raw
+// hex number (no sRGB→linear conversion) because the old path baked
+// the hex into a NoColorSpace canvas — sampled raw. The planes billboard
+// toward the camera every frame (same pattern as the enemy halo IM).
+// Drift: nebulaData.pos entries 0 and 3 are the drifting nebulas — the
+// upkeep block moves them via the neb1/neb4 records, and the sync reads
+// the positions each frame.
+const NEB_VERT = [
+  'attribute float instanceOpacity;',
+  'varying vec2 vUv;',
+  'varying vec3 vColor;',
+  'varying float vOpacity;',
+  'void main() {',
+  '  vUv = uv;',
+  '  vColor = instanceColor;',
+  '  vOpacity = instanceOpacity;',
+  '  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4( position, 1.0 );',
+  '}',
+].join('\n');
+const NEB_FRAG = [
+  'uniform sampler2D map;',
+  'varying vec2 vUv;',
+  'varying vec3 vColor;',
+  'varying float vOpacity;',
+  'void main() {',
+  '  vec4 tex = texture2D( map, vUv );',
+  '  gl_FragColor = linearToOutputTexel( vec4( vColor * tex.rgb, tex.a * vOpacity ) );',
+  '}',
+].join('\n');
+let nebulaIM = null; // the field's InstancedMesh (1 draw call)
+let nebulaData = null; // { pos: Vector3[], size: number[], startZ: number[] }
+function buildNebulaField(list) {
+  nebulaData = { pos: [], size: [], startZ: [] };
+  for (const n of list) {
+    nebulaData.pos.push(new THREE.Vector3(n.pos[0], n.pos[1], n.pos[2]));
+    nebulaData.size.push(n.size);
+    nebulaData.startZ.push(n.pos[2]);
+  }
+  const geo = new THREE.PlaneGeometry(1, 1);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { map: { value: getNebulaTexture() } },
+    vertexShader: NEB_VERT, fragmentShader: NEB_FRAG,
+    transparent: true, depthWrite: false,
+  });
   mat.userData.envOwned = true;
-  const spr = new THREE.Sprite(mat);
-  spr.scale.set(size, size, 1);
-  return spr;
+  nebulaIM = new THREE.InstancedMesh(geo, mat, list.length);
+  nebulaIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  nebulaIM.frustumCulled = false;
+  const col = new THREE.Color();
+  const opac = new Float32Array(list.length);
+  list.forEach((n, i) => {
+    // Raw hex numbers (setHex, no color-space conversion) — matches the
+    // old baked-canvas path, which sampled the hex bytes raw.
+    nebulaIM.setColorAt(i, col.setHex(parseInt(String(n.hex).replace('#', ''), 16)));
+    opac[i] = n.opacity;
+  });
+  geo.setAttribute('instanceOpacity', new THREE.InstancedBufferAttribute(opac, 1));
+  nebulaIM.instanceColor.needsUpdate = true;
+  envGroup.add(nebulaIM);
+  // Drift records: the upkeep block moves neb1/neb4 by .position.z and
+  // wraps at userData.startZ — the records share the Vector3 objects
+  // the sync reads, so the drift flows through unchanged.
+  neb1 = list.length > 0 ? { position: nebulaData.pos[0], userData: { startZ: nebulaData.startZ[0] } } : null;
+  neb4 = list.length > 3 ? { position: nebulaData.pos[3], userData: { startZ: nebulaData.startZ[3] } } : null;
+  syncNebulaInstances();
+}
+const _nebQ = new THREE.Quaternion();
+const _nebS = new THREE.Vector3();
+const _nebM = new THREE.Matrix4();
+function syncNebulaInstances() {
+  if (!nebulaIM || !nebulaData) return;
+  camera.getWorldQuaternion(_nebQ);
+  for (let i = 0; i < nebulaData.pos.length; i++) {
+    _nebS.setScalar(nebulaData.size[i]);
+    _nebM.compose(nebulaData.pos[i], _nebQ, _nebS);
+    nebulaIM.setMatrixAt(i, _nebM);
+  }
+  nebulaIM.instanceMatrix.needsUpdate = true;
 }
 function bandedPlanetTexture(colors, storm, w, h) {
   const cw = w || 512, ch = h || 256;
@@ -1388,7 +1608,7 @@ function addKitMeteors() {
 // world assets (see the env 1 `world` slot).
 function buildFleetDressing() {
   const group = new THREE.Group();
-  const TRACERS = 16;
+  const TRACERS = 3;
   const tGeo = new THREE.BoxGeometry(0.15, 0.15, 1);
   const tMat = new THREE.MeshBasicMaterial({ color: 0xffcc66, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9, toneMapped: false, fog: false, depthWrite: false });
   tMat.userData.envOwned = true;
@@ -1404,6 +1624,7 @@ function buildFleetDressing() {
   for (let i = 0; i < 4; i++) {
     const s = glowSprite(0xffaa33, 24, 0);
     s.material.userData.envOwned = true;
+    s.visible = false; // FQ1: idle flashes cost 0 draw calls (shown on flash start)
     group.add(s);
     flashes.push({ sprite: s, t: rand(0.5, 4), flash: 0 });
   }
@@ -1609,6 +1830,9 @@ function buildMeridian() {
   if (!m) return false;
   m.position.set(-180, 60, -380); m.rotation.y = 0.6;
   envGroup.add(m);
+  // FQ1: merge the static hull by material (backdrop capital — its turrets
+  // never aim; the ring_spin subtree rotates, so it stays separate).
+  mergeStaticMeshes(m, ['ring_spin']);
   envDressing.meridian = { group: m, lod0: m, lod1: null, lod: 0, mixer: null };
   const q = m.quaternion;
   worldColliders.push({ kind: 'sphere', owner: 'meridian', p: m.position.clone().add(new THREE.Vector3(0, 0, -30).applyQuaternion(q)), r: 35 });
@@ -1624,6 +1848,10 @@ function buildEscortFrigates() {
   a.position.set(80, 20, -300); a.rotation.y = -0.3;
   b.position.set(-120, -10, -320); b.rotation.y = 0.5; b.scale.setScalar(0.9);
   envGroup.add(a); envGroup.add(b);
+  // FQ1: merge each frigate's static hull by material (backdrop escorts —
+  // no animated parts, no damage components).
+  mergeStaticMeshes(a, []);
+  mergeStaticMeshes(b, []);
   // Phase 5: record the clones for the LOD swap (updateFrigateLOD).
   envDressing.frigates = [
     { lod0: a, lod1: null, lod: 0 },
@@ -1712,6 +1940,12 @@ function buildBlenderStation() {
       fireT: 1 + Math.random() * 1.5 });
     worldColliders.push({ kind: 'sphere', owner: 'station-riders', obj: t, local: new THREE.Vector3(0, 0, 0), r: 3 });
   }
+  // FQ1: merge the ring riders by material (the ring spins as one group,
+  // so merged meshes parented to ringGroup spin with it; the turret
+  // pivots aim, so their subtrees stay separate). Clones of one GLB
+  // share material objects, so the two arms / two solar arrays / three
+  // turret mounts each collapse across clones.
+  mergeStaticMeshes(ringGroup, ['turret_1']);
   return { group, ringGroup, beacons, kitAdded: true, blender: true };
 }
 // Station colliders: the ring torus (rotation-invariant, so the spinning
@@ -1798,7 +2032,13 @@ function addBlenderStation() {
 // textures (glowTex / rockTex — never marked envOwned).
 function disposeEnvGroup(group) {
   const disposeObj = (obj) => {
-    if (obj.userData && (obj.userData.kitAsset || obj.userData.blenderAsset)) return; // GLB subtree: skip entirely (no dispose, no recurse)
+    if (obj.userData && (obj.userData.kitAsset || obj.userData.blenderAsset)) {
+      // FQ1: merged-runtime meshes inside a GLB clone own FRESH geometry
+      // (mergeGeos output) — free just that geometry; the shared GLB
+      // geometry and materials are never touched.
+      obj.traverse((o) => { if (o.userData && o.userData.mergedRuntime && o.geometry) o.geometry.dispose(); });
+      return; // GLB subtree: skip entirely (no dispose, no recurse)
+    }
     if (obj.geometry) obj.geometry.dispose();
     const mats = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
     for (const m of mats) {
@@ -1821,6 +2061,8 @@ function loadEnvironment(id) {
   if (envGroup) { scene.remove(envGroup); disposeEnvGroup(envGroup); envGroup = null; }
   if (starGroup) { scene.remove(starGroup); disposeEnvGroup(starGroup); starGroup = null; }
   gasGiantGroup = null;
+  nebulaIM = null; nebulaData = null; // FQ1: rebuilt by buildNebulaField below
+  neb1 = null; neb4 = null;
   ambientNear = [];
   worldColliders = [];
   worldGates = [];
@@ -1851,19 +2093,9 @@ function loadEnvironment(id) {
   envGroup.add(new THREE.Mesh(new THREE.SphereGeometry(850, 32, 16), skyMat));
   starGroup = new THREE.Group();
   starGroup.name = 'env-stars-' + cfg.id;
-  for (const s of cfg.stars) starGroup.add(makeStars(s.count, 380, s.size));
+  starGroup.add(makeStarfield(cfg.stars, 380)); // FQ1: all layers in one Points (was 4)
   scene.add(starGroup);
-  const nebs = [];
-  for (const n of cfg.nebulas) {
-    const spr = nebulaSprite(n.hex, n.size);
-    spr.material.opacity = n.opacity;
-    spr.position.set(n.pos[0], n.pos[1], n.pos[2]);
-    spr.userData.startZ = n.pos[2]; // the drift wrap target (tick upkeep)
-    envGroup.add(spr);
-    nebs.push(spr);
-  }
-  neb1 = nebs[0] || null;
-  neb4 = nebs[3] || null;
+  buildNebulaField(cfg.nebulas); // FQ1: one InstancedMesh (was one Sprite each)
   for (const p of cfg.planets) {
     const m = makePlanet(p.radius, p.tex === 'crater' ? crateredTexture() : bandedPlanetTexture(p.colors, p.storm), p.pos[0], p.pos[1], p.pos[2]);
     envGroup.add(m);
@@ -1933,6 +2165,7 @@ function updateEnvDressing(dt) {
     camera.getWorldPosition(_envCamPos);
     starGroup.position.copy(_envCamPos);
   }
+  syncNebulaInstances(); // FQ1: billboard the nebula field (drift moves instances 0/3)
   if (!envDressing) return;
   // Gas-giant limb glare: recompute the true sun limb from the player's
   // viewpoint every frame (the limb moves as the player flies).
@@ -1999,14 +2232,18 @@ function updateEnvDressing(dt) {
       if (f.flash > 0) {
         f.flash -= dt;
         f.sprite.material.opacity = 0.9 * Math.max(0, f.flash / 0.25);
+        // FQ1: an idle flash costs a draw call even at opacity 0 — hide it.
+        if (f.flash <= 0) f.sprite.visible = false;
       } else if (f.t <= 0) {
         _randomShellPoint(_dressV, 200, 400);
         f.sprite.position.copy(_dressV);
         f.sprite.material.opacity = 0.9;
+        f.sprite.visible = true; // FQ1: re-show for the flash
         f.flash = 0.25;
         f.t = 1.5 + Math.random() * 3.5;
       } else {
         f.sprite.material.opacity = 0;
+        f.sprite.visible = false; // FQ1: idle between flashes
       }
     }
   }
@@ -2681,7 +2918,7 @@ function _hudPlane(w, h, tex) {
 // circle (12° at 1.5 m ≈ 0.32 m radius on the 0.7 m plane). Static texture.
 const reticleMesh = _hudPlane(0.7, 0.7, _hudCanvasTex(256, 256, (x) => {
   x.strokeStyle = 'rgba(255,255,255,0.35)'; x.lineWidth = 3; x.setLineDash([10, 8]);
-  x.beginPath(); x.arc(128, 128, 117, 0, Math.PI * 2); x.stroke(); // gimbal cone limit
+  x.beginPath(); // Keep the aiming field clear around the central bullseye.
   x.setLineDash([]);
   x.strokeStyle = '#7df9ff'; x.lineWidth = 5;
   x.beginPath(); x.arc(128, 128, 26, 0, Math.PI * 2); x.stroke();
@@ -2691,6 +2928,7 @@ const reticleMesh = _hudPlane(0.7, 0.7, _hudCanvasTex(256, 256, (x) => {
     x.beginPath(); x.moveTo(128 + dx * 34, 128 + dy * 34); x.lineTo(128 + dx * 48, 128 + dy * 48); x.stroke();
   }
 }));
+reticleMesh.scale.setScalar(0.65);
 reticleMesh.position.set(0, 0, -1.5);
 // Lock diamond: amber diamond outline + corner ticks. Repositioned per frame.
 const lockDiamondMesh = _hudPlane(0.16, 0.16, _hudCanvasTex(128, 128, (x) => {
@@ -3073,15 +3311,6 @@ const cockpit = new THREE.Group();
 // child except the holo meshes, which re-parent to holo_mount instead).
 const cockpitProcParts = [];
 {
-  const strutGeo = new THREE.BoxGeometry(0.09, 2.1, 0.06);
-  for (const s of [-1, 1]) {
-    const strut = new THREE.Mesh(strutGeo, MAT.hullDark);
-    strut.position.set(s * 0.98, 0, -1.5);
-    cockpit.add(strut);
-  }
-  const topBar = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.07, 0.06), MAT.hullDark);
-  topBar.position.set(0, 0.99, -1.5);
-  cockpit.add(topBar);
   const dash = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.18, 0.1), MAT.hullDark);
   dash.position.set(0, -0.95, -1.5);
   cockpit.add(dash);
@@ -3133,7 +3362,12 @@ const cockpitProcParts = [];
   cockpit.add(holoShell);
 }
 cockpit.visible = false;
-camera.add(cockpit);
+// Keep the instruments at dashboard depth while halving their physical dimensions.
+const instrumentMount = new THREE.Group();
+instrumentMount.scale.setScalar(0.5);
+instrumentMount.position.set(0, -0.43, -0.73);
+instrumentMount.add(cockpit);
+camera.add(instrumentMount);
 
 // PAUSE PANEL (Neon pattern): camera-attached, visible only while paused
 // in play mode (see tick). 2.0: the canvas is REDRAWN by drawPausePanel()
@@ -3595,7 +3829,7 @@ function pollXR(dt) {
   // them only while paused (A/X mutes, grip restarts). The old dual-stick
   // steering + aim-ray steering are GONE (the aim ray never aimed a weapon;
   // in 2.0 the ship flies where the sticks point it).
-  const out = { thrust: 0, strafe: 0, yaw: 0, pitch: 0, fire: false, secondary: false, roll: false, brake: false, cycle: false, recall: false, pauseToggle: false, muteBtn: false, restartBtn: false };
+  const out = { thrust: 0, strafe: 0, yaw: 0, pitch: 0, fire: false, secondary: false, brake: false, cycle: false, recall: false, pauseToggle: false, muteBtn: false, restartBtn: false };
   let anyClick = false; // any thumbstick click held this frame (pause hold)
   if (!renderer.xr.isPresenting) return out;
   const session = renderer.xr.getSession();
@@ -3619,7 +3853,7 @@ function pollXR(dt) {
     rightTrackingOK = true;
   }
   trigClock += dt;
-  let trigRDown = false; // right trigger held this frame (double-tap detection)
+  let leftTrigger = false, trigRDown = false; // right trigger held this frame (double-tap detection)
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
@@ -3653,7 +3887,7 @@ function pollXR(dt) {
       if (aBtn) { out.cycle = true; out.muteBtn = true; } // A: cycle in play, mute while paused
       if (bBtn) out.brake = true; // B: brake (or secondary under the 'button' remap)
     } else if (src.handedness === 'left') {
-      if (trig > 0.5) out.roll = true; // left trigger: roll (or secondary under the 'trigger' remap)
+      leftTrigger = trig > 0.5;
       if (aBtn) { out.cycle = true; out.muteBtn = true; } // X mirrors A
       if (bBtn) out.brake = true; // Y mirrors B
     }
@@ -3677,7 +3911,7 @@ function pollXR(dt) {
   if (remap === 'button') {
     out.secondary = out.brake; out.brake = false;
   } else if (remap === 'trigger') {
-    const rollWas = out.roll; out.roll = out.secondary; out.secondary = rollWas;
+    out.secondary = leftTrigger;
   } else if (remap === 'double') {
     out.secondary = doubleTapFire;
   }
@@ -3749,6 +3983,10 @@ function flightDeadzone(x, dead) {
 }
 // One axis of velocity integration: accelerate toward vCmd with time
 // constant tau, accel clamped to ±limit (m/s²).
+function pilotAxis(input) {
+  const magnitude = Math.max(0, Math.min(1, (Math.abs(input) - 0.18) / 0.82));
+  return Math.sign(input) * magnitude * (0.45 + 0.55 * magnitude);
+}
 function flightAxisStep(v, vCmd, tau, limit, dt) {
   let a = (vCmd - v) / tau;
   if (a > limit) a = limit;
@@ -3870,14 +4108,14 @@ let prevShake = 0; // hit rising-edge detection (S.shake is set by damagePlayer)
 
 // ---- comfort settings (localStorage-backed; pause menu edits them) ----
 const FLIGHT_SETTINGS_KEY = 'star-strike-vr:flight-settings';
-const flightSettings = { sensitivity: 1.0, reducedMotion: false, invertPitch: false, secondary: 'grip' };
+const flightSettings = { comfortVersion: 4, sensitivity: 1.0, reducedMotion: true, invertPitch: false, secondary: 'grip' };
 function loadFlightSettings() {
   try {
     const raw = localStorage.getItem(FLIGHT_SETTINGS_KEY);
     if (!raw) return;
     const p = JSON.parse(raw);
     if (typeof p.sensitivity === 'number') flightSettings.sensitivity = clamp(p.sensitivity, FLIGHT.SENS_MIN, FLIGHT.SENS_MAX);
-    if (typeof p.reducedMotion === 'boolean') flightSettings.reducedMotion = p.reducedMotion;
+    if (p.comfortVersion === 4 && typeof p.reducedMotion === 'boolean') flightSettings.reducedMotion = p.reducedMotion;
     if (typeof p.invertPitch === 'boolean') flightSettings.invertPitch = p.invertPitch;
     if (['grip', 'button', 'trigger', 'double'].includes(p.secondary)) flightSettings.secondary = p.secondary;
   } catch (e) { /* corrupted settings — defaults stand */ }
@@ -3906,7 +4144,7 @@ function resetFlight() {
 // a 0.4 s lateral dash (no rotation) instead of the barrel roll; everyone
 // else gets the roll (tryRoll owns the timers + cooldowns).
 function triggerRollOrDash() {
-  if (S.mode !== 'play' || S.rollT > 0 || S.rollCd > 0) return;
+  if (renderer.xr.isPresenting || S.mode !== 'play' || S.rollT > 0 || S.rollCd > 0) return;
   breakMissileLocks(); // a roll or dash breaks enemy-missile locks (Phase 3) — both paths
   if (flightSettings.reducedMotion) {
     dashDir = lastStrafeInput < -0.2 ? -1 : 1; // dash with the strafe input, else right
@@ -4055,6 +4293,112 @@ function showLastPerfSummary() {
 }
 showLastPerfSummary(); // menu shows the previous session before play starts
 window.addEventListener('pagehide', perfSessionFlush);
+
+// ============================== FQ1 frame-time ring + perf-log export (directive §5/§6) ==============================
+// A rolling average alone does not demonstrate stable performance — the
+// ring keeps the last 3600 RAW frame times (rawDt, never the clamped
+// gameplay dt; ~50 s at 72 fps) plus the draw-call count of each frame,
+// so the perf cell and the export can report the DISTRIBUTION (p50/p95/
+// p99, % of frames over the 13.9 ms budget). Fed during ACTIVE PLAY only
+// (same rule as perfValve) so the numbers describe play, not the menu
+// attract loop. The export file IS the delivery mechanism — nobody reads
+// localStorage off Danny's headset; the menu button downloads the JSON.
+const PERF_RING_N = 3600;
+const perfRing = new Float32Array(PERF_RING_N); // frame times, ms (raw)
+const perfCallRing = new Uint16Array(PERF_RING_N); // draw calls per frame (0 = unsampled)
+let perfRingHead = 0, perfRingCount = 0;
+function perfRingPush(ms, calls) {
+  perfRing[perfRingHead] = ms;
+  perfCallRing[perfRingHead] = calls > 65535 ? 65535 : (calls || 0);
+  perfRingHead = (perfRingHead + 1) % PERF_RING_N;
+  if (perfRingCount < PERF_RING_N) perfRingCount++;
+}
+function perfRingValues() { // chronological frame times, ms (oldest first)
+  const out = new Array(perfRingCount);
+  for (let i = 0; i < perfRingCount; i++) out[i] = perfRing[(perfRingHead - perfRingCount + i + PERF_RING_N) % PERF_RING_N];
+  return out;
+}
+function perfDistribution() { // null until at least one play frame is recorded
+  const n = perfRingCount;
+  if (!n) return null;
+  const arr = perfRingValues().sort((a, b) => a - b);
+  let sum = 0, over139 = 0, over20 = 0;
+  for (const v of arr) { sum += v; if (v > 13.9) over139++; if (v > 20) over20++; }
+  const q = (p) => arr[Math.min(n - 1, Math.floor(n * p))];
+  return { n, min: arr[0], p50: q(0.5), p95: q(0.95), p99: q(0.99), max: arr[n - 1], mean: sum / n, over139, over20 };
+}
+function perfCallStats() { // draw-call stats over sampled frames (0 = unsampled, skipped)
+  const vals = [];
+  for (let i = 0; i < perfRingCount; i++) {
+    const c = perfCallRing[(perfRingHead - perfRingCount + i + PERF_RING_N) % PERF_RING_N];
+    if (c > 0) vals.push(c);
+  }
+  if (!vals.length) return null;
+  vals.sort((a, b) => a - b);
+  const n = vals.length;
+  return { n, min: vals[0], p50: vals[Math.floor(n * 0.5)], p95: vals[Math.min(n - 1, Math.floor(n * 0.95))], max: vals[n - 1] };
+}
+function perfRollingFps() { // rolling FPS over the last ≤120 play frames ('—' until 5 frames)
+  const n = Math.min(perfRingCount, 120);
+  if (n < 5) return '—';
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += perfRing[(perfRingHead - 1 - i + PERF_RING_N) % PERF_RING_N];
+  return String(Math.round(1000 / (sum / n)));
+}
+// The perf cell's second line (build ID is the first line, set in tick).
+function perfDistLine(calls, perEye) {
+  const d = perfDistribution();
+  if (!d || d.n < 5) return 'no play frames yet — start a run';
+  return 'p50 ' + d.p50.toFixed(1) + ' · p95 ' + d.p95.toFixed(1) + ' · p99 ' + d.p99.toFixed(1)
+    + ' ms · >13.9ms ' + Math.round(d.over139 / d.n * 100) + '% · rolling ' + perfRollingFps()
+    + ' FPS · ' + calls + ' calls' + perEye + ' · L' + perfValve.level + ' · ' + xrLayerSize();
+}
+// EXPORT PERF LOG: downloads a JSON file with the build ID, timestamp,
+// full frame-time array, distribution stats, draw-call stats, valve
+// seconds (total + per environment), and device/XR info. Guarded: a
+// download failure shows a status message instead of throwing.
+function exportPerfLog() {
+  try {
+    const d = perfDistribution();
+    const frames = perfRingValues().map((v) => Math.round(v * 10) / 10);
+    const env = ENVIRONMENTS.find((e) => e.id === currentEnv);
+    const rec = {
+      build: BUILD_ID,
+      game: 'Star Strike VR 2.0',
+      exportedAt: new Date().toISOString(),
+      device: {
+        userAgent: (typeof navigator !== 'undefined' && navigator.userAgent) || null,
+        hardwareConcurrency: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || null,
+        devicePixelRatio: (typeof window !== 'undefined' && window.devicePixelRatio) || null,
+      },
+      xr: { presenting: renderer.xr.isPresenting, layerSize: xrLayerSize() },
+      session: {
+        env: currentEnv, envName: env ? env.name : null, mode: S.mode, wave: S.wave,
+        valveLevel: perfValve.level, valveSec: perfSession.valveSec.map((v) => Math.round(v)),
+        envValve: Object.fromEntries(Object.entries(perfSession.envValve).map(([k, v]) => [k, v.map((x) => Math.round(x))])),
+      },
+      frames: { n: frames.length, unit: 'ms (raw frame time, play only)', values: frames },
+      distribution: d ? {
+        n: d.n, min: +d.min.toFixed(2), p50: +d.p50.toFixed(2), p95: +d.p95.toFixed(2),
+        p99: +d.p99.toFixed(2), max: +d.max.toFixed(2), mean: +d.mean.toFixed(2),
+        pctOver13_9ms: +(d.over139 / d.n * 100).toFixed(1), pctOver20ms: +(d.over20 / d.n * 100).toFixed(1),
+      } : null,
+      drawCalls: perfCallStats(),
+    };
+    const blob = new Blob([JSON.stringify(rec, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'star-strike-perf-' + BUILD_ID + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => { try { URL.revokeObjectURL(a.href); } catch (e) { /* already revoked */ } }, 5000);
+    setStatus('Perf log exported (' + frames.length + ' play frames).');
+  } catch (e) {
+    setStatus('Perf log export failed — try again after a run.');
+  }
+}
+{ const _x = document.getElementById('exportPerfBtn'); if (_x) _x.addEventListener('click', exportPerfLog); }
 // The XR layer's ACTUAL framebuffer size (Rhythm Slicer pattern) — the
 // resolution the headset really renders at. 'n/a' when no XR layer exists.
 function xrLayerSize() {
@@ -4088,7 +4432,7 @@ function checkTier() {
 // around OBJECTIVE_ANCHOR). The px/py/pvx/pvy compatibility aliases were
 // DELETED in Phase 3 (the damage/respawn, nova, rail, and boss-volley
 // sections are true 3D now) — nothing reads them anymore.
-let prevRoll = false, prevSecondary = false, prevCycle = false, prevRecall = false;
+let prevSecondary = false, prevCycle = false, prevRecall = false;
 let lastSecondaryPressT = -1; // Nova double-press window (Phase 3): two secondary presses within 0.4 s
 let prevMuteBtn = false, prevRestartBtn = false, prevPauseFire = false, stickHoldT = 0, stickHoldLatched = false; // pause/mute/restart edge state
 
@@ -4347,10 +4691,15 @@ function _orientAlongVel(q, vx, vy, vz) {
   q.setFromUnitVectors(_pZ, _pV);
 }
 function syncProjectileInstances() {
+  // FQ1: an InstancedMesh costs a draw call even when every instance is
+  // parked at zero scale — hide each pool while it has no live entry.
+  // (Same pattern as the per-kind enemy IM gating in Phase 5.)
+  let nPBolt = 0, nEBolt = 0, nPlasma = 0, nMissile = 0, nFlame = 0, nTracer = 0, nFlak = 0, nShock = 0;
   // Player bolts: stretched ×4 along velocity.
   for (let i = 0; i < pBolts.length; i++) {
     const b = pBolts[i];
     if (!b.on) { pBoltIM.setMatrixAt(i, _mZero); continue; }
+    nPBolt++;
     _orientAlongVel(_pQ, b.vx, b.vy, b.vz);
     _pDummy.position.copy(b.p); _pDummy.quaternion.copy(_pQ); _pDummy.scale.set(1, 1, 4);
     _pDummy.updateMatrix();
@@ -4360,6 +4709,7 @@ function syncProjectileInstances() {
   for (let i = 0; i < eBolts.length; i++) {
     const b = eBolts[i];
     if (!b.on) { eBoltIM.setMatrixAt(i, _mZero); continue; }
+    nEBolt++;
     _orientAlongVel(_pQ, b.vx, b.vy, b.vz);
     _pDummy.position.copy(b.p); _pDummy.quaternion.copy(_pQ); _pDummy.scale.set(1, 1, 4);
     _pDummy.updateMatrix();
@@ -4369,6 +4719,7 @@ function syncProjectileInstances() {
   for (let i = 0; i < pPlasma.length; i++) {
     const b = pPlasma[i];
     if (!b.on) { pPlasmaIM.setMatrixAt(i, _mZero); continue; }
+    nPlasma++;
     _pDummy.position.copy(b.p); _pDummy.quaternion.identity(); _pDummy.scale.set(1, 1, 1);
     _pDummy.updateMatrix();
     pPlasmaIM.setMatrixAt(i, _pDummy.matrix);
@@ -4378,11 +4729,13 @@ function syncProjectileInstances() {
   for (let i = 0; i < MISSILES.length; i++) {
     const ms = MISSILES[i];
     if (!ms.on) { missileIM.setMatrixAt(i, _mZero); missileFlameIM.setMatrixAt(i, _mZero); continue; }
+    nMissile++;
     _orientAlongVel(_pQ, ms.vx, ms.vy, ms.vz);
     _pDummy.position.copy(ms.p); _pDummy.quaternion.copy(_pQ); _pDummy.scale.set(1, 1, 1);
     _pDummy.updateMatrix();
     missileIM.setMatrixAt(i, _pDummy.matrix);
     if (ms.phase === 'eject') { missileFlameIM.setMatrixAt(i, _mZero); continue; }
+    nFlame++;
     _pDummy.position.copy(ms.p).addScaledVector(_pV, -0.7); // _pV still holds the normalized velocity
     _pDummy.updateMatrix();
     missileFlameIM.setMatrixAt(i, _pDummy.matrix);
@@ -4391,6 +4744,7 @@ function syncProjectileInstances() {
     const em = EMISSILES[j];
     const idx = 32 + j;
     if (!em.on) { missileIM.setMatrixAt(idx, _mZero); missileFlameIM.setMatrixAt(idx, _mZero); continue; }
+    nMissile++; nFlame++;
     _orientAlongVel(_pQ, em.vx, em.vy, em.vz);
     _pDummy.position.copy(em.p); _pDummy.quaternion.copy(_pQ); _pDummy.scale.set(1, 1, 1);
     _pDummy.updateMatrix();
@@ -4403,6 +4757,7 @@ function syncProjectileInstances() {
   for (let i = 0; i < TRACERS.length; i++) {
     const t = TRACERS[i];
     if (!t.on) { tracerIM.setMatrixAt(i, _mZero); continue; }
+    nTracer++;
     _pQ.setFromUnitVectors(_pZ, t.dir);
     _pDummy.position.copy(t.p); _pDummy.quaternion.copy(_pQ); _pDummy.scale.set(1, 1, t.len);
     _pDummy.updateMatrix();
@@ -4412,6 +4767,7 @@ function syncProjectileInstances() {
   for (let i = 0; i < FLAK.length; i++) {
     const f = FLAK[i];
     if (!f.on) { flakIM.setMatrixAt(i, _mZero); continue; }
+    nFlak++;
     _orientAlongVel(_pQ, f.vx, f.vy, f.vz);
     _pDummy.position.copy(f.p); _pDummy.quaternion.copy(_pQ); _pDummy.scale.set(1.2, 1.2, 4.8);
     _pDummy.updateMatrix();
@@ -4421,6 +4777,7 @@ function syncProjectileInstances() {
   for (let i = 0; i < SHOCKS.length; i++) {
     const s = SHOCKS[i];
     if (!s.on) { shockIM.setMatrixAt(i, _mZero); continue; }
+    nShock++;
     const k = s.t / 0.8;
     _pDummy.position.copy(s.p); _pDummy.quaternion.copy(_camQ); _pDummy.scale.setScalar(s.scale);
     _pDummy.updateMatrix();
@@ -4428,6 +4785,14 @@ function syncProjectileInstances() {
     _shockCol.setHex(0xffcc55).multiplyScalar(0.9 * (1 - k));
     shockIM.setColorAt(i, _shockCol);
   }
+  pBoltIM.visible = nPBolt > 0;
+  eBoltIM.visible = nEBolt > 0;
+  pPlasmaIM.visible = nPlasma > 0;
+  missileIM.visible = nMissile > 0;
+  missileFlameIM.visible = nFlame > 0;
+  tracerIM.visible = nTracer > 0;
+  flakIM.visible = nFlak > 0;
+  shockIM.visible = nShock > 0;
   pBoltIM.instanceMatrix.needsUpdate = true;
   eBoltIM.instanceMatrix.needsUpdate = true;
   pPlasmaIM.instanceMatrix.needsUpdate = true;
@@ -4572,12 +4937,34 @@ const bomberBodyIM = _inst(GEO.oct, MAT.bomberBody, BOMBER_N);
 const bomberGunIM = _inst(GEO.sphere, MAT.bomberCore, BOMBER_N * 2);
 const leaderIM = _inst(new THREE.OctahedronGeometry(0.35), MAT.leaderMark, 8);
 const haloIM = _inst(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }), DRONE_N + SHARD_N + BOMBER_N);
+// FQ1 distant-enemy visibility (directive §4): formations spawn 180–240 m
+// out, but the NEBULA fog hides everything past 140 m (fog.far = 140,
+// pinned by environment-tests — the dense fog IS the theatre's look, so
+// it stays). Enemy bodies are fully fogged at spawn range, and the
+// 1.6–2.6 m fog-exempt halos subtend ~0.5° (≈5 px per eye) at 0.30–0.34
+// brightness — too small and too dim to find. The fix is a beacon, not a
+// fog change: each halo keeps a minimum ANGULAR size (~1.5° diameter)
+// and brightens with range, reading as an engine-glow beacon through the
+// murk; formation-leader markers get the same floor. Applied in every
+// theatre (uniform beacon language); in clear theatres the floor only
+// bites past ~70 m, where the body is already small.
+const HALO_MIN_ANG = 0.026; // ~1.5° angular-diameter floor (2·tan 0.75°)
+const HALO_MAX_SCALE = 8; // cap: no beacon grows past 8 m
+const LEADER_MIN_ANG = 0.012; // ~0.7° floor for the leader octahedron
+const HALO_BASE = { drone: { hex: 0xff3df0, bright: 0.34 }, shard: { hex: 0x27e8ff, bright: 0.30 }, bomber: { hex: 0xff8833, bright: 0.30 } };
+const _haloCol = new THREE.Color();
+const _visCamPos = new THREE.Vector3();
+function _haloBright(kind, dist) { // brightness ramps with range: base at ≤60 m, ×2.2 at ≥200 m
+  const k = Math.min(1, Math.max(0, (dist - 60) / 140));
+  return HALO_BASE[kind].bright * (1 + 1.2 * k);
+}
 { // Per-instance halo tint (opacity baked into the color: additive blending
   // reads color value as brightness). Set once — kinds never change slots.
+  // syncEnemyInstances re-tints per frame for the range ramp (below).
   const _hc = new THREE.Color();
-  for (let i = 0; i < DRONE_N; i++) haloIM.setColorAt(i, _hc.setHex(0xff3df0).multiplyScalar(0.34));
-  for (let j = 0; j < SHARD_N; j++) haloIM.setColorAt(DRONE_N + j, _hc.setHex(0x27e8ff).multiplyScalar(0.3));
-  for (let k = 0; k < BOMBER_N; k++) haloIM.setColorAt(DRONE_N + SHARD_N + k, _hc.setHex(0xff8833).multiplyScalar(0.3));
+  for (let i = 0; i < DRONE_N; i++) haloIM.setColorAt(i, _hc.setHex(HALO_BASE.drone.hex).multiplyScalar(HALO_BASE.drone.bright));
+  for (let j = 0; j < SHARD_N; j++) haloIM.setColorAt(DRONE_N + j, _hc.setHex(HALO_BASE.shard.hex).multiplyScalar(HALO_BASE.shard.bright));
+  for (let k = 0; k < BOMBER_N; k++) haloIM.setColorAt(DRONE_N + SHARD_N + k, _hc.setHex(HALO_BASE.bomber.hex).multiplyScalar(HALO_BASE.bomber.bright));
   haloIM.instanceColor.needsUpdate = true;
 }
 const _ONE_Q = new THREE.Quaternion();
@@ -4613,6 +5000,7 @@ function syncEnemyInstances() {
   // keep writing in both modes (they still read).
   const glbFighters = blenderState.fighters === 'blender';
   camera.getWorldQuaternion(_camQ); // halo planes billboard toward the camera
+  camera.getWorldPosition(_visCamPos); // FQ1: halo/leader range for the visibility floor
   for (let i = 0; i < ENEMIES.length; i++) {
     const e = ENEMIES[i];
     if (e.kind === 'drone') {
@@ -4642,7 +5030,11 @@ function syncEnemyInstances() {
         droneCoreIM.setMatrixAt(i, _mPart.multiplyMatrices(_dummy.matrix, LM.coreD));
       }
       _haloP.copy(e.g.position); _haloP.z -= 0.1;
-      _haloS.setScalar(1.85 * e.g.scale.x);
+      // FQ1: halo keeps a minimum angular size + brightens with range
+      // (distant-enemy beacon — see HALO_MIN_ANG).
+      const _hd = e.g.position.distanceTo(_visCamPos);
+      _haloS.setScalar(Math.min(HALO_MAX_SCALE, Math.max(1.85 * e.g.scale.x, _hd * HALO_MIN_ANG)));
+      haloIM.setColorAt(i, _haloCol.setHex(HALO_BASE.drone.hex).multiplyScalar(_haloBright('drone', _hd)));
       haloIM.setMatrixAt(i, _mPart.compose(_haloP, _camQ, _haloS));
     } else if (e.kind === 'shard') {
       const j = i - DRONE_N;
@@ -4667,7 +5059,9 @@ function syncEnemyInstances() {
         shardCoreIM.setMatrixAt(j, _mPart.multiplyMatrices(_dummy.matrix, LM.coreS));
       }
       _haloP.copy(e.g.position); _haloP.z -= 0.1;
-      _haloS.setScalar(1.6 * e.g.scale.x);
+      const _hd = e.g.position.distanceTo(_visCamPos); // FQ1: beacon range
+      _haloS.setScalar(Math.min(HALO_MAX_SCALE, Math.max(1.6 * e.g.scale.x, _hd * HALO_MIN_ANG)));
+      haloIM.setColorAt(DRONE_N + j, _haloCol.setHex(HALO_BASE.shard.hex).multiplyScalar(_haloBright('shard', _hd)));
       haloIM.setMatrixAt(DRONE_N + j, _mPart.compose(_haloP, _camQ, _haloS));
     } else { // bomber: bigger octahedron hull + twin gun cores
       const k = i - DRONE_N - SHARD_N;
@@ -4690,19 +5084,23 @@ function syncEnemyInstances() {
         bomberGunIM.setMatrixAt(k * 2 + 1, _mPart.multiplyMatrices(_dummy.matrix, LM.gunBR));
       }
       _haloP.copy(e.g.position); _haloP.z -= 0.1;
-      _haloS.setScalar(2.6 * e.g.scale.x);
+      const _hd = e.g.position.distanceTo(_visCamPos); // FQ1: beacon range
+      _haloS.setScalar(Math.min(HALO_MAX_SCALE, Math.max(2.6 * e.g.scale.x, _hd * HALO_MIN_ANG)));
+      haloIM.setColorAt(DRONE_N + SHARD_N + k, _haloCol.setHex(HALO_BASE.bomber.hex).multiplyScalar(_haloBright('bomber', _hd)));
       haloIM.setMatrixAt(DRONE_N + SHARD_N + k, _mPart.compose(_haloP, _camQ, _haloS));
     }
   }
   // Leader markers: a small amber octahedron 2.5 m above each live
   // formation leader (8 slots; formations beyond 8 get no marker).
+  // FQ1: same angular floor as the halos — a 1 m marker is sub-pixel
+  // at spawn range in the nebula.
   let li = 0;
   for (const f of FORMATIONS) {
     if (li >= 8) break;
     const leader = f.members[0];
     if (!leader || !leader.on) continue;
     _haloP.copy(leader.g.position); _haloP.y += 2.5;
-    _haloS.setScalar(1 + 0.15 * Math.sin(time * 4));
+    _haloS.setScalar(Math.max(1, leader.g.position.distanceTo(_visCamPos) * LEADER_MIN_ANG) * (1 + 0.15 * Math.sin(time * 4)));
     leaderIM.setMatrixAt(li, _mPart.compose(_haloP, _ONE_Q, _haloS));
     li++;
   }
@@ -4719,6 +5117,7 @@ function syncEnemyInstances() {
   bomberGunIM.instanceMatrix.needsUpdate = true;
   leaderIM.instanceMatrix.needsUpdate = true;
   haloIM.instanceMatrix.needsUpdate = true;
+  if (haloIM.instanceColor) haloIM.instanceColor.needsUpdate = true; // FQ1: per-frame range ramp
 }
 syncEnemyInstances(); // park every instance at zero scale until the first spawn
 
@@ -5071,15 +5470,18 @@ for (let i = 0; i < 14; i++) {
 const _rockDummy = new THREE.Object3D();
 const _rockZero = new THREE.Matrix4().makeScale(0, 0, 0);
 function syncRockInstances() {
+  let nLive = 0; // FQ1: hide the rock IM while no interactive rock is live
   for (let i = 0; i < ROCKS.length; i++) {
     const r = ROCKS[i];
     if (!r.on) { rockIM.setMatrixAt(i, _rockZero); continue; }
+    nLive++;
     _rockDummy.position.copy(r.m.position);
     _rockDummy.quaternion.setFromEuler(r.m.rotation);
     _rockDummy.scale.copy(r.m.scale);
     _rockDummy.updateMatrix();
     rockIM.setMatrixAt(i, _rockDummy.matrix);
   }
+  rockIM.visible = nLive > 0;
   rockIM.instanceMatrix.needsUpdate = true;
 }
 syncRockInstances(); // park every instance at zero scale until the first spawn
@@ -5109,6 +5511,7 @@ const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
 pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3).setUsage(THREE.DynamicDrawUsage));
 const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ map: glowTex, size: 0.3, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+points.visible = false; // FQ1: hidden until the first live spark (the play branch gates it on pLive)
 points.frustumCulled = false;
 scene.add(points);
 const _burstCol = new THREE.Color();
@@ -5577,7 +5980,7 @@ function bossDown() {
   hudDirty = true;
 }
 function tryRoll() {
-  if (S.mode !== 'play' || S.rollT > 0 || S.rollCd > 0) return;
+  if (renderer.xr.isPresenting || S.mode !== 'play' || S.rollT > 0 || S.rollCd > 0) return;
   S.rollT = 0.55; S.rollCd = 1.4; sfxRoll(); pulseBoth(0.3, 40);
 }
 function tryNova() {
@@ -6060,7 +6463,7 @@ function stepFlight(dt, inp) {
   if (bState === 'ok') boundaryWarned = false;
   // --- recenter: any stick input interrupts the guided turn ---
   const stickActive = Math.abs(inp.thrust) > 0 || Math.abs(inp.strafe) > 0 || Math.abs(inp.yaw) > 0 || Math.abs(inp.pitch) > 0 || inp.brake;
-  if (stickActive) recenterActive = false;
+  if (stickActive || inp.manualVR) recenterActive = false;
   let yawIn = inp.yaw, pitchIn = inp.pitch;
   if (flightSettings.invertPitch) pitchIn = -pitchIn;
   if (recenterActive) {
@@ -6074,7 +6477,7 @@ function stepFlight(dt, inp) {
       if (_fRecenter.aligned || recenterT <= 0) recenterActive = false;
     } else recenterActive = false;
   }
-  if (bState === 'turn') {
+  if (!inp.manualVR && bState === 'turn') {
     // Auto-turn: steer toward the anchor, blended 50/50 with the player's
     // own steering — the game never wrestles control away entirely, but a
     // centered stick always turns home. Thrust is cut below.
@@ -6087,6 +6490,10 @@ function stepFlight(dt, inp) {
   // --- turn rates: smoothed (≥0.35 s ramp), capped. Sticks never roll. ---
   yawRate = flightTurnStep(yawRate, yawIn * caps.yaw, dt);
   pitchRate = flightTurnStep(pitchRate, pitchIn * caps.pitch, dt);
+  if (inp.manualVR) {
+    if (yawIn === 0) yawRate = 0;
+    if (pitchIn === 0) pitchRate = 0;
+  }
   // --- barrel roll: rotates the SHIP (the player sits in it). Player
   // triggered only, never automatic; reduced-motion players dash instead
   // (dashT set by triggerRollOrDash — no rotation at all).
@@ -6094,11 +6501,16 @@ function stepFlight(dt, inp) {
   if (S.rollT > 0) { S.rollT -= dt; rollRate = (Math.PI * 2) / 0.55; } // one full turn in 0.55 s
   _fEuler.set(pitchRate * dt, -yawRate * dt, rollRate * dt);
   _fDeltaQ.setFromEuler(_fEuler);
-  shipQuat.multiply(_fDeltaQ);
+  if (inp.manualVR && rm) {
+    // Integrate around world up so combined yaw and pitch cannot bank the cockpit.
+    _fEuler.setFromQuaternion(shipQuat, 'YXZ');
+    _fEuler.set(clamp(_fEuler.x + pitchRate * dt, -0.38, 0.38), _fEuler.y - yawRate * dt, 0, 'YXZ');
+    shipQuat.setFromEuler(_fEuler);
+  } else shipQuat.multiply(_fDeltaQ);
   // --- auto-level: the brake button levels the ship, and reduced-motion
   // mode levels on stick release (pitch eases toward level, τ = 2 s).
   // Never fights an active pitch input or a recenter.
-  if ((inp.brake || rm) && pitchIn === 0 && !recenterActive) {
+  if (!inp.manualVR && (inp.brake || rm) && pitchIn === 0 && !recenterActive) {
     _fEuler.setFromQuaternion(shipQuat);
     const pErr = _fEuler.x;
     if (Math.abs(pErr) > 0.01) {
@@ -6108,12 +6520,12 @@ function stepFlight(dt, inp) {
     }
   }
   // --- commanded velocity (ship frame). Engine upgrades multiply speed. ---
-  const sm = speedMul();
+  const sm = speedMul() * (inp.manualVR && rm ? 0.48 : 1);
   let vfCmd = inp.thrust >= 0 ? inp.thrust * FLIGHT.MAX_FWD : inp.thrust * FLIGHT.MAX_REV;
   let vsCmd = inp.strafe * FLIGHT.MAX_STRAFE;
   vfCmd *= sm; vsCmd *= sm;
   if (dashT > 0) { dashT -= dt; vsCmd = dashDir * FLIGHT.MAX_STRAFE * sm; }
-  if (bState === 'turn') { vfCmd *= 0.25; vsCmd *= 0.25; } // thrust cut at the boundary
+  if (!inp.manualVR && bState === 'turn') { vfCmd *= 0.25; vsCmd *= 0.25; } // thrust cut at the boundary
   // --- velocity integration (ship frame, momentum in the world) ---
   // The world velocity is transformed into the ship frame, integrated per
   // axis, and transformed back — so turning doesn't drag the velocity
@@ -6123,7 +6535,7 @@ function stepFlight(dt, inp) {
   _fLocal.copy(shipVel).applyQuaternion(_fDeltaQ.copy(shipQuat).invert());
   let vf = -_fLocal.z, vs = _fLocal.x, vy = _fLocal.y;
   const rmAccel = rm ? FLIGHT.RM_ACCEL : 1;
-  if (inp.brake) vf = flightBrakeStep(vf, 0, FLIGHT.BRAKE_BUTTON * rmAccel, dt);
+  if (inp.brake || (inp.manualVR && inp.thrust === 0)) vf = flightBrakeStep(vf, 0, FLIGHT.BRAKE_BUTTON * rmAccel, dt);
   else if (inp.thrust < 0 && vf > 0) vf = flightBrakeStep(vf, 0, FLIGHT.BRAKE_STICK * rmAccel, dt);
   else vf = flightAxisStep(vf, vfCmd, FLIGHT.TAU_FWD, flightFwdLimit(vf, vfCmd, rm), dt);
   if (Math.abs(inp.strafe) > 0 || dashT > 0) strafeBurstT += dt; else strafeBurstT = 0;
@@ -6131,7 +6543,8 @@ function stepFlight(dt, inp) {
     vs = flightBrakeStep(vs, 0, FLIGHT.BRAKE_BUTTON * rmAccel, dt);
     vy = flightBrakeStep(vy, 0, FLIGHT.BRAKE_BUTTON * rmAccel, dt);
   } else {
-    vs = flightAxisStep(vs, vsCmd, FLIGHT.TAU_STRAFE, flightStrafeLimit(strafeBurstT, rm), dt);
+    vs = inp.manualVR && vsCmd === 0 ? flightBrakeStep(vs, 0, FLIGHT.BRAKE_BUTTON * rmAccel, dt)
+      : flightAxisStep(vs, vsCmd, FLIGHT.TAU_STRAFE, flightStrafeLimit(strafeBurstT, rm), dt);
     vy = flightAxisStep(vy, 0, FLIGHT.TAU_FWD, FLIGHT.BRAKE_STICK * rmAccel, dt);
   }
   if (Math.abs(vf) < 0.25 && vfCmd === 0) vf = 0; // snap-to-zero deadband (kills the exponential tail)
@@ -6139,7 +6552,17 @@ function stepFlight(dt, inp) {
   if (Math.abs(vy) < 0.25) vy = 0;
   _fLocal.set(vs, vy, -vf).applyQuaternion(shipQuat);
   shipVel.copy(_fLocal);
+  if (inp.manualVR && anchorDist >= FLIGHT.TURN_R) {
+    // Gradually limit only outward speed. Returning or flying along the boundary stays manual.
+    _fToAnchor.copy(shipPos).sub(OBJECTIVE_ANCHOR).normalize();
+    const outward = shipVel.dot(_fToAnchor);
+    const limit = Math.max(0, FLIGHT.PLAY_R - anchorDist);
+    if (outward > limit) shipVel.addScaledVector(_fToAnchor, limit - outward);
+  }
   shipPos.addScaledVector(shipVel, dt);
+  if (inp.manualVR && shipPos.distanceToSquared(OBJECTIVE_ANCHOR) > FLIGHT.PLAY_R ** 2) {
+    shipPos.sub(OBJECTIVE_ANCHOR).setLength(FLIGHT.PLAY_R).add(OBJECTIVE_ANCHOR);
+  }
   // --- collision avoidance (analytic spheres: asteroids + a temporary
   // bounding sphere for the boss) ---
   proxDist = 1e9;
@@ -6320,6 +6743,10 @@ function wireRigGLB() {
       rigChargeActions.push(action);
     }
   }
+  // FQ1: merge the rig's static housing by material — gimbals, barrels,
+  // cores (ChargePulse-animated), laser gimbal, emitter, doors, and
+  // slide stay separate (animated or visibility-toggled).
+  mergeStaticMeshes(rig, ['gimbal_L', 'gimbal_R', 'barrel_L', 'barrel_R', 'core_L', 'core_R', 'laser_gimbal', 'center_emitter', 'door_L', 'door_R', 'rail_slide']);
   blenderState.rig = 'blender';
 }
 function updateRigChargeMixers(dt) {
@@ -6369,7 +6796,12 @@ function wireCockpitGLB() {
   for (const child of [...cockpit.children]) {
     if (child !== holoPlanet && child !== holoShell) { child.visible = false; cockpitProcParts.push(child); }
   }
+  // The canopy rails form a single mesh. Keep the instrument shelf as the horizon reference.
+  ck.getObjectByName('CockpitFrame')?.removeFromParent();
   cockpit.add(ck);
+  // FQ1: merge the static frame by material — the 4 panels stay separate
+  // (live canvas materials, UV-flipped cloned geometry).
+  mergeStaticMeshes(ck, ['panel_schematic', 'panel_radar', 'panel_weapons', 'panel_console']);
   // Holo planet + shell ride the mount (local origin — the upkeep bob
   // writes local y only in GLB mode).
   mount.add(holoPlanet); mount.add(holoShell);
@@ -6560,6 +6992,20 @@ function wireBossGLB() {
   if (blenderState.boss === 'blender' || !blenderKit['ravager']) return;
   const rav = blenderKit['ravager'].scene.clone();
   rav.userData.blenderAsset = true;
+  // Satin armor on untextured hull panels. Preserve luminous weak points.
+  const armorFinishes = new Map();
+  rav.traverse((part) => {
+    const source = part.material;
+    if (!part.isMesh || !source?.isMeshStandardMaterial || source.map ||
+        source.emissive.getHex() || source.transparent) return;
+    if (!armorFinishes.has(source)) {
+      const finish = source.clone();
+      finish.roughness = Math.max(finish.roughness, 0.66);
+      finish.roughnessMap ||= crSurface;
+      armorFinishes.set(source, finish);
+    }
+    part.material = armorFinishes.get(source);
+  });
   // The clone is not in the scene yet — its matrices are stale (identity).
   // Update them BEFORE computing barrel rest directions: setFromObject
   // uses matrixWorld, and pivot.worldToLocal updates the pivot chain, so
@@ -6606,6 +7052,10 @@ function wireBossGLB() {
     shield: { hp: 30, maxHp: 30, meshes: b0.shieldMeshes, meshes0: b0.shieldMeshes, meshes1: null, destroyed: false, pos: new THREE.Vector3(0, 8.2, 25), r: 5 },
     core: { hp: 0, maxHp: 0, meshes: b0.coreMeshes, meshes0: b0.coreMeshes, meshes1: null, destroyed: false, pos: new THREE.Vector3(0, 7.2, 0), r: 4.5 },
   };
+  // FQ1: merge the static hull by material — AFTER the barrel rest-
+  // direction computation above (it reads barrel bounds). Shield/core
+  // damage meshes and the aiming turret pivots stay separate.
+  mergeStaticMeshes(rav, ['ShieldDome', 'ShieldRing', 'ShieldCore', 'Core', 'CoreGrille', 'turret_1', 'turret_2', 'turret_3', 'turret_4', 'turret_5', 'turret_6']);
   blenderState.boss = 'blender';
 }
 // Restore every component for a new boss appearance (called from
@@ -6825,6 +7275,10 @@ function updateBossLOD() {
     if (boss.userData.components.core.destroyed) {
       for (const m of b1.coreMeshes) m.visible = false;
     }
+    // FQ1: merge the LOD1 hull by material (same exclusions as LOD0;
+    // after the damage-state application above, so destroyed parts
+    // stay hidden — merged groups never include them anyway).
+    mergeStaticMeshes(rav1, ['ShieldDome', 'ShieldRing', 'ShieldCore', 'Core', 'CoreGrille', 'turret_1', 'turret_2', 'turret_3', 'turret_4', 'turret_5', 'turret_6']);
   }
   if (!boss.userData.glbSceneLod1) return;
   const d = boss.position.distanceTo(shipPos);
@@ -6911,6 +7365,9 @@ function updateMeridianLOD(dt) {
     l1.rotation.copy(m.lod0.rotation);
     l1.visible = false;
     envGroup.add(l1);
+    // FQ1: merge the LOD1 hull by material (ring_spin excluded — it
+    // rotates via the RingSpin clip, re-bound to the active scene below).
+    mergeStaticMeshes(l1, ['ring_spin']);
     m.lod1 = l1;
   }
   // RingSpin mixer: bind to the ACTIVE scene (re-bind on LOD swap —
@@ -6957,6 +7414,9 @@ function updateFrigateLOD() {
       l1.scale.copy(f.lod0.scale);
       l1.visible = false;
       envGroup.add(l1);
+      // FQ1: merge the LOD1 hull by material (backdrop escort — no
+      // animated parts, no damage components).
+      mergeStaticMeshes(l1, []);
       f.lod1 = l1;
     }
     if (!f.lod1) continue;
@@ -7123,11 +7583,18 @@ function tick() {
   const rawDt = clock.getDelta();
   const dt = Math.min(rawDt, 0.05);
   time += dt;
+  // FQ1: feed the frame-time ring during ACTIVE PLAY only (same rule as
+  // the valve — the distribution must describe play, not the menu).
+  // Draw calls are read from the PREVIOUS frame's render (renderer.info
+  // resets at each render call); a 0 means "unsampled", skipped by stats.
+  // Guarded like the D6 block below (the Node test harness's stub
+  // renderer has no .info).
+  if (S.mode === 'play' && !paused) perfRingPush(rawDt * 1000, (renderer.info && renderer.info.render) ? renderer.info.render.calls : 0);
   const xr = pollXR(dt);
 
   // VR pause/mute/restart buttons (rising edges; seen whether paused or not —
   // that is how you resume). A/X mutes ONLY while paused (in play it is Nova);
-  // grip restarts ONLY while paused (in play it is barrel roll).
+  // grip restarts ONLY while paused (in play it is secondary weapon; barrel roll is left trigger).
   if (xr.pauseToggle) togglePause();
   if (xr.muteBtn && !prevMuteBtn && paused) setMuted(!muted);
   prevMuteBtn = xr.muteBtn;
@@ -7138,7 +7605,7 @@ function tick() {
     // PAUSED: gameplay frozen. Edge trackers stay fresh so a button held
     // through resume never fires on the resume frame; the beacon keeps
     // pulsing and the HUD keeps drawing (MUTED tag + perf readout update).
-    prevRoll = xr.roll; prevSecondary = xr.secondary; prevCycle = xr.cycle; prevRecall = xr.recall;
+    prevSecondary = xr.secondary; prevCycle = xr.cycle; prevRecall = xr.recall;
     secondaryKeyQueued = false; cycleKeyQueued = false;
     // Pause-menu settings (2.0): left stick up/down (or desktop arrows)
     // moves the selection; right stick left/right (or arrows) changes the
@@ -7179,8 +7646,8 @@ function tick() {
     // --- 2.0 flight: assemble the flight input (XR sticks, else desktop
     // keys/mouse), then integrate — stepFlight owns the flight model. ---
     if (renderer.xr.isPresenting) {
-      flightInput.thrust = xr.thrust; flightInput.strafe = xr.strafe;
-      flightInput.yaw = xr.yaw; flightInput.pitch = xr.pitch; flightInput.brake = xr.brake;
+      flightInput.thrust = pilotAxis(xr.thrust); flightInput.strafe = pilotAxis(xr.strafe);
+      flightInput.yaw = pilotAxis(xr.yaw); flightInput.pitch = pilotAxis(xr.pitch); flightInput.brake = xr.brake;
     } else {
       // Desktop fallback (architecture §(b)): W/S thrust, A/D strafe,
       // mouse position from center = yaw/pitch rate (8% deadzone), B brake.
@@ -7190,6 +7657,7 @@ function tick() {
       flightInput.pitch = flightDeadzone(mouse.y, 0.08);
       flightInput.brake = !!keys['KeyB'];
     }
+    flightInput.manualVR = renderer.xr.isPresenting;
     stepFlight(dt, flightInput);
 
     // --- shield regen (Phase 3): +5/s after 6 s without damage ---
@@ -7197,8 +7665,7 @@ function tick() {
     if (ns !== S.shield) { S.shield = ns; hudDirty = true; }
 
     // --- roll / secondary / cycle / recenter (edge-detected) ---
-    if (xr.roll && !prevRoll) triggerRollOrDash();
-    prevRoll = xr.roll;
+
     const secondaryPressed = (xr.secondary && !prevSecondary) || secondaryKeyQueued;
     secondaryKeyQueued = false;
     if (secondaryPressed) {
@@ -7216,7 +7683,7 @@ function tick() {
     if ((xr.cycle && !prevCycle) || cycleKeyQueued) cycleTarget();
     cycleKeyQueued = false;
     prevCycle = xr.cycle;
-    if (xr.recall && !prevRecall) recallShip();
+    // The VR stick click only operates pause.
     prevRecall = xr.recall;
     // Ship findability: beacon pulse + objective pointer (flight untouched).
     beaconMat.opacity = 0.28 + Math.sin(time * 6) * 0.1;
@@ -7626,15 +8093,18 @@ function tick() {
     }
 
     // --- particles ---
+    let pLive = 0; // FQ1: hide the particle cloud while no spark is live
     for (let i = 0; i < PARTS; i++) {
       if (pLife[i] <= 0) continue;
       pLife[i] -= dt;
       if (pLife[i] <= 0) { pPos[i * 3 + 1] = -999; continue; } // hide dead sparks
+      pLive++;
       pPos[i * 3] += pVel[i * 3] * dt;
       pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
       pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
     }
     pGeo.attributes.position.needsUpdate = true;
+    points.visible = pLive > 0;
 
     // --- shockwaves (InstancedMesh in Phase 3 — the sync function turns
     // the entries into billboarded rings; the tick block ages them) ---
@@ -7673,7 +8143,7 @@ function tick() {
     // position is NEVER written by gameplay code (the old S.shake block is
     // deleted). A hit jolts the COCKPIT FRAME (≤0.01 m, 0.15 s) + haptics
     // (in damagePlayer) + a vignette flash (driven in the upkeep block).
-    if (S.shake > prevShake) { cockpitJoltT = 0.15; hitFlash = 0.5; } // new hit (rising edge)
+    if (S.shake > prevShake) { cockpitJoltT = renderer.xr.isPresenting ? 0 : 0.15; hitFlash = 0.5; } // new hit (rising edge)
     prevShake = S.shake;
     if (S.shake > 0) S.shake -= dt;
     if (cockpitJoltT > 0) {
@@ -7823,19 +8293,29 @@ function tick() {
   syncEnemyInstances();
   syncProjectileInstances();
   syncRockInstances(); // Phase 4: interactive rocks are instanced
+  // FQ1: the particle cloud only exists in play (the play branch gates it
+  // on live sparks) — hide it in the menu so a run's leftover sparks
+  // never cost a draw call or freeze mid-air behind the picker. Paused
+  // keeps the last play-frame state (the frozen field stays visible
+  // behind the pause menu).
+  if (S.mode !== 'play') points.visible = false;
   updateEnvDressing(dt); // Phase 4: starfield follow, glare, tumble, dressing
   updateBlenderSystems(dt); // Blender integration: wiring polls, LOD, turrets, flak, mixers, gates, audio bed
   renderer.render(scene, camera);
 
-  // D6: DOM perf overlay (?debug=perf) — the desktop verification
-  // instrument. The 3D HUD perf line is VR-only, so desktop had no
-  // readout at all. Updated at 2 Hz in every mode (menu included); the
-  // frame time is a local EMA because perfValve only runs in play.
-  // renderer.info.reset() runs at the START of render() (r160), so the
-  // count read here is the just-completed frame's. D6b: the EMA and the
-  // cadence use rawDt (true frame time) — the clamped gameplay dt pinned
-  // the readout at exactly 50.0 ms on machines slower than 20 fps.
-  if (perfDebug) {
+  // D6/FQ1: DOM perf cell — the build-ID + frame-time instrument.
+  // FQ1: always visible (no ?debug=perf gate — Danny launches from the
+  // hub with no query params). Line 1: build ID; line 2: the frame-time
+  // DISTRIBUTION (p50/p95/p99, % over 13.9 ms, rolling FPS labeled as
+  // rolling, draw calls, valve level, XR layer size) from the play-only
+  // ring — before any play frame it says "no play frames yet". Updated
+  // at 2 Hz in every mode (menu included); the EMA and the cadence use
+  // rawDt (true frame time) — the clamped gameplay dt pinned the readout
+  // at exactly 50.0 ms on machines slower than 20 fps. renderer.info
+  // resets at the START of render() (r160), so the count read here is
+  // the just-completed frame's. The 3D HUD perf line keeps its own
+  // ?debug=perf gate (untouched, see drawHUD).
+  {
     perfDomEma = perfDomEma === 0 ? rawDt : perfDomEma * 0.9 + rawDt * 0.1;
     perfDomT += rawDt;
     if (perfDomT > 0.5) {
@@ -7843,7 +8323,7 @@ function tick() {
       const calls = renderer.info && renderer.info.render ? renderer.info.render.calls : 0;
       const perEye = renderer.xr.isPresenting ? ' ≈ ' + Math.round(calls / 2) + '/eye' : '';
       perfEl.style.display = 'block';
-      perfEl.textContent = 'PERF ' + (perfDomEma * 1000).toFixed(1) + ' ms · ' + calls + ' calls' + perEye + ' · L' + perfValve.level + ' · ' + xrLayerSize();
+      perfEl.textContent = 'PERF ' + BUILD_ID + '\n' + perfDistLine(calls, perEye);
     }
   }
 }

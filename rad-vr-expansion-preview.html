@@ -65,6 +65,8 @@
   .modeBtn.sel { background:linear-gradient(92deg,#27e8ff,#2bff88); color:#06121f; border-color:transparent; }
   #perfSummary { margin-top:10px; font-size:12px; color:#9aa0ac; line-height:1.5; }
   #perfNote { margin-top:4px; font-size:11px; color:#7a7f8a; }
+  /* FQ1: build identifier, menu footer — so Danny can confirm what he is testing. */
+  #buildId { margin-top:14px; font-size:12px; color:#7a7f8a; letter-spacing:1px; }
   /* Shared arcade scoreboard cell: small dark translucent rectangle, thin neon
      border, TOP-LEFT. Mirrored 1:1 by the VR camera-attached plane below. */
   #hud {
@@ -110,8 +112,8 @@
 </style>
 <script type="importmap">
 { "imports": {
-  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  "three": "./vendor/three/three.module.js",
+  "three/addons/": "./vendor/three/addons/"
 } }
 </script>
 </head>
@@ -158,7 +160,8 @@
     <button id="vrBtn">ENTER VR</button>
     <div id="status"></div>
     <div id="perfSummary"></div>
-    <div id="perfNote">Session performance (frame times + valve state) is logged locally on this device only, to help tune the game. No personal data, never sent anywhere.</div>
+    <div id="perfNote">Session performance (frame times + valve state) is logged locally on this device only, to help tune the game. No personal data, never sent anywhere. EXPORT PERF LOG below downloads the full frame-time distribution as a file — that file is how the numbers leave the headset.</div>
+    <p><button class="modeBtn" id="exportPerfBtn">⬇ EXPORT PERF LOG</button></p>
     <p class="small">Open this page in your <b>Quest Browser</b>, then tap <b>ENTER VR</b>. No headset handy? Desktop preview works too — arrow keys / WASD drive, M mutes.</p>
     <p><b>Thumbstick</b> steers &nbsp;·&nbsp; <b>Right trigger</b> = gas &nbsp;·&nbsp; <b>Left trigger</b> = brake</p>
     <p class="small">Two-way highway: cross the median to face oncoming traffic — wrong-way near misses score double and build a bonus. Brake for hairpins: tight curves push you wide.</p>
@@ -168,6 +171,7 @@
     <p class="small">In game: press <b>A</b> on the right controller (or <b>T</b> on desktop) to cycle Day → Sunset → Night.</p>
     <p class="small">In VR: <b>B</b> pauses (menu: resume · location · mute · comfort vignette · restart) · <b>Y</b> mutes. Desktop: <b>P</b> pauses, <b>M</b> mutes.</p>
     <p class="small"><button class="todOpt" id="vigBtn">◐ COMFORT VIGNETTE: OFF</button></p>
+    <div id="buildId"></div>
     <p class="backlink"><a href="./">← Danny's Arcade</a></p>
   </div>
 </div>
@@ -179,6 +183,12 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';   // Expansion: licensed Kenney nature models (progressive enhancement; the game plays fully on procedural props if the loads fail)
+
+// Finished-Quality Program FQ1 (2026-11-16, directive §1): the build
+// identifier, shown in the menu footer, on the pause-menu perf cell, and in
+// the perf-log export — so Danny can confirm exactly which build he is
+// testing. Single source of truth: every display reads this const.
+const BUILD_ID = 'RAD-ROAD-20261121';
 
 // ============================== helpers ==============================
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -291,6 +301,52 @@ function perfSessionEnd() {
   });
   savePerfLog(log);
   renderPerfSummary();
+}
+
+// --- FQ1 frame-time ring buffer (directive §5: distribution, not just an
+// average) ---
+// A rolling average alone does not demonstrate stable performance, so the
+// last 3600 gameplay frame times (~50 s at 72 FPS) are kept in a ring
+// buffer. The pause-menu perf cell and the menu summary show the
+// distribution (p50/p95/p99, % frames over 13.9 ms — the 72 FPS budget —
+// rolling FPS labeled as rolling, draw calls), and EXPORT PERF LOG
+// downloads the full array. Same feed gate as the valve: gameplay frames
+// only (never paused, never during the post-start / post-resume warm-up),
+// so load and resume hitches are not counted as gameplay frame time.
+// Quantile convention matches perfSessionEnd (floor(q*n), clamped).
+// Pure helpers (verbatim-extracted by rad-fq1-perf-tests.mjs — keep them
+// side-effect-free and independent of renderer/session state).
+const FRAME_RING_CAP = 3600;
+const frameRing = new Float32Array(FRAME_RING_CAP);
+let frameRingHead = 0;     // next write slot
+let frameRingCount = 0;    // frames recorded (<= FRAME_RING_CAP)
+let lastDrawCalls = 0;     // renderer.info.render.calls from the most recent render (both eyes, in XR)
+function frameRingPush(ms) {
+  frameRing[frameRingHead] = ms;
+  frameRingHead = (frameRingHead + 1) % FRAME_RING_CAP;
+  if (frameRingCount < FRAME_RING_CAP) frameRingCount++;
+}
+function frameRingOrdered() {
+  // Oldest -> newest, plain numbers rounded to 0.1 ms (export + stats).
+  const out = new Array(frameRingCount);
+  const start = frameRingCount < FRAME_RING_CAP ? 0 : frameRingHead;
+  for (let i = 0; i < frameRingCount; i++) out[i] = Math.round(frameRing[(start + i) % FRAME_RING_CAP] * 10) / 10;
+  return out;
+}
+function frameRingStats() {
+  const n = frameRingCount;
+  if (!n) return { n: 0, p50: null, p95: null, p99: null, mean: null, pctOver139: null, rollingFps: null };
+  const sorted = frameRingOrdered().sort((a, b) => a - b);
+  const at = q => sorted[Math.min(n - 1, Math.floor(q * n))];
+  let sum = 0, over = 0;
+  for (let i = 0; i < n; i++) { sum += sorted[i]; if (sorted[i] > 13.9) over++; }
+  const mean = sum / n;
+  return {
+    n, p50: at(0.5), p95: at(0.95), p99: at(0.99),
+    mean: Math.round(mean * 10) / 10,
+    pctOver139: Math.round(over / n * 1000) / 10,
+    rollingFps: Math.round(1000 / mean * 10) / 10   // 1000 / mean frame time over the ring; labeled "rolling" everywhere it is shown
+  };
 }
 
 // --- Frame-time valve (Neon / Rhythm Slicer pattern, Bible §2/§4) ---
@@ -976,7 +1032,7 @@ for (let s = 0; s < DRAW; s++) {
   const b = s * MARK_VERTS;
   for (let d = 0; d < 6; d++) {
     const db = b + d * 4;
-    markIdx.push(db, db + 2, db + 1, db + 1, db + 2, db + 3);
+    markIdx.push(db, db + 1, db + 2, db + 1, db + 3, db + 2);
   }
 }
 const markGeo = new THREE.BufferGeometry();
@@ -984,7 +1040,7 @@ markGeo.setAttribute('position', new THREE.BufferAttribute(markPos, 3).setUsage(
 markGeo.setAttribute('color', new THREE.BufferAttribute(markCol, 3).setUsage(THREE.DynamicDrawUsage));
 markGeo.setAttribute('normal', new THREE.BufferAttribute(markNor, 3).setUsage(THREE.DynamicDrawUsage));
 markGeo.setIndex(markIdx);
-const markings = new THREE.Mesh(markGeo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+const markings = new THREE.Mesh(markGeo, new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
 markings.frustumCulled = false;
 markings.receiveShadow = true;   // hybrid shadows: lane lines now shadow with the road
 scene.add(markings);
@@ -3365,6 +3421,10 @@ drawScoreCell('0 PTS · 0 MPH', '0.00 MI · TIER 1', 'NEXT TIER 1500m · RUSH IN
 // only the menu, the render loop, and idle engine audio keep running.
 let paused = false;
 let pauseSel = 0;
+// FQ1: on the first paused frame the sticks are baselined, not read as menu
+// edges — pausing mid-steer used to jump the selection / cycle the location
+// on entry (see the paused branch of tick).
+let pauseNavInit = false;
 const PAUSE_ITEMS = ['RESUME', 'LOCATION', 'MUTE', 'VIGNETTE', 'RESTART RUN'];
 // Journey boundary tracker (tick compares currentLocIdx() against this).
 // The pause-menu LOCATION jump updates it so the boundary banner does not
@@ -3398,6 +3458,11 @@ function drawPauseMenu() {
   g.textAlign = 'center';
   g.font = '900 52px Arial'; g.fillStyle = '#ffffff';
   g.fillText('PAUSED', 320, 66);
+  // FQ1: build identifier, top-right corner — visible every time the menu
+  // opens, clear of the centred title (title spans ~230..410px at 52px).
+  g.font = '700 16px Arial'; g.fillStyle = '#7a7f8a'; g.textAlign = 'right';
+  g.fillText(BUILD_ID, 628, 30);
+  g.textAlign = 'center';
   // Hint line: kept short (20px, ~590px max) so it fits the 640px canvas —
   // the old 24px line measured ~968px and was clipped at both panel edges.
   g.font = '700 20px Arial'; g.fillStyle = '#27e8ff';
@@ -3422,17 +3487,35 @@ function drawPauseMenu() {
     g.fillStyle = i === pauseSel ? '#ffd319' : '#eaf6ff';
     g.fillText((i === pauseSel ? '▶ ' : '') + pauseItemLabel(i), 320, y);
   });
-  // Perf readout: measured frame time + valve level + the XR layer's ACTUAL
-  // framebuffer size — a measurement display, never an FPS claim.
-  g.font = '700 22px Arial'; g.fillStyle = '#9aa0ac';
-  g.fillText('PERF ' + perfValve.ema.toFixed(1) + 'ms AVG · VALVE L' + perfValve.level + ' · FB ' + xrLayerSize(), 320, 372);
+  // Perf readout (FQ1, directive §5): frame-time DISTRIBUTION from the ring
+  // buffer — a rolling average alone does not demonstrate stable
+  // performance — plus rolling FPS (labeled as rolling), draw calls, valve
+  // level, and the XR layer's ACTUAL framebuffer size. Measured values
+  // only, never an FPS claim: real Quest 2 numbers come from the headset
+  // session, and EXPORT PERF LOG carries the full distribution. Both lines
+  // auto-fit to the 600px inner width (same pattern as the status line).
+  // Before any gameplay frame is recorded, fall back to the valve EMA line.
+  const ps = frameRingStats();
+  g.fillStyle = '#9aa0ac';
+  const perfFit = (txt, y) => {
+    let px = 20;
+    g.font = '700 ' + px + 'px Arial';
+    while (g.measureText(txt).width > 600 && px > 14) { px -= 1; g.font = '700 ' + px + 'px Arial'; }
+    g.fillText(txt, 320, y);
+  };
+  if (ps.n) {
+    perfFit('p50 ' + ps.p50 + ' · p95 ' + ps.p95 + ' · p99 ' + ps.p99 + ' ms · >13.9ms ' + ps.pctOver139 + '%', 350);
+    perfFit(ps.rollingFps + ' FPS (rolling) · DRAW ' + lastDrawCalls + ' · VALVE L' + perfValve.level + ' · FB ' + xrLayerSize(), 376);
+  } else {
+    perfFit('PERF ' + perfValve.ema.toFixed(1) + 'ms AVG · VALVE L' + perfValve.level + ' · FB ' + xrLayerSize(), 372);
+  }
   pauseTex.needsUpdate = true;
 }
 function setPaused(p) {
   if (paused === p) return;
   paused = p;
   pausePanel.visible = p;
-  if (p) { pauseSel = 0; drawPauseMenu(); }
+  if (p) { pauseSel = 0; pauseNavInit = true; drawPauseMenu(); }
   else { perfWarmup = 2; }   // resume hitch is not gameplay frame time
 }
 // Round 3 (pause-menu FIX 1): one shared selection-move path for the XR
@@ -3760,7 +3843,11 @@ window.addEventListener('keydown', e => {
   // shares cyclePauseLocation with the tick's XR stick path (R5) and the
   // click path — one cycle path, three inputs.
   if (!e.repeat) {
-    if (e.code === 'KeyP') setPaused(!paused);
+    // FQ1: P only pauses while driving (panel hidden). Pausing from the menu
+    // used to start the run already paused, with the menu hidden — the
+    // player had to press P again before anything moved. XR B cannot hit
+    // this path: it only fires while presenting, which implies driving.
+    if (e.code === 'KeyP') { if (panelHidden) setPaused(!paused); }
     else if (paused) {
       if (e.code === 'ArrowUp' || e.code === 'KeyW') movePauseSelection(-1);
       else if (e.code === 'ArrowDown' || e.code === 'KeyS') movePauseSelection(1);
@@ -3776,7 +3863,10 @@ window.addEventListener('keyup', e => { keys[e.code] = false; });
 // (alt-tab, focus loss) never delivers its keyup, so keys[] latches true
 // and the polled edge for that key can never fire again until reload.
 // Clear the whole map on blur; held keys re-register on the next keydown.
-window.addEventListener('blur', () => { for (const k of Object.keys(keys)) keys[k] = false; });
+// FQ1: the polled weapon/TOD edge flags are cleared too — a B/H/O/T held
+// across the blur left prevKey* true, so the next press after the blur was
+// swallowed (edge already "seen") until a release + re-press.
+window.addEventListener('blur', () => { for (const k of Object.keys(keys)) keys[k] = false; prevKeyB = prevKeyH = prevKeyO = prevKeyT = false; });
 
 const DEAD = 0.12;
 let prevSqL = false, prevSqR = false, prevTodR = false;
@@ -3997,12 +4087,17 @@ function updateAimDebug() {
 }
 function updateAimOverlay() {
   if (!DEBUG_AIM || !dbgOverlay) return;
+  const ps = frameRingStats();
+  const distLine = ps.n
+    ? 'p50 ' + ps.p50 + ' p95 ' + ps.p95 + ' p99 ' + ps.p99 + ' ms · >13.9 ' + ps.pctOver139 + '% · ' + ps.rollingFps + ' FPS (rolling)'
+    : 'no gameplay frames recorded yet';
   dbgOverlay.textContent =
     'STEER raw ' + dbgInputSteer.toFixed(3) + '  smooth ' + steerSmooth.toFixed(3) +
     '  hand ' + (steerHand || '-') +
     '\nlatVel ' + dbgLatVel.toFixed(2) + ' m/s (raw would be ' + dbgRawLatVel.toFixed(2) + ')' +
     '\nplayerX ' + playerX.toFixed(2) + '  speed ' + (speed * 2.23694).toFixed(0) + ' MPH' +
     '\nvalve L' + perfValve.level + '  EMA ' + perfValve.ema.toFixed(1) + ' ms' +
+    '\n' + distLine +
     '\ngas ' + dbgXR.gas.toFixed(2) + ' brake ' + dbgXR.brake.toFixed(2) + ' src ' + dbgXR.sources + ' edge ' + dbgXR.lastEdge +
     '\nassets: ' + assetLoadStatus + (kenneyCarsOn ? ' · kenney cars ON' : ' · procedural cars') + (kenneyNatureOn ? ' · kenney nature ON' : ' · procedural nature') + (asphaltOn ? ' · photo asphalt ON' : ' · canvas asphalt');
 }
@@ -4153,24 +4248,85 @@ document.getElementById('scenicBtn').addEventListener('click', () => {
   saveExpPrefs(); updateModeButtons(); refreshTrafficActivation();
 });
 // V2.0 perf summary: the last completed session, shown on the menu so Danny
-// never has to copy numbers by hand.
+// never has to copy numbers by hand. FQ1: the live ring-buffer distribution
+// for this page load is shown first (it survives the session end, so after a
+// drive the menu shows that drive's real distribution), then the stored
+// last-session summary.
 function renderPerfSummary() {
   const el = document.getElementById('perfSummary');
   if (!el) return;
+  const ps = frameRingStats();
+  const live = ps.n
+    ? 'Live (this page load, ' + ps.n + ' frames): p50 ' + ps.p50 + ' ms · p95 ' + ps.p95 + ' ms · p99 ' + ps.p99 + ' ms · ' + ps.pctOver139 + '% over 13.9 ms · ' + ps.rollingFps + ' FPS (rolling) · draw calls ' + lastDrawCalls + '. '
+    : '';
   const log = loadPerfLog();
-  if (!log.length) { el.textContent = 'No performance sessions logged yet — drive a session and the summary appears here.'; return; }
+  if (!log.length) { el.textContent = live + 'No performance sessions logged yet — drive a session and the summary appears here.'; return; }
   const s = log[log.length - 1];
   const locName = (LOCATIONS[LOC_INDEX[s.loc]] || {}).name || s.loc;
   const mins = Math.max(1, Math.round(s.durationSec / 60));
-  el.textContent = 'Last session: ' + locName + ' · ' + mins + ' min · median ' + s.medianMs + ' ms, p95 ' + s.p95Ms + ' ms' +
+  el.textContent = live + 'Last session: ' + locName + ' · ' + mins + ' min · median ' + s.medianMs + ' ms, p95 ' + s.p95Ms + ' ms' +
     (s.minMs !== undefined ? ', best ' + s.minMs + ' ms' : '') +
     ' · valve L0 ' + Math.round(s.valveTime[0]) + 's / L1 ' + Math.round(s.valveTime[1]) + 's / L2 ' + Math.round(s.valveTime[2]) + 's';
+}
+// FQ1 perf-log export (directive §6): the export FILE is the delivery
+// mechanism — nobody can read this headset's localStorage remotely.
+// Downloads a JSON file: build ID, timestamp, the full frame-time array
+// (last 3600 gameplay frames this page load), distribution stats,
+// device/XR info, draw calls, and the stored session summaries. No
+// personal data of any kind; nothing is transmitted anywhere.
+function exportPerfLog() {
+  try {
+    const payload = {
+      buildId: BUILD_ID,
+      game: 'rad-vr-expansion',
+      exportedAt: new Date().toISOString(),
+      frameWindow: 'last 3600 gameplay frames this page load (ring buffer; paused + warm-up frames excluded)',
+      location: LOCATIONS[currentLocIdx()].id,
+      mode: expPrefs.journey ? 'journey' : 'single',
+      device: {
+        userAgent: navigator.userAgent || 'unknown',
+        hardwareConcurrency: navigator.hardwareConcurrency || null,
+        devicePixelRatio: window.devicePixelRatio || null,
+        innerWidth: window.innerWidth, innerHeight: window.innerHeight
+      },
+      xr: {
+        presenting: renderer.xr.isPresenting,
+        layerSize: xrLayerSize(),
+        valveLevel: perfValve.level,
+        valveEmaMs: Math.round(perfValve.ema * 10) / 10,
+        foveation: perfValve.foveation[perfValve.level]
+      },
+      drawCalls: lastDrawCalls,
+      frameStats: frameRingStats(),
+      frameTimesMs: frameRingOrdered(),
+      sessions: loadPerfLog()
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rad-perf-' + BUILD_ID + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) { /* already revoked */ } }, 5000);
+    setStatus('Perf log exported — check your Downloads folder.');
+  } catch (e) {
+    setStatus('Perf log export failed: ' + (e && e.message ? e.message : e));
+  }
 }
 // Menu boot state: selected location card, mode buttons, bests, perf summary.
 document.querySelectorAll('.locCard').forEach(el => el.classList.toggle('sel', el.dataset.loc === expPrefs.location));
 updateModeButtons();
 updateBestDisplays();
 renderPerfSummary();
+// FQ1: build ID in the menu footer + the perf-log export button (both read
+// BUILD_ID; the footer is set here so the const stays the single source of
+// truth). Null-guarded: the harness stub returns a proxy, real DOM has them.
+const buildIdEl = document.getElementById('buildId');
+if (buildIdEl) buildIdEl.textContent = 'Build ' + BUILD_ID + ' · Finished-Quality FQ1';
+const exportPerfBtn = document.getElementById('exportPerfBtn');
+if (exportPerfBtn) exportPerfBtn.addEventListener('click', () => exportPerfLog());
 
 if (navigator.xr && navigator.xr.isSessionSupported) {
   xrSupportPromise = navigator.xr.isSessionSupported('immersive-vr').then(ok => {
@@ -4185,7 +4341,10 @@ if (navigator.xr && navigator.xr.isSessionSupported) {
   setStatus('WebXR is not available here. For VR, open this page in the Quest Browser. Desktop preview still works.');
 }
 
+let vrStarting = false;   // FQ1: ENTER VR double-tap guard — two rapid taps used to run the handler twice (the button is only disabled AFTER the awaited support check), firing two requestSession calls against one immersive slot.
 vrBtn.addEventListener('click', async () => {
+  if (vrStarting) return;   // a start is already in flight; the first tap owns it
+  vrStarting = true;
   startAudio();
   // Round 3 (R1): await the support check before branching — a fast tap
   // before isSessionSupported resolves would otherwise take the desktop
@@ -4193,7 +4352,7 @@ vrBtn.addEventListener('click', async () => {
   // and pollXRInput returning zeros forever. The awaited promise never
   // rejects (it carries the .catch below).
   if (xrSupportPromise) await xrSupportPromise;
-  if (!xrSupported) { hidePanel(); return; }
+  if (!xrSupported) { vrStarting = false; hidePanel(); return; }
   vrBtn.disabled = true;
   try {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
@@ -4201,7 +4360,7 @@ vrBtn.addEventListener('click', async () => {
     await renderer.xr.setSession(session);
     hidePanel();
     perfWarmup = 2;
-    session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+    session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; vrStarting = false; });
   } catch (err) {
     try {
       const session = await navigator.xr.requestSession('immersive-vr');
@@ -4209,10 +4368,11 @@ vrBtn.addEventListener('click', async () => {
       await renderer.xr.setSession(session);
       hidePanel();
       perfWarmup = 2;
-      session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; });
+      session.addEventListener('end', () => { if (paused) setPaused(false); showPanel(); setStatus('VR session ended. Tap ENTER VR to go again.'); vrBtn.disabled = false; vrStarting = false; });
     } catch (err2) {
       setStatus('Could not start VR: ' + err2.message + ' — desktop preview is running instead.');
       vrBtn.disabled = false;
+      vrStarting = false;
       hidePanel();
     }
   }
@@ -4601,10 +4761,11 @@ function tick() {
   avgFrameMs = avgFrameMs * 0.95 + ft * 0.05;
   if (avgFrameMs > 22) perfHold = true; else if (avgFrameMs < 17) perfHold = false;
   // Frame-time valve: fed only during active play (never while paused, and
-  // not during the post-start / post-resume warm-up window).
+  // not during the post-start / post-resume warm-up window). The FQ1 ring
+  // buffer takes the same feed, so the distribution is gameplay frame time.
   if (!paused) {
     if (perfWarmup > 0) perfWarmup -= dt;
-    else perfValve.update(ft, dt);
+    else { perfValve.update(ft, dt); frameRingPush(ft); }
   }
   const input = readInputs();
   dbgInputSteer = input.steer;   // steering diagnostic (?debug=aim)
@@ -4615,19 +4776,28 @@ function tick() {
     // Menu navigation (XR thumbstick): one item per deflection edge.
     // Keyboard arrows are handled in the keydown listener (Round 3).
     const dir = input.menuY < -0.5 ? -1 : input.menuY > 0.5 ? 1 : 0;
-    if (dir !== 0 && dir !== prevMenuDir) movePauseSelection(dir);
-    prevMenuDir = dir;
     // Round 3 (R5): right-stick X cycles the location while LOCATION is
     // selected (VR). Sticks don't steer while paused, so there is no
     // conflict. Stays paused so the new location shows in the menu.
     // Desktop arrows take the same cyclePauseLocation path via the
     // keydown listener; trigger/A still cycles +1 via activatePauseItem.
     const dirX = input.menuX < -0.5 ? -1 : input.menuX > 0.5 ? 1 : 0;
-    if (dirX !== 0 && dirX !== prevMenuXDir && pauseSel === 1) {
-      cyclePauseLocation(dirX);
-      drawPauseMenu(); clickSound();
+    if (pauseNavInit) {
+      // FQ1: a stick held deflected at pause entry (e.g. mid-steer) is the
+      // baseline, not a menu edge — the player must re-centre and deflect
+      // again to move. Before this, pausing while steering jumped the
+      // selection on the first paused frame (and cycled the location if
+      // LOCATION happened to be selected).
+      prevMenuDir = dir; prevMenuXDir = dirX; pauseNavInit = false;
+    } else {
+      if (dir !== 0 && dir !== prevMenuDir) movePauseSelection(dir);
+      prevMenuDir = dir;
+      if (dirX !== 0 && dirX !== prevMenuXDir && pauseSel === 1) {
+        cyclePauseLocation(dirX);
+        drawPauseMenu(); clickSound();
+      }
+      prevMenuXDir = dirX;
     }
-    prevMenuXDir = dirX;
     if (input.menuAct) activatePauseItem();
     // Frozen world: idle engine hum, vignette off, still render the scene
     // (the headset can still look around the frozen world).
@@ -4635,6 +4805,7 @@ function tick() {
     updateInputDebug(dt);   // Round 3 (R2): the readout stays live while paused (menu nav uses the sticks)
     vignetteMat.opacity = 0;
     renderer.render(scene, camera);
+    lastDrawCalls = renderer.info.render.calls;
     return;
   }
   if (input.tod) cycleTimeOfDay();
@@ -4870,6 +5041,7 @@ function tick() {
   updateAimDebug();
   updateInputDebug(dt);   // Round 3 (R2): in-VR input readout (?debug=aim)
   renderer.render(scene, camera);
+  lastDrawCalls = renderer.info.render.calls;   // FQ1: draw calls for the perf cell + export
 }
 buildAimDebug();   // no-op unless ?debug=aim
 buildInputDebug();   // no-op unless ?debug=aim (Round 3 R2)

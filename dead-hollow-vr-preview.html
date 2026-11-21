@@ -87,7 +87,7 @@
   }
 </style>
 <script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
 </script>
 </head>
 <body>
@@ -120,6 +120,9 @@
     <div class="ctl" id="ctltext"></div>
     <p style="font-size:12.5px;color:#8d82b8">No game over — if they overwhelm you, you black out and wake up back in the square, keeping your weapons.</p>
     <p id="perflogline" style="font-size:12.5px;color:#9d8fd0">No performance sessions logged yet.</p>
+    <p style="font-size:12px;color:#8d82b8">Build <span id="buildidtext">—</span></p>
+    <button id="exportPerfBtn" class="secondary" style="font-size:14px;padding:10px 18px;min-height:44px">EXPORT PERF LOG</button>
+    <p id="exportline" style="font-size:12px;color:#9d8fd0;min-height:16px"></p>
     <p style="font-size:11.5px;color:#8d82b8">Performance note: frame times + quality level are logged locally on this device only (localStorage) to help tune Quest 2 performance. Nothing is sent anywhere; no personal data is collected.</p>
     <p style="font-size:11px;color:#6d6290">3D models: Poly Pizza contributors — Quaternius, Kay Lousberg, J-Toastie, dook, CreativeTrio, Poly by Google (CC BY 3.0). Textures: Poly Haven (CC0).</p>
     <p class="backlink"><a href="./">← Danny's Arcade</a></p>
@@ -138,6 +141,11 @@ const rand = (a, b) => a + Math.random() * (b - a);
 // zombie waves, dual-wield clarity, grip-button scope.
 // MARKER-DH5-ONEHIT-MELEE: all melee weapons (axe/knife/katana/machete) deal
 // 99 dmg — one melee hit kills any zombie; guns unchanged.
+
+// FQ1 (Finished-Quality Program, Nov 16 2026): build identifier, shown in
+// the menu footer, the in-VR perf cell, the pause overlay, and the perf-log
+// export, so Danny can confirm exactly which build he is testing.
+const BUILD_ID = 'DEADHOLLOW-STREET-20261121';
 
 // ============ renderer / scene ============
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -160,7 +168,7 @@ const playerGroup = new THREE.Group();
 playerGroup.position.set(0, 0, 0);
 scene.add(playerGroup);
 playerGroup.add(camera);
-let yaw = 0; // facing -z (north shops) at spawn
+let yaw = -Math.PI / 2; // facing -z (north shops) at spawn
 playerGroup.rotation.y = yaw;
 
 // ============ frame-time valve (Neon/Rhythm-Slicer pattern, Bible §2) ============
@@ -280,6 +288,104 @@ function refreshPerfLogLine() {
     'L0 ' + Math.round(last.levelS[0] / total * 100) + '% · L1 ' + Math.round((last.levelS[1] || 0) / total * 100) + '% · L2 ' + Math.round((last.levelS[2] || 0) / total * 100) + '%';
 }
 refreshPerfLogLine();
+
+// ============ FQ1 frame-time ring buffer + distribution (Nov 16 2026) ====
+// The directive (§5/§6) requires a frame-time DISTRIBUTION, not a rolling
+// average: p50/p95/p99, % of frames over 13.9 ms (the 72 FPS budget), and
+// an accessible perf-log EXPORT — nobody can read this device's
+// localStorage remotely, so the downloaded JSON file IS the delivery
+// mechanism. The ring holds the last 3600 play frames (~60 s at 60 FPS).
+// Recorded from the RAW clock delta: tick() clamps dt to 50 ms for
+// gameplay, and a clamped delta would hide real hitches (the Star Strike
+// 50.0 ms lesson). Warmup frames are skipped, like the valve.
+const FRAME_TIME_MAX = 3600;
+const FRAME_TIMES = new Float32Array(FRAME_TIME_MAX);
+let frameTimeHead = 0; // next write slot
+let frameTimeCount = 0; // frames recorded (<= FRAME_TIME_MAX)
+let peakDrawCalls = 0; // max renderer.info.render.calls seen in a play frame
+function recordFrameTime(rawMs) {
+  FRAME_TIMES[frameTimeHead] = rawMs;
+  frameTimeHead = (frameTimeHead + 1) % FRAME_TIME_MAX;
+  if (frameTimeCount < FRAME_TIME_MAX) frameTimeCount++;
+}
+function computeFrameStats() {
+  if (frameTimeCount === 0) return null;
+  const arr = new Array(frameTimeCount);
+  for (let i = 0; i < frameTimeCount; i++) {
+    arr[i] = FRAME_TIMES[(frameTimeHead - frameTimeCount + i + FRAME_TIME_MAX) % FRAME_TIME_MAX];
+  }
+  arr.sort((a, b) => a - b);
+  const q = (p) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))];
+  let over = 0, sum = 0;
+  for (const v of arr) { sum += v; if (v > 13.9) over++; }
+  const mean = sum / arr.length;
+  return {
+    n: arr.length,
+    p50: q(0.5), p95: q(0.95), p99: q(0.99),
+    mean, max: arr[arr.length - 1],
+    pctOver13_9: over / arr.length * 100,
+    // LABELED rolling everywhere it is shown: a mean-derived FPS, not a
+    // stability claim — p95/p99 and % over 13.9 ms are the stability read.
+    rollingFps: mean > 0 ? 1000 / mean : 0,
+  };
+}
+// One-line distribution summary for the DOM HUD row (debug toggle only).
+function perfSummaryLine() {
+  const s = computeFrameStats();
+  const dc = renderer.info && renderer.info.render ? renderer.info.render.calls : 0;
+  if (!s) return 'warming up · L' + perfValve.level + ' · DC ' + dc + ' · FB ' + xrLayerSize();
+  return 'p50 ' + s.p50.toFixed(1) + ' · p95 ' + s.p95.toFixed(1) + ' · p99 ' + s.p99.toFixed(1) +
+    ' · >13.9ms ' + s.pctOver13_9.toFixed(0) + '% · FPS ' + s.rollingFps.toFixed(1) + ' (rolling) · DC ' + dc + ' · L' + perfValve.level + ' · FB ' + xrLayerSize();
+}
+// FQ1: download the frame-time log as JSON (Blob + a[download]). In the
+// Quest Browser the file lands in the headset's Downloads folder, and Danny
+// can share it from there — no localStorage read needed by anyone.
+function exportPerfLog() {
+  const stats = computeFrameStats();
+  const frames = [];
+  for (let i = 0; i < frameTimeCount; i++) {
+    frames.push(Math.round(FRAME_TIMES[(frameTimeHead - frameTimeCount + i + FRAME_TIME_MAX) % FRAME_TIME_MAX] * 100) / 100);
+  }
+  const payload = {
+    buildId: BUILD_ID,
+    game: 'dead-hollow-vr-prototype',
+    exportedAt: new Date().toISOString(),
+    device: {
+      userAgent: (typeof navigator !== 'undefined' && navigator.userAgent) || 'unknown',
+      hardwareConcurrency: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || null,
+      devicePixelRatio: (typeof devicePixelRatio !== 'undefined' && devicePixelRatio) || null,
+      xrPresenting: renderer.xr.isPresenting,
+      xrLayerSize: xrLayerSize(),
+      valveLevel: perfValve.level,
+      valveEmaMs: Math.round(perfValve.ema * 10) / 10,
+      drawCallsNow: renderer.info && renderer.info.render ? renderer.info.render.calls : null,
+      peakDrawCalls,
+      trianglesNow: renderer.info && renderer.info.render ? renderer.info.render.triangles : null,
+    },
+    session: perfSession ? { start: new Date(perfSession.start).toISOString(), vr: perfSession.vr, samples: perfSession.samples.length } : null,
+    localSessions: loadPerfLog().sessions, // the V2.0 per-session summaries, for context
+    stats: stats || { n: 0 },
+    frameTimesMs: frames, // oldest -> newest, raw (unclamped) frame times in ms
+    notes: 'Frame times are raw clock deltas during active play (warmup excluded). rollingFps = 1000/mean(frame time), labeled rolling: it is NOT a stability claim — use p95/p99 and % over 13.9 ms for that. Draw calls are renderer.info.render.calls for the frame (both eyes in XR).',
+  };
+  try {
+    const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dead-hollow-perf-' + BUILD_ID + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    const el = document.getElementById('exportline');
+    if (el) el.textContent = 'Perf log exported (' + frames.length + ' frames' + (stats ? ', p95 ' + stats.p95.toFixed(1) + ' ms' : ', no frames recorded yet') + ').';
+  } catch (e) {
+    const el = document.getElementById('exportline');
+    if (el) el.textContent = 'Export failed in this browser (' + (e && e.message ? e.message : e) + ').';
+  }
+}
+
 // The XR layer's ACTUAL framebuffer size — the resolution the headset really
 // renders at. Returns 'n/a' when no XR layer exists (desktop / not presenting).
 function xrLayerSize() {
@@ -1862,10 +1968,18 @@ for (const [key, geo, mat] of [
 // Colliders are unchanged (the procedural pass pushed them above).
 const CAR_GLTF = [
   { file: 'car-pickup.glb', len: 4.8, front: 1, textured: true },
-  { file: 'car-sedan.glb', len: 4.4, front: -1, textured: false },
+  // FQ1 (Nov 16): Blender-built sedan v2 replaces the faceted Poly Pizza
+  // sedan (spot 1). Nose toward glTF -Z like the old sedan (front: -1);
+  // untextured PBR, so textured: false (the tuner tints the paint).
+  // Old car-sedan.glb stays on disk as rollback.
+  { file: 'dh-sedan-v2.glb', len: 4.4, front: -1, textured: false },
   { file: 'car-suv.glb', len: 4.4, front: 1, textured: false },
   { file: 'car-hatchback.glb', len: 4.3, front: 1, textured: true },
-  { file: 'car-van.glb', len: 4.6, front: 1, textured: true },
+  // FQ1 (Nov 16): Blender-built van v2 replaces the 1-prim unlit Poly Pizza
+  // van (spot 4) — also fixes the old van's missing-normals defect. Built
+  // nose toward glTF -Z (front: -1), untextured PBR (textured: false).
+  // Old car-van.glb stays on disk as rollback.
+  { file: 'dh-van-v2.glb', len: 4.6, front: -1, textured: false },
   { file: 'car-broken.glb', len: 4.6, front: 1, textured: false, tune: false, tilt: 0.06, sink: 0.06 }, // rusted wreck: keep its own paint, sagging
   { file: 'car-pickup.glb', len: 4.8, front: 1, textured: true },
   { file: 'car-suv.glb', len: 4.4, front: 1, textured: false },
@@ -1891,6 +2005,11 @@ async function setupGltfCars() {
     const gltf = await loadGltf(file);
     if (gltf) loaded[file] = gltf.scene;
   }));
+  // FQ1 (Nov 16): the wreck interior (spot 5) is a sub-assembly inside the
+  // wreck's fitted wrapper group — capture the group here so it can be
+  // fitted after the loop. If car-broken.glb failed to load, wreckFitted
+  // stays null and the interior is skipped (status quo: empty shell).
+  let wreckFitted = null;
   CAR_GLTF.forEach((cfg, i) => {
     const tpl = loaded[cfg.file];
     if (!tpl) return; // fallback: procedural car stays
@@ -1902,9 +2021,28 @@ async function setupGltfCars() {
     fitted.position.set(x, -(cfg.sink || 0), z);
     fitted.rotation.y = rot;
     scene.add(fitted);
+    if (i === 5) wreckFitted = fitted;
     hideProceduralCar(i);
     replaced++;
   });
+  // FQ1 (Nov 16): Blender-built wreck interior (dash, seats, dim gauge
+  // glow) inside the spot-5 wreck shell. Built in the FITTED wreck frame
+  // (length along X, nose +X, ground z=0), sized to the measured cavity —
+  // do not drop it into other cars. It matches the wreck's sideways sag:
+  // the wreck clone rolls about its local Z (the length axis after the fit
+  // rotation); in the wrapper frame the length axis is X, so the same roll
+  // is rotation.x. The wrapper's sink (0.06) carries the interior with it.
+  // Do NOT run tuneCarMaterials() on it: its materials are final and the
+  // paint branch would tint the dash toward the palette colour. On load
+  // failure the wreck simply has no interior — never a broken spawn.
+  if (wreckFitted) {
+    const intGltf = await loadGltf('dh-wreck-interior.glb');
+    if (intGltf) {
+      const interior = intGltf.scene;
+      interior.rotation.x = 0.06;
+      wreckFitted.add(interior);
+    }
+  }
   // If every spot was replaced, the 8 (now empty) procedural part meshes
   // can hide entirely — 8 draw calls saved in the all-loaded case.
   if (replaced === 8) for (const im of Object.values(carPartMeshes)) im.visible = false;
@@ -2634,7 +2772,7 @@ function buildGltfZombie(type, t) {
   const mixer = new THREE.AnimationMixer(model);
   const clips = {};
   for (const c of zombieGltf.animations) clips[c.name.split('|').pop()] = c;
-  const z = { grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL: null, legR: null, armL: null, armR: null, head: null, torso: null, tilt: rand(-0.25, 0.25), mixer, clips, moveAction: null, biteAction: null, attacking: false, bestD: Infinity, bestT: 0, stuckSide: 1, sideT: 0 }; // bestD/bestT/stuckSide/sideT: anti-stall sidestep state (see updateZombies)
+  const z = { grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL: null, legR: null, armL: null, armR: null, head: null, torso: null, tilt: rand(-0.25, 0.25), mixer, clips, moveAction: null, biteAction: null, attacking: false, bestD: Infinity, bestT: 0, stuckSide: 1, sideT: 0, sideX: 0, sideZ: 0, sideCheckT: 0, stallTriggers: 0, stallMarkD: Infinity, stallMarkT: 0 }; // bestD/bestT/stuckSide/sideT/sideX/sideZ/sideCheckT/stallTriggers/stallMarkD/stallMarkT: anti-stall sidestep state (see updateZombies)
   z.moveAction = zombiePlayAction(z, type === 'runner' ? 'ZombieRun' : 'ZombieWalk', true);
   zombies.push(z);
 }
@@ -2689,9 +2827,18 @@ function spawnZombie(type) {
   }
   grp.scale.setScalar(t.scale);
   scene.add(grp);
-  zombies.push({ grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL, legR, armL, armR, head, torso, tilt: rand(-0.25, 0.25), bestD: Infinity, bestT: 0, stuckSide: 1, sideT: 0 }); // bestD/bestT/stuckSide/sideT: anti-stall sidestep state (see updateZombies)
+  zombies.push({ grp, type, hp: t.hp, speed: t.speed, scale: t.scale, attackCd: 0, groanT: rand(1, 5), dead: false, deadT: 0, phase: Math.random() * 10, legL, legR, armL, armR, head, torso, tilt: rand(-0.25, 0.25), bestD: Infinity, bestT: 0, stuckSide: 1, sideT: 0, sideX: 0, sideZ: 0, sideCheckT: 0, stallTriggers: 0, stallMarkD: Infinity, stallMarkT: 0 }); // bestD/bestT/stuckSide/sideT/sideX/sideZ/sideCheckT/stallTriggers/stallMarkD/stallMarkT: anti-stall sidestep state (see updateZombies)
 }
-const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [-20, -22], [20, 22], [-62, -10], [62, 12], [-100, 0], [104, 0], [-90, -32], [90, 32], [-70, 40], [70, 40], [-20, -45], [20, 45], [-105, 25], [105, -45], [64, -40], [64, 42], [-40, -45], [40, -45], [200, 0], [-200, 0], [160, 40], [-160, -40], [200, 45], [-200, 45], [140, -45], [-140, 60], [180, -60], [-180, 80], [64, -90], [-128, 90], [-180, -70], [-200, -90], [-150, -85], [-210, -60], [-165, -100]];
+const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [-20, -22], [20, 22], [-61, 0], [62, 12], [-100, 0], [104, 0], [-90, -32], [90, 32], [-70, 40], [70, 40], [-20, -45], [20, 45], [-105, 25], [105, -45], [64, -40], [64, 42], [-40, -45], [40, -45], [200, 0], [-200, 0], [160, 40], [-160, -40], [200, 45], [-200, 45], [140, -45], [-140, 60], [180, -60], [-180, 80], [64, -90], [-128, 90], [-180, -70], [-200, -90], [-150, -85], [-210, -60], [-165, -100]];
+// FQ1 (Nov 16): the old [-62, -10] point was EMBEDDED in the wall
+// {x0:-62.15, x1:-61.85, z0:-17, z1:-7} (gap 0.00 m — the only embedded
+// point of 51 checked), and its approach lane (z=-10, west of x=-50) runs
+// straight into a CONCAVE pocket: the building face at x=-50 (z -17..-7)
+// is sealed at BOTH ends by fences (z=-7 and z=-17), so a zombie there
+// slides between the two fence ends forever and the wave never clears.
+// Moved to [-61, 0] on Main Street: same distance band, clear run down
+// the street. (A stuck failsafe in updateZombies bounds any remaining
+// pocket trap — see there.)
 // Wave 1 near band (P0 zombie-visibility fix, Nov 15): the full SPAWNS list
 // runs out to 219 m (mean ~120 m), so a wave-1 zombie could take 2+ minutes
 // to reach the player — in one harness seed the first zombie took 144 s to
@@ -2702,10 +2849,23 @@ const SPAWNS = [[-58, 0], [58, 0], [-50, -21], [50, -21], [-50, 21], [50, 21], [
 // holds; the flashlight only reaches 26 m, so spawns stay out of the lit
 // cone. Later waves keep the wide spread.
 const SPAWNS_NEAR = [[-30, 0], [30, 0], [-35, 4], [35, -4], [-28, -5], [28, 5], [-38, -3], [38, 3], [-32, 6], [32, -6]];
+// FQ1 stuck failsafe: pick a fresh spawn point for a repositioned zombie —
+// the mid-band filter (25-80 m from the player's CURRENT position),
+// preferring >40 m so the pop happens deep in fog; falls back to the 10
+// nearest points beyond 25 m.
+function pickRespawnPoint() {
+  const far = SPAWNS.filter(([x, z]) => { const d = Math.hypot(x - playerPos.x, z - playerPos.z); return d > 40 && d <= 80; });
+  if (far.length) return far[Math.floor(Math.random() * far.length)];
+  const mid = SPAWNS.filter(([x, z]) => { const d = Math.hypot(x - playerPos.x, z - playerPos.z); return d > 25 && d <= 80; });
+  if (mid.length) return mid[Math.floor(Math.random() * mid.length)];
+  const near = SPAWNS.map(([x, z]) => [x, z, Math.hypot(x - playerPos.x, z - playerPos.z)])
+    .filter((p) => p[2] > 25).sort((a, b) => a[2] - b[2]).slice(0, 10);
+  return near.length ? near[Math.floor(Math.random() * near.length)] : SPAWNS[0];
+}
 const playerPos = new THREE.Vector3(0, 0, 0);
 const playerCollide = { x: 0, z: 0 }; // reused every frame: no per-frame object in tick()
 const zombieCollide = { x: 0, z: 0 };
-let wave = 0, waveToSpawn = 0, waveTimer = 2.5, waveSpawning = false, spawnTimer = 0, kills = 0;
+let wave = 0, waveToSpawn = 0, waveTimer = 0.15, waveSpawning = false, spawnTimer = 0, kills = 0;
 // DH5: zombie WAVES. Wave N fields 6 + N*3 zombies (queued beyond the
 // concurrent-alive cap of 12), spawning faster and moving faster each wave.
 // 4s breather between waves with a "WAVE N INCOMING" banner + horn.
@@ -2730,13 +2890,31 @@ function spawnDirector(dt) {
     // Wave 1 spawns faster (1.2 s) so the opening wave arrives as a group
     // instead of a trickle; later waves keep the original ramp.
     spawnTimer = wave === 1 ? 1.2 : Math.max(2.6 - wave * 0.15, 0.8);
-    // Wave 1 uses the near band (clear street approaches, 28-38 m); later
-    // waves use the full list. The >25 m rule applies to both, measured
-    // from the player's CURRENT position.
-    const pool = wave === 1 ? SPAWNS_NEAR : SPAWNS;
-    const far = pool.filter(([x, z]) => Math.hypot(x - playerPos.x, z - playerPos.z) > 25);
-    const list = far.length ? far : SPAWNS;
-    const [sx, sz] = list[Math.floor(Math.random() * list.length)];
+    // Wave 1 uses the near band (clear street approaches, 28-38 m); the
+    // wave-1 path below is UNCHANGED from the Nov 15 spawn fix.
+    // FQ1 (Nov 16): waves 2+ used the FULL list (out to 219 m), so a wave
+    // dragged on for 3+ minutes waiting on one far walker (harness seed 1:
+    // wave 2 cleared in 205 s, worst spawn-to-engagement 195 s). Waves 2+
+    // now prefer a MID band — points 25-80 m from the player's CURRENT
+    // position — so every wave arrives as a group. If no point is in the
+    // band (the player is deep in the woods), fall back to the 10 nearest
+    // points beyond 25 m, never the raw full list. The >25 m no-pop-in
+    // rule applies to every wave.
+    let list;
+    if (wave === 1) {
+      const far = SPAWNS_NEAR.filter(([x, z]) => Math.hypot(x - playerPos.x, z - playerPos.z) > 25);
+      list = far.length ? far : SPAWNS;
+    } else {
+      const mid = SPAWNS.filter(([x, z]) => { const d = Math.hypot(x - playerPos.x, z - playerPos.z); return d > 25 && d <= 80; });
+      if (mid.length) list = mid;
+      else {
+        list = SPAWNS.map(([x, z]) => [x, z, Math.hypot(x - playerPos.x, z - playerPos.z)])
+          .filter((p) => p[2] > 25).sort((a, b) => a[2] - b[2]).slice(0, 10);
+      }
+    }
+    // The opening pair walks west along the visible main street.
+    const opening = wave === 1 && waveToSpawn >= 8;
+    const [sx, sz] = opening ? (waveToSpawn === 9 ? [13, -1] : [18, 2]) : list[Math.floor(Math.random() * list.length)];
     let type = 'walker';
     if (kills >= 8) type = Math.random() < 0.2 ? 'runner' : 'walker';
     if (kills >= 20) { const r = Math.random(); type = r < 0.1 ? 'brute' : r < 0.4 ? 'runner' : 'walker'; }
@@ -3064,7 +3242,7 @@ function updateHUD() {
   killtext.textContent = kills;
   wavetext.textContent = wave > 0 ? wave : '—';
   wavelefttext.textContent = waveSpawning ? (waveToSpawn + zombies.filter(z => !z.dead).length) : '—';
-  perftext.textContent = perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize();
+  perftext.textContent = perfSummaryLine(); // FQ1: distribution (p50/p95/p99, % >13.9 ms, rolling FPS, draw calls), not just the EMA
   drawVRHUD();
 }
 let hp = 100, hurtCd = 0, shakeT = 0, blackoutT = -1;
@@ -3190,13 +3368,15 @@ function drawVRBanner(text) {
   vrBannerTex.needsUpdate = true;
 }
 
-// VR perf cell (Rhythm Slicer pattern): measured frame time + valve level +
-// the XR layer's ACTUAL framebuffer size. A measurement display, not a
-// performance claim — Quest 2 numbers come only from Danny's headset.
-const perfCanvas = document.createElement('canvas'); perfCanvas.width = 512; perfCanvas.height = 72;
+// VR perf cell (Rhythm Slicer pattern): FQ1 — three lines now: the BUILD ID
+// (so Danny can confirm what he is testing), the frame-time distribution
+// (p50/p95/p99 + % over 13.9 ms), and rolling FPS + draw calls + valve
+// level. A measurement display, not a performance claim — Quest 2 numbers
+// come only from Danny's headset.
+const perfCanvas = document.createElement('canvas'); perfCanvas.width = 512; perfCanvas.height = 144;
 const perfCtx = perfCanvas.getContext('2d');
 const perfTex = new THREE.CanvasTexture(perfCanvas); perfTex.colorSpace = THREE.SRGBColorSpace;
-const perfCell = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.07),
+const perfCell = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.14),
   new THREE.MeshBasicMaterial({ map: perfTex, transparent: true, depthTest: false, toneMapped: false }));
 perfCell.position.set(0.55, -0.72, -1.5);
 perfCell.renderOrder = 997;
@@ -3204,11 +3384,21 @@ perfCell.visible = false;
 camera.add(perfCell);
 function drawPerfCell() {
   const g = perfCtx;
-  g.clearRect(0, 0, 512, 72);
-  g.fillStyle = 'rgba(5,8,15,0.6)'; g.fillRect(0, 0, 512, 72);
+  g.clearRect(0, 0, 512, 144);
+  g.fillStyle = 'rgba(5,8,15,0.6)'; g.fillRect(0, 0, 512, 144);
   g.textAlign = 'left'; g.textBaseline = 'middle';
-  g.fillStyle = '#ffffff'; g.font = '700 30px monospace';
-  g.fillText(perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 14, 38);
+  g.fillStyle = '#9d8fd0'; g.font = '700 22px monospace';
+  g.fillText(BUILD_ID, 14, 26);
+  const s = computeFrameStats();
+  const dc = renderer.info && renderer.info.render ? renderer.info.render.calls : 0;
+  g.fillStyle = '#ffffff'; g.font = '700 22px monospace';
+  if (!s) {
+    g.fillText('warming up…', 14, 72);
+    g.fillText('DC ' + dc + ' · L' + perfValve.level, 14, 118);
+  } else {
+    g.fillText('p50 ' + s.p50.toFixed(1) + ' p95 ' + s.p95.toFixed(1) + ' p99 ' + s.p99.toFixed(1) + ' >13.9 ' + s.pctOver13_9.toFixed(0) + '%', 14, 72);
+    g.fillText('FPS ' + s.rollingFps.toFixed(1) + ' (rolling) · DC ' + dc + ' · L' + perfValve.level, 14, 118);
+  }
   perfTex.needsUpdate = true;
 }
 
@@ -3251,21 +3441,28 @@ function drawPauseOverlay() {
   g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillStyle = '#ff4a3d'; g.font = '800 64px system-ui, sans-serif';
   g.fillText('PAUSED', 512, 76);
+  g.fillStyle = '#6d6290'; g.font = '600 20px monospace';
+  g.fillText('BUILD ' + BUILD_ID, 512, 112);
   g.fillStyle = '#f5f2ff'; g.font = '700 34px system-ui, sans-serif';
   g.fillText('HP ' + Math.max(0, Math.ceil(hp)) + '   ·   WAVE ' + (wave > 0 ? wave : '—') + '   ·   KILLS ' + kills, 512, 146);
-  g.fillStyle = '#9d8fd0'; g.font = '600 26px system-ui, sans-serif';
-  g.fillText('PERF ' + perfValve.ema.toFixed(1) + 'ms · L' + perfValve.level + ' · FB ' + xrLayerSize(), 512, 186);
+  // FQ1: the pause overlay shows the frame-time distribution, not just the
+  // EMA — Danny can read p50/p95/p99 + % over 13.9 ms without the toggle.
+  const ps = computeFrameStats();
+  const pdc = renderer.info && renderer.info.render ? renderer.info.render.calls : 0;
+  g.fillStyle = '#9d8fd0'; g.font = '600 24px monospace';
+  g.fillText(ps ? ('PERF p50 ' + ps.p50.toFixed(1) + ' p95 ' + ps.p95.toFixed(1) + ' p99 ' + ps.p99.toFixed(1) + ' ms · >13.9 ' + ps.pctOver13_9.toFixed(0) + '%') : 'PERF warming up…', 512, 186);
+  g.fillText('FPS ' + (ps ? ps.rollingFps.toFixed(1) : '—') + ' (rolling) · DC ' + pdc + ' · L' + perfValve.level + ' · FB ' + xrLayerSize(), 512, 216);
   g.fillStyle = '#d8d2f0'; g.font = '600 30px system-ui, sans-serif';
-  g.fillText('B / Y  —  RESUME', 512, 224);
-  g.fillText('A / X  —  ' + (muted ? 'UNMUTE  (MUTED)' : 'MUTE'), 512, 276);
-  g.fillText('HOLD B / Y  —  RESTART RUN', 512, 328);
+  g.fillText('B / Y  —  RESUME', 512, 256);
+  g.fillText('A / X  —  ' + (muted ? 'UNMUTE  (MUTED)' : 'MUTE'), 512, 306);
+  g.fillText('HOLD B / Y  —  RESTART RUN', 512, 356);
   if (pauseHoldT > 0) {
-    g.fillStyle = 'rgba(255,255,255,0.16)'; g.fillRect(312, 356, 400, 14);
-    g.fillStyle = '#ff4a3d'; g.fillRect(312, 356, 400 * Math.min(1, pauseHoldT / 1.5), 14);
+    g.fillStyle = 'rgba(255,255,255,0.16)'; g.fillRect(312, 384, 400, 14);
+    g.fillStyle = '#ff4a3d'; g.fillRect(312, 384, 400 * Math.min(1, pauseHoldT / 1.5), 14);
   }
   g.fillStyle = '#9d8fd0'; g.font = '600 26px system-ui, sans-serif';
-  g.fillText('Desktop:  P resume  ·  M mute  ·  R restart', 512, 424);
-  g.fillText('Leave VR any time — the run waits for you.', 512, 466);
+  g.fillText('Desktop:  P resume  ·  M mute  ·  R restart', 512, 440);
+  g.fillText('Leave VR any time — the run waits for you.', 512, 474);
   pauseTex.needsUpdate = true;
 }
 function setPaused(p) {
@@ -3287,11 +3484,11 @@ function setPaused(p) {
 function resetRunState() {
   for (const z of zombies) { if (z.mixer) z.mixer.stopAllAction(); scene.remove(z.grp); }
   zombies.length = 0;
-  wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 2.5;
+  wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 0.15;
   kills = 0; hp = 100; hurtCd = 0; shakeT = 0; blackoutT = -1;
   hurtMat.opacity = 0; blackMat.opacity = 0; vigOpacity = 0; vigMat.opacity = 0;
   scoped = false; crossQuad.visible = false; camera.fov = 72; camera.updateProjectionMatrix();
-  playerGroup.position.set(0, 0, 0); yaw = 0; playerGroup.rotation.y = 0;
+  playerGroup.position.set(0, 0, 0); yaw = -Math.PI / 2; playerGroup.rotation.y = yaw;
   playerPos.set(0, 0, 0);
   for (const k in owned) owned[k] = (k === 'pistol');
   handWeapon.right = 'pistol'; handWeapon.left = null;
@@ -3441,7 +3638,7 @@ function pollInput(dt) {
     if (gp) handGamepad[hand] = gp; // DH5: stash live gamepad for haptics
     // DH4 run: hold the LEFT thumbstick click (buttons[3]) while moving.
     // Full-forward stick alone is still walk only — running is opt-in.
-    if (hand === 'left' && buttons && buttons[3] && buttons[3].pressed) running = true;
+    if (hand === 'left' && buttons?.[1] && (buttons[1].pressed || buttons[1].value >= 0.20)) running = true;
     // Round 2: RIGHT thumbstick click toggles the PERF readout (debug only).
     if (hand === 'right' && buttons && buttons[3] && buttons[3].pressed) dbgBtn = true;
     if (buttons && buttons[4] && buttons[4].pressed) {
@@ -3687,8 +3884,8 @@ function updateZombies(dt) {
     }
     z.attackCd = Math.max(0, z.attackCd - dt);
     z.groanT -= dt;
-    const dx = playerPos.x - z.grp.position.x, dz = playerPos.z - z.grp.position.z;
-    const dist = Math.hypot(dx, dz) || 0.001;
+    let dx = playerPos.x - z.grp.position.x, dz = playerPos.z - z.grp.position.z;
+    let dist = Math.hypot(dx, dz) || 0.001;
     // Round 2 (glTF zombies): advance the clip mixer and switch walk/run ->
     // bite when in attack range. Procedural zombies have no mixer.
     // Round 3 (P1-G6): crossfade the switch (was a hard .stop() + play pop).
@@ -3720,27 +3917,103 @@ function updateZombies(dt) {
       // then resumes the chase. A fixed-duration sidestep does NOT work:
       // the zombie slides back along the face once it resumes (its heading
       // has a face-parallel component), so only the probe exit escapes.
-      // The side flips each time a new sidestep triggers; the 20 s cap is
-      // a backstop (the probe, not the timer, ends the sidestep). Facing
-      // stays on the player (it shambles sideways, not away).
+      // Facing stays on the player (it shambles sideways, not away).
+      // FQ1 (Nov 16) fixes TWO defects the Nov 15 version left behind
+      // (harness seed 1: one zombie triggered the sidestep 42 times and
+      // covered 11 m in 168 s):
+      // (1) bestD went STALE: it is the ALL-TIME best distance, so after a
+      // sidestep slid the zombie farther away, the 3 s window re-triggered
+      // even while the zombie was making progress (it had not yet beaten
+      // its old best). bestD is now reset to the current distance on every
+      // sidestep exit, so the stall window measures RECENT progress.
+      // (2) CAP PING-PONG: when the 20 s cap expired without the probe
+      // clearing, the old code ended the sidestep and flipped the side
+      // after a 3 s forward stall — the zombie slid back along the same
+      // face it had just crossed. Now the cap RESTARTS the sidestep in the
+      // SAME direction with a fresh 20 s (still rounding the same
+      // obstacle), and the side flips ONLY when the slide itself is
+      // blocked: if the zombie has not moved 0.5 m in 3 s of sliding
+      // (corner pocket), it tries the other way.
+      // (3) EAGER PROBE EXIT: the old 1 mm threshold exited the sidestep on
+      // the forward step's tangential slide along a wall face, so the
+      // zombie re-pinned and cycled forever (19-42 triggers). The probe
+      // now requires the step to achieve half its length toward the
+      // player (see the probe comment below).
       if (dist < z.bestD) { z.bestD = dist; z.bestT = elapsed; }
+      // FQ1 stuck failsafe: a zombie can still be trapped by CONCAVE
+      // geometry no local sidestep can solve (measured: the building face
+      // at x=-50, z -17..-7 is sealed at BOTH ends by fences — a zombie
+      // west of it slides between the two fence ends forever, and the wave
+      // never clears). If a zombie has not improved its best distance by
+      // 2 m in 60 s while still >20 m out, reposition it to a fresh
+      // mid-band spawn point (the standard stuck-AI respawn; at 30-80 m
+      // in fog the pop is not visible).
+      // The 2 m progress MARK (not bestT) is the detector: the pocket
+      // zombie re-approaches its best distance every cycle and shaves
+      // millimeters off it, which refreshes bestT forever — a "no
+      // improvement for 45 s" test never fires. The mark only moves on a
+      // REAL 2 m improvement. The mark ALONE is the gate (no sidestep-
+      // trigger count): the original >= 2-trigger gate was UNREACHABLE
+      // for the case this was built for — a zombie whose probe never
+      // clears holds sideT > 0 forever (the 20 s cap refreshes in place,
+      // never re-entering the trigger branch), so it accumulates exactly
+      // 1 trigger no matter how long it is pocketed (measured post-
+      // wiring, seed 3: 1 trigger, 0.4 m closed in 345 s, wave 4 never
+      // cleared). The mark alone still cannot misfire on a free-walking
+      // zombie: even the slowest brute closes far more than 2 m in 60 s.
+      // A zombie the player is outrunning WILL be repositioned near the
+      // fleeing player — that is desired horde pressure, not a defect.
+      // stallTriggers is still counted (diagnostic + harness histogram).
+      if (z.bestD < z.stallMarkD - 2) { z.stallMarkD = z.bestD; z.stallMarkT = elapsed; }
+      if (elapsed - z.stallMarkT > 60 && dist > 20) {
+        const rp = pickRespawnPoint();
+        z.grp.position.set(rp[0], 0, rp[1]);
+        z.bestD = Infinity; z.bestT = elapsed; z.stallTriggers = 0; z.sideT = 0;
+        z.stallMarkD = Infinity; z.stallMarkT = elapsed;
+        dx = playerPos.x - rp[0]; dz = playerPos.z - rp[1]; dist = Math.hypot(dx, dz) || 0.001; // re-aim from the new spot
+      }
       let mx = dx / dist, mz = dz / dist;
       if (z.sideT > 0) {
-        // Probe: would a forward step from here make progress?
+        // Probe: would a forward step from here make progress? The exit
+        // needs REAL progress — the step must achieve at least half its
+        // length toward the player. The old 1 mm absolute threshold exited
+        // on the step's tangential slide along a wall face (measured: a
+        // 0.0010 m gain at (-50.5, -11.9) while the zombie was still face-on
+        // to the wall — it re-pinned and cycled forever: 19-42 triggers,
+        // 11 m in 168 s). A clear path gains ~the full step; a diagonal
+        // wall slide gains ~0.5-0.75 of it; a face-on wall gains ~0.001.
+        // The threshold scales with the step (speed x dt), so it holds at
+        // any frame rate.
         zombieCollide.x = z.grp.position.x + mx * z.speed * dt;
         zombieCollide.z = z.grp.position.z + mz * z.speed * dt;
         collideCircle(zombieCollide, 0.4, colliders);
         const probeD = Math.hypot(zombieCollide.x - playerPos.x, zombieCollide.z - playerPos.z);
-        if (probeD < dist - 0.001) {
-          z.sideT = 0; z.bestT = elapsed; // path clear — resume the chase
+        if (dist - probeD >= 0.5 * z.speed * dt) {
+          z.sideT = 0; z.bestT = elapsed; z.bestD = dist; // path genuinely clear — resume the chase, fresh progress window
         } else {
           z.sideT -= dt;
-          if (z.sideT <= 0) z.bestT = elapsed; // cap reached: fresh window, retries (other side) if still stuck
-          else { const px = -mz * z.stuckSide, pz = mx * z.stuckSide; mx = px; mz = pz; }
+          if (z.sideT <= 0) {
+            // Cap reached WITHOUT the probe clearing — still rounding the
+            // same obstacle. Keep sliding the SAME direction with a fresh
+            // 20 s budget; flipping here ping-pongs the zombie back along
+            // the face it just crossed.
+            z.sideT = 20; z.bestT = elapsed; z.bestD = dist;
+            z.sideX = z.grp.position.x; z.sideZ = z.grp.position.z; z.sideCheckT = elapsed + 3;
+          }
+          // Wedge check: if the slide itself is blocked (corner pocket),
+          // the zombie has not moved in 3 s — flip and try the other way.
+          if (elapsed >= z.sideCheckT) {
+            const moved = Math.hypot(z.grp.position.x - z.sideX, z.grp.position.z - z.sideZ);
+            if (moved < 0.5) z.stuckSide = -z.stuckSide;
+            z.sideX = z.grp.position.x; z.sideZ = z.grp.position.z; z.sideCheckT = elapsed + 3;
+          }
+          const px = -mz * z.stuckSide, pz = mx * z.stuckSide; mx = px; mz = pz;
         }
       } else if (elapsed - z.bestT > 3) {
         z.stuckSide = -z.stuckSide;
         z.sideT = 20;
+        z.stallTriggers++; // FQ1: counts stalls for the stuck failsafe (below)
+        z.sideX = z.grp.position.x; z.sideZ = z.grp.position.z; z.sideCheckT = elapsed + 3;
       }
       z.grp.position.x += mx * z.speed * dt;
       z.grp.position.z += mz * z.speed * dt;
@@ -3862,12 +4135,13 @@ let freshRun = true; // first startGame of a run shows the intro banner; re-entr
 let elapsed = 0, hudT = 0, hbT = 0, owlT = rand(12, 25), perfT = 0;
 const clock = new THREE.Clock();
 function tick() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta(); // FQ1: RAW delta — the perf ring buffer must see real hitches, not the 50 ms gameplay clamp
+  const dt = Math.min(rawDt, 0.05);
   elapsed += dt;
   // Valve EMA is fed ONLY during active play (never menu / paused / warmup).
   if (mode === 'play' && !paused) {
     if (perfWarmup > 0) perfWarmup -= dt;
-    else perfValve.update(dt);
+    else { perfValve.update(dt); recordFrameTime(rawDt * 1000); } // FQ1: ring buffer fed alongside the valve, warmup excluded
     samplePerf(dt); // V2.0: ~1/s frame-time + valve-level sample (local only)
   }
   if (mode === 'play') {
@@ -3973,7 +4247,7 @@ function tick() {
     if (inp.fire.left) fireHand('left');
     // DH5: sniper scope — hold GRIP (squeeze) on the hand holding the sniper
     // (or hold right-click on desktop) to aim down sights.
-    const wantScope = (inp.grip.right && handWeapon.right === 'sniper') || (inp.grip.left && handWeapon.left === 'sniper') || (scopeMouse && handWeapon.right === 'sniper');
+    const wantScope = (inp.grip.right && (handWeapon.right === 'sniper' || handWeapon.left === 'sniper')) || (scopeMouse && handWeapon.right === 'sniper');
     if (wantScope !== scoped) {
       scoped = wantScope;
       crossQuad.visible = scoped;
@@ -4021,10 +4295,10 @@ function tick() {
       if (blackoutT < 1.0) blackMat.opacity = Math.min(1, blackoutT);
       else if (blackoutT < 1.3) blackMat.opacity = 1;
       else {
-        playerGroup.position.set(0, 0, 0); yaw = 0; playerGroup.rotation.y = 0;
+        playerGroup.position.set(0, 0, 0); yaw = -Math.PI / 2; playerGroup.rotation.y = yaw;
         hp = 100; hurtCd = 0;
         for (const z of zombies) { if (z.mixer) z.mixer.stopAllAction(); scene.remove(z.grp); }
-        zombies.length = 0; wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 2.5; // DH5: waves restart
+        zombies.length = 0; wave = 0; waveToSpawn = 0; waveSpawning = false; waveTimer = 0.15; // DH5: waves restart
         blackoutT = -1; blackMat.opacity = 0;
         showBanner('YOU BLACKED OUT — you wake up in the square.', 3000);
         updateHUD();
@@ -4049,6 +4323,11 @@ function tick() {
     if (perfT > 0.25) { perfT = 0; drawPerfCell(); }
   }
   renderer.render(scene, camera);
+  // FQ1: peak draw calls across play frames (exported with the perf log).
+  if (mode === 'play' && !paused && renderer.info && renderer.info.render) {
+    const dc = renderer.info.render.calls;
+    if (dc > peakDrawCalls) peakDrawCalls = dc;
+  }
 }
 // Round 2: apply the night environment map intensity to every standard
 // material in the scene (materials that set their own envMapIntensity carry
@@ -4060,7 +4339,7 @@ renderer.setAnimationLoop(tick);
 const menuEl = document.getElementById('menu');
 const vrStatusEl = document.getElementById('vrstatus');
 function setVrStatus(msg) { if (vrStatusEl) vrStatusEl.textContent = msg; }
-document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · hold LEFT stick click to RUN · right stick Y also walks · right stick X snap-turns instantly · each trigger fires its own hand — grab a second gun to dual wield · A/X on a controller swaps THAT hand\'s weapon · hold the GRIP (squeeze) button with the SNIPER equipped to aim down sights · B/Y pauses (A/X mutes, hold B/Y restarts) · guns buzz when fired · unlimited ammo, no reloading · comfort vignette darkens edges while you move · right stick click toggles the PERF readout (F3 on desktop). Desktop: WASD moves · hold Shift to run · mouse looks · click fires right hand · hold right-click with the SNIPER to aim down sights · Q swaps right hand · E swaps left hand · P pauses · M mutes · R restarts (while paused).';
+document.getElementById('ctltext').textContent = 'VR: left stick moves where you look · hold LEFT side grip while moving to RUN · right stick Y also walks · right stick X snap-turns instantly · each trigger fires its own hand — grab a second gun to dual wield · A/X on a controller swaps THAT hand\'s weapon · hold the RIGHT side grip with the SNIPER equipped to aim down sights · B/Y pauses (A/X mutes, hold B/Y restarts) · guns buzz when fired · unlimited ammo, no reloading · comfort vignette darkens edges while you move · right stick click toggles the PERF readout (F3 on desktop). Desktop: WASD moves · hold Shift to run · mouse looks · click fires right hand · hold right-click with the SNIPER to aim down sights · Q swaps right hand · E swaps left hand · P pauses · M mutes · R restarts (while paused).';
 document.getElementById('mutebtn').onclick = () => setMuted(!muted);
 document.getElementById('quitbtn').onclick = () => quitToMenu();
 function startGame() {
@@ -4069,12 +4348,15 @@ function startGame() {
   if (!perfSession) startPerfSession(); // V2.0: a play session starts a perf record
   menuEl.style.display = 'none';
   document.getElementById('hint').textContent = renderer.xr.isPresenting
-    ? 'Left stick moves where you look · hold left click to RUN · right stick turn · each trigger fires its hand · A/X swaps that hand · B/Y pauses'
+    ? 'Left stick moves where you look · hold left side grip to RUN · right stick turn · each trigger fires its hand · A/X swaps that hand · B/Y pauses'
     : 'WASD move · hold Shift to run · mouse look · click fires right hand · Q swaps right · E swaps left · P pauses · M mutes';
   if (freshRun) { showBanner('HOLLOW CREEK — find weapons. survive.', 3000); freshRun = false; }
   updateHUD();
 }
 document.getElementById('startBtn').onclick = () => { startGame(); };
+// FQ1: build ID in the menu footer + perf-log export button.
+document.getElementById('buildidtext').textContent = BUILD_ID;
+document.getElementById('exportPerfBtn').onclick = () => exportPerfLog();
 // VR entry (Rhythm Slicer pattern): local-floor first, 'local' fallback,
 // visible failure message instead of a silent desktop fallback. The
 // session-end handler restores the menu (the old handler only reset the
