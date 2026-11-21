@@ -188,7 +188,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';   // Expansion:
 // identifier, shown in the menu footer, on the pause-menu perf cell, and in
 // the perf-log export — so Danny can confirm exactly which build he is
 // testing. Single source of truth: every display reads this const.
-const BUILD_ID = 'RAD-ROAD-20261121';
+const BUILD_ID = 'RAD-GAUGES-20261121';
 
 // ============================== helpers ==============================
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -3624,6 +3624,7 @@ const gaugeTex = new THREE.CanvasTexture(gaugeCanvas);
 gaugeTex.colorSpace = THREE.SRGBColorSpace;
 const gaugeCluster = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.28),
   new THREE.MeshBasicMaterial({ map: gaugeTex, toneMapped: false }));
+gaugeCluster.scale.setScalar(0.70);
 gaugeCluster.position.set(0, -0.20, -0.72); gaugeCluster.rotation.x = -0.30;
 cockpit.add(gaugeCluster);
 function drawGaugeDial(g, cx, cy, r, value, max, label, unit, glow, nums, redline) {
